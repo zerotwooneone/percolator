@@ -26,46 +26,92 @@
                     <TextBlock Text="{Binding BoundEndpoint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                    <Button Content="🎲" ToolTip.Tip="Reroll Profile (CTL-PER-01)" Command="{Binding RerollProfileCommand}" Padding="6,4" />
                     <ToggleButton Content="🟢" IsChecked="{Binding IsListening}" ToolTip.Tip="Toggle Ingress (Listening/Muted) (CTL-PER-02)" Padding="6,4" />
+                    <DropDownButton Content="⚙️ Settings ▼" ToolTip.Tip="Persona Settings">
+                        <DropDownButton.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <ScrollViewer MaxHeight="450">
+                                    <StackPanel Spacing="8" MinWidth="240" Margin="4">
+                                        <TextBlock Text="Protocol Capabilities" FontWeight="Bold" FontSize="11" />
+                                        <CheckBox Content="Allow Peer Discovery (CTL-PER-03)" IsChecked="{Binding AllowPeerDiscovery}" />
+                                        <CheckBox Content="Allow File Transfers (CTL-PER-04)" IsChecked="{Binding AllowFileTransfers}" />
+                                        <CheckBox Content="Send Read Receipts (CTL-PER-05)" IsChecked="{Binding SendReadReceipts}" />
+                                        <CheckBox Content="Relay-Only Routing (CTL-PER-06)" IsChecked="{Binding RelayOnlyRouting}" />
+
+                                        <Separator Margin="0,4" />
+
+                                        <TextBlock Text="Automated Bot Responses" FontWeight="Bold" FontSize="11" />
+                                        <CheckBox Content="Auto-Accept Handshakes" IsChecked="{Binding AutoAcceptHandshakes}" />
+                                        <CheckBox Content="Auto-Reply 'Pong'" IsChecked="{Binding AutoReplyPong}" />
+                                        <CheckBox Content="Auto-Replenish PreKeys" IsChecked="{Binding AutoReplenishPreKeys}" />
+                                        <CheckBox Content="Auto-Share Profile on Connect" IsChecked="{Binding AutoShareProfile}" />
+                                        <CheckBox Content="Auto-Accept Group Invites" IsChecked="{Binding AutoAcceptGroupInvites}" />
+                                        <CheckBox Content="Auto-Accept File Transfers" IsChecked="{Binding AutoAcceptFileTransfers}" />
+
+                                        <Separator Margin="0,4" />
+
+                                        <TextBlock Text="Maintenance" FontWeight="Bold" FontSize="11" />
+                                        <Button Content="🔑 Publish 25 PreKeys" Command="{Binding PublishPreKeysCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                        <Button Content="🎲 Reroll Profile (CTL-PER-01)" Command="{Binding RerollProfileCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Flyout>
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
                 </StackPanel>
             </Grid>
 
-            <!-- Toggles & Action Toolbar CTL-PER-03..12 -->
+            <!-- Action Toolbar: 3 Compact Utility Flyout Buttons -->
             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" Margin="0,0,0,10">
-                <!-- Dropdown for Capabilities -->
-                <DropDownButton Content="⚙️ Capabilities ▼">
+                <!-- 1. Connect Peer Flyout -->
+                <DropDownButton Content="🔗 Connect Peer ▼">
                     <DropDownButton.Flyout>
                         <Flyout Placement="Bottom">
-                            <StackPanel Spacing="6" MinWidth="200" Margin="4">
-                                <TextBlock Text="Protocol Capabilities" FontWeight="Bold" FontSize="11" />
-                                <CheckBox Content="Allow Peer Discovery (CTL-PER-03)" IsChecked="{Binding AllowPeerDiscovery}" />
-                                <CheckBox Content="Allow File Transfers (CTL-PER-04)" IsChecked="{Binding AllowFileTransfers}" />
-                                <CheckBox Content="Send Read Receipts (CTL-PER-05)" IsChecked="{Binding SendReadReceipts}" />
-                                <CheckBox Content="Relay-Only Routing (CTL-PER-06)" IsChecked="{Binding RelayOnlyRouting}" />
+                            <StackPanel DataContext="{Binding ConnectPeer}" Spacing="8" MinWidth="300" Margin="4">
+                                <TextBlock Text="Connect to Peer" FontWeight="Bold" FontSize="12" />
+
+                                <!-- Tabs: In-World vs External URL -->
+                                <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="0,4,0,0">
+                                    <TabItem Header="In-World Persona">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Select In-World Persona:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <ComboBox ItemsSource="{Binding AvailableInWorldPersonas}"
+                                                      SelectedItem="{Binding SelectedInWorldTarget}"
+                                                      HorizontalAlignment="Stretch">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding DisplayName}" />
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </TabItem>
+                                    <TabItem Header="External URL">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Paste Invitation Code / URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <TextBox Text="{Binding ExternalInvitationInput}" Watermark="percolator://invite?..." />
+                                        </StackPanel>
+                                    </TabItem>
+                                </TabControl>
+
+                                <TextBlock Text="{Binding ErrorMessage}"
+                                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                                <Button Content="🔗 Connect"
+                                        Command="{Binding ConnectCommand}"
+                                        IsEnabled="{Binding !IsConnecting}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Classes="accent" />
                             </StackPanel>
                         </Flyout>
                     </DropDownButton.Flyout>
                 </DropDownButton>
 
-                <!-- Dropdown for Autopilot -->
-                <DropDownButton Content="🤖 Autopilot ▼">
-                    <DropDownButton.Flyout>
-                        <Flyout Placement="Bottom">
-                            <StackPanel Spacing="6" MinWidth="200" Margin="4">
-                                <TextBlock Text="Automated Bot Responses" FontWeight="Bold" FontSize="11" />
-                                <CheckBox Content="Auto-Accept Handshakes" IsChecked="{Binding AutoAcceptHandshakes}" />
-                                <CheckBox Content="Auto-Reply 'Pong'" IsChecked="{Binding AutoReplyPong}" />
-                                <CheckBox Content="Auto-Replenish PreKeys" IsChecked="{Binding AutoReplenishPreKeys}" />
-                                <CheckBox Content="Auto-Share Profile on Connect" IsChecked="{Binding AutoShareProfile}" />
-                                <CheckBox Content="Auto-Accept Group Invites" IsChecked="{Binding AutoAcceptGroupInvites}" />
-                                <CheckBox Content="Auto-Accept File Transfers" IsChecked="{Binding AutoAcceptFileTransfers}" />
-                            </StackPanel>
-                        </Flyout>
-                    </DropDownButton.Flyout>
-                </DropDownButton>
-
-                <!-- CONN-12: Direct Peer Interop Flyouts -->
+                <!-- 2. Share Invite Flyout -->
                 <DropDownButton Content="📋 Share Invite ▼">
                     <DropDownButton.Flyout>
                         <Flyout Placement="Bottom">
@@ -109,36 +155,38 @@
                     </DropDownButton.Flyout>
                 </DropDownButton>
 
-                <DropDownButton Content="🔗 Connect Peer ▼">
+                <!-- 3. Relay Flyout -->
+                <DropDownButton Content="📬 Relay ▼">
                     <DropDownButton.Flyout>
                         <Flyout Placement="Bottom">
-                            <StackPanel DataContext="{Binding ConnectPeer}" Spacing="8" MinWidth="280" Margin="4">
-                                <TextBlock Text="Connect to Peer" FontWeight="Bold" FontSize="12" />
+                            <StackPanel DataContext="{Binding RelayRegistration}" Spacing="8" MinWidth="300" Margin="4">
+                                <TextBlock Text="Relay Registration" FontWeight="Bold" FontSize="12" />
 
-                                <TextBlock Text="Target Mode:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <ComboBox ItemsSource="{Binding AvailableTargetKinds}"
-                                          SelectedItem="{Binding TargetKind}"
-                                          HorizontalAlignment="Stretch" />
+                                <!-- Tabs: In-World vs External Relay -->
+                                <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="0,4,0,0">
+                                    <TabItem Header="In-World Relay">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Select In-World Relay:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <ComboBox ItemsSource="{Binding AvailableInWorldRelays}"
+                                                      SelectedItem="{Binding SelectedInWorldRelay}"
+                                                      HorizontalAlignment="Stretch">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding DisplayName}" />
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </TabItem>
+                                    <TabItem Header="External Relay">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Relay Endpoint (host:port):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <TextBox Text="{Binding ExternalRelayInput}" Watermark="e.g. 127.0.0.1:5100 or relay://..." />
+                                        </StackPanel>
+                                    </TabItem>
+                                </TabControl>
 
-                                <!-- In-World Simulated Node Selection -->
-                                <StackPanel Spacing="4" IsVisible="{Binding IsInWorldMode}">
-                                    <TextBlock Text="Select In-World Persona:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                    <ComboBox ItemsSource="{Binding AvailableInWorldPersonas}"
-                                              SelectedItem="{Binding SelectedInWorldTarget}"
-                                              HorizontalAlignment="Stretch">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding DisplayName}" />
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                </StackPanel>
-
-                                <!-- External Invitation Code -->
-                                <StackPanel Spacing="4" IsVisible="{Binding IsExternalMode}">
-                                    <TextBlock Text="Paste Invitation Code / URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                    <TextBox Text="{Binding ExternalInvitationInput}" Watermark="percolator://invite?..." />
-                                </StackPanel>
+                                <CheckBox Content="Seed 25 PreKeys on Registration" IsChecked="{Binding SeedPreKeysToRelay}" />
 
                                 <TextBlock Text="{Binding ErrorMessage}"
                                            Foreground="{DynamicResource SystemFillColorCriticalBrush}"
@@ -146,9 +194,9 @@
                                            TextWrapping="Wrap"
                                            IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                                <Button Content="🔗 Connect"
-                                        Command="{Binding ConnectCommand}"
-                                        IsEnabled="{Binding !IsConnecting}"
+                                <Button Content="📬 Register Relay"
+                                        Command="{Binding RegisterRelayCommand}"
+                                        IsEnabled="{Binding !IsRegistering}"
                                         HorizontalAlignment="Stretch"
                                         HorizontalContentAlignment="Center"
                                         Classes="accent" />
@@ -156,10 +204,6 @@
                         </Flyout>
                     </DropDownButton.Flyout>
                 </DropDownButton>
-
-                <!-- CTL-PER-13: Relay Bar -->
-                <Button Content="📬 Register Relay" Command="{Binding RegisterRelayCommand}" />
-                <Button Content="🔑 Publish PreKeys" Command="{Binding PublishPreKeysCommand}" />
             </StackPanel>
 
             <!-- Pending Banners CTL-PER-14, 15, 16 -->

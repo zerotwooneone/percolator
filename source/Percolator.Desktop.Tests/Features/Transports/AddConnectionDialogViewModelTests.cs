@@ -9,6 +9,9 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
+using IOutboundConnectionWorkflow = Percolator.Application.Connections.IOutboundConnectionWorkflow;
+using OutboundConnectionResult = Percolator.Application.Connections.OutboundConnectionResult;
+using AppOutboundStatus = Percolator.Application.Connections.OutboundConnectionStatus;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Invitations;
 using Percolator.Desktop.Common.Services;
@@ -30,7 +33,7 @@ namespace Percolator.Desktop.Tests.Features.Transports;
 public sealed class AddConnectionDialogViewModelTests
 {
     private Mock<IPeerInvitationCodec> _mockCodec = null!;
-    private Mock<IPeerConnectionService> _mockPeerConnectionService = null!;
+    private Mock<IOutboundConnectionWorkflow> _mockOutboundWorkflow = null!;
     private Mock<IRelayDirectory> _mockRelayDirectory = null!;
     private FakeRelayMailboxProvisioner _fakeRelayProvisioner = null!;
     private FakeClipboardService _fakeClipboardService = null!;
@@ -45,7 +48,7 @@ public sealed class AddConnectionDialogViewModelTests
     public void SetUp()
     {
         _mockCodec = new Mock<IPeerInvitationCodec>(MockBehavior.Strict);
-        _mockPeerConnectionService = new Mock<IPeerConnectionService>(MockBehavior.Strict);
+        _mockOutboundWorkflow = new Mock<IOutboundConnectionWorkflow>(MockBehavior.Strict);
         _mockRelayDirectory = new Mock<IRelayDirectory>(MockBehavior.Strict);
         _fakeRelayProvisioner = new FakeRelayMailboxProvisioner();
         _fakeClipboardService = new FakeClipboardService();
@@ -84,7 +87,7 @@ public sealed class AddConnectionDialogViewModelTests
         var vm = new AddConnectionDialogViewModel(
             _contextMock.Object,
             _mockCodec.Object,
-            _mockPeerConnectionService.Object,
+            _mockOutboundWorkflow.Object,
             _mockRelayDirectory.Object,
             _fakeRelayProvisioner,
             _fakeClipboardService,
@@ -104,31 +107,31 @@ public sealed class AddConnectionDialogViewModelTests
         contextMock.SetupGet(c => c.Data).Returns(_testPersonaId);
 
         Action act0 = () => new AddConnectionDialogViewModel(
-            null!, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            null!, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act1 = () => new AddConnectionDialogViewModel(
-            contextMock.Object, null!, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, null!, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act2 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, null!, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act3 = () => new AddConnectionDialogViewModel(
-            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, null!,
+            contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, null!,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act4 = () => new AddConnectionDialogViewModel(
-            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
             null!, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act5 = () => new AddConnectionDialogViewModel(
-            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, null!, _mockPersonaDirectory.Object, logger, time);
         Action act6 = () => new AddConnectionDialogViewModel(
-            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, null!, logger, time);
         Action act7 = () => new AddConnectionDialogViewModel(
-            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, null!, time);
         Action act8 = () => new AddConnectionDialogViewModel(
-            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, null!);
 
         act0.Should().Throw<ArgumentNullException>();
@@ -137,9 +140,6 @@ public sealed class AddConnectionDialogViewModelTests
         act3.Should().Throw<ArgumentNullException>();
         act4.Should().Throw<ArgumentNullException>();
         act5.Should().Throw<ArgumentNullException>();
-        act6.Should().Throw<ArgumentNullException>();
-        act7.Should().Throw<ArgumentNullException>();
-        act8.Should().Throw<ArgumentNullException>();
         act6.Should().Throw<ArgumentNullException>();
         act7.Should().Throw<ArgumentNullException>();
         act8.Should().Throw<ArgumentNullException>();
@@ -232,17 +232,18 @@ public sealed class AddConnectionDialogViewModelTests
             .Setup(c => c.Decode("valid-token"))
             .Returns(DomainResult<PeerInvitationPayload>.Success(_testInvitationPayload));
 
-        var expectedResult = new PeerConnectionResult(ChannelId.New(), DeviceId.Primary);
+        var workflowResult = new OutboundConnectionResult(
+            AppOutboundStatus.Connected,
+            _testInvitationPayload.IdentityId,
+            _testInvitationPayload,
+            new Uri("https://127.0.0.1:5100"));
 
-        _mockPeerConnectionService
-            .Setup(p => p.ConnectToDirectPeerAsync(
-                _testInvitationPayload.IdentityId,
-                _testInvitationPayload.RoutingToken,
-                _testInvitationPayload.DeliveryToken,
-                new Uri("https://127.0.0.1:5100"),
-                null,
+        _mockOutboundWorkflow
+            .Setup(p => p.ConnectAsync(
+                _testInvitationPayload,
+                TimeSpan.FromSeconds(3),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult<PeerConnectionResult>.Success(expectedResult));
+            .ReturnsAsync(DomainResult<OutboundConnectionResult>.Success(workflowResult));
 
         var vm = CreateViewModel();
         vm.PeerInvitationInput = "valid-token";
@@ -263,15 +264,18 @@ public sealed class AddConnectionDialogViewModelTests
             .Setup(c => c.Decode("valid-token"))
             .Returns(DomainResult<PeerInvitationPayload>.Success(_testInvitationPayload));
 
-        _mockPeerConnectionService
-            .Setup(p => p.ConnectToDirectPeerAsync(
-                _testInvitationPayload.IdentityId,
-                _testInvitationPayload.RoutingToken,
-                _testInvitationPayload.DeliveryToken,
-                new Uri("https://127.0.0.1:5100"),
-                null,
+        var workflowResult = new OutboundConnectionResult(
+            AppOutboundStatus.PendingOffline,
+            _testInvitationPayload.IdentityId,
+            _testInvitationPayload,
+            new Uri("https://127.0.0.1:5100"));
+
+        _mockOutboundWorkflow
+            .Setup(p => p.ConnectAsync(
+                _testInvitationPayload,
+                TimeSpan.FromSeconds(3),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult<PeerConnectionResult>.Failure(new DomainError("PEER_UNREACHABLE", "Target host refused connection.")));
+            .ReturnsAsync(DomainResult<OutboundConnectionResult>.Success(workflowResult));
 
         var vm = CreateViewModel();
         vm.PeerInvitationInput = "valid-token";
@@ -286,64 +290,26 @@ public sealed class AddConnectionDialogViewModelTests
     }
 
     [Test]
-    public async Task SubmitPeerConnectionAsync_WhenProbeTimesOut_CompletesWithPendingOfflineStatus()
+    public async Task SubmitPeerConnectionAsync_WhenWorkflowFails_SetsErrorMessage()
     {
         _mockCodec
-            .Setup(c => c.Decode("valid-token"))
+            .Setup(c => c.Decode("invalid-endpoint-token"))
             .Returns(DomainResult<PeerInvitationPayload>.Success(_testInvitationPayload));
 
-        _mockPeerConnectionService
-            .Setup(p => p.ConnectToDirectPeerAsync(
-                _testInvitationPayload.IdentityId,
-                _testInvitationPayload.RoutingToken,
-                _testInvitationPayload.DeliveryToken,
-                new Uri("https://127.0.0.1:5100"),
-                null,
+        _mockOutboundWorkflow
+            .Setup(p => p.ConnectAsync(
+                _testInvitationPayload,
+                TimeSpan.FromSeconds(3),
                 It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new OperationCanceledException());
+            .ReturnsAsync(DomainResult<OutboundConnectionResult>.Failure(new DomainError("INVALID_ENDPOINT", "Invalid endpoint format")));
 
         var vm = CreateViewModel();
-        vm.PeerInvitationInput = "valid-token";
+        vm.PeerInvitationInput = "invalid-endpoint-token";
 
         await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
 
-        _dialogResult.Should().NotBeNull();
-        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.PendingOffline);
-        _dialogResult.PeerId.Should().Be(_testInvitationPayload.IdentityId);
-        vm.ErrorMessage.Should().BeNull();
-    }
-
-    [Test]
-    public async Task SubmitPeerConnectionAsync_WithIpv6Host_BuildsValidUriWithoutCrash()
-    {
-        var ipv6Payload = new PeerInvitationPayload(
-            PublicIdentityId.New(),
-            BlindedRoutingToken.New(),
-            DeliveryToken.GenerateRandom(),
-            new[] { "::1" },
-            PortRange.Single(5100));
-
-        _mockCodec
-            .Setup(c => c.Decode("ipv6-token"))
-            .Returns(DomainResult<PeerInvitationPayload>.Success(ipv6Payload));
-
-        _mockPeerConnectionService
-            .Setup(p => p.ConnectToDirectPeerAsync(
-                ipv6Payload.IdentityId,
-                ipv6Payload.RoutingToken,
-                ipv6Payload.DeliveryToken,
-                new Uri("https://[::1]:5100"),
-                null,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(ChannelId.New(), DeviceId.Primary)));
-
-        var vm = CreateViewModel();
-        vm.PeerInvitationInput = "ipv6-token";
-
-        await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
-
-        _dialogResult.Should().NotBeNull();
-        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.Connected);
+        _dialogResult.Should().BeNull();
+        vm.ErrorMessage.Should().Be("Invalid endpoint format");
     }
 
     [Test]

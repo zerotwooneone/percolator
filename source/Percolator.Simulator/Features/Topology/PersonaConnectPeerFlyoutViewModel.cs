@@ -5,7 +5,10 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ObservableCollections;
+using Percolator.Application.Connections;
 using Percolator.Application.Invitations;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Shell;
 using R3;
@@ -17,13 +20,13 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
     private readonly ISimulatedPersonaHost _host;
     private readonly ISimulatedWorldStateService _worldState;
     private readonly IPeerInvitationCodec _codec;
-    private readonly IPeerConnectionService _peerConnectionService;
+    private readonly IOutboundConnectionWorkflow _workflow;
     private readonly IStatusToastService _toastService;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsInWorldMode))]
     [NotifyPropertyChangedFor(nameof(IsExternalMode))]
-    private PeerConnectionTargetKind _targetKind = PeerConnectionTargetKind.InWorldSimulatedNode;
+    private int _selectedTabIndex;
 
     [ObservableProperty]
     private IReadOnlyList<SimulatedNodeSummary> _availableInWorldPersonas = Array.Empty<SimulatedNodeSummary>();
@@ -40,22 +43,20 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
     [ObservableProperty]
     private string? _errorMessage;
 
-    public bool IsInWorldMode => TargetKind == PeerConnectionTargetKind.InWorldSimulatedNode;
-    public bool IsExternalMode => TargetKind == PeerConnectionTargetKind.ExternalInvitationCode;
-
-    public IReadOnlyList<PeerConnectionTargetKind> AvailableTargetKinds { get; } = Enum.GetValues<PeerConnectionTargetKind>();
+    public bool IsInWorldMode => SelectedTabIndex == 0;
+    public bool IsExternalMode => SelectedTabIndex == 1;
 
     public PersonaConnectPeerFlyoutViewModel(
         ISimulatedPersonaHost host,
         ISimulatedWorldStateService worldState,
         IPeerInvitationCodec codec,
-        IPeerConnectionService peerConnectionService,
+        IOutboundConnectionWorkflow workflow,
         IStatusToastService toastService)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _codec = codec ?? throw new ArgumentNullException(nameof(codec));
-        _peerConnectionService = peerConnectionService ?? throw new ArgumentNullException(nameof(peerConnectionService));
+        _workflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
 
         RefreshAvailableInWorldPersonas();
@@ -87,7 +88,7 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
         IsConnecting = true;
         try
         {
-            if (TargetKind == PeerConnectionTargetKind.InWorldSimulatedNode)
+            if (IsInWorldMode)
             {
                 if (SelectedInWorldTarget == null)
                 {
@@ -102,18 +103,21 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
                     return;
                 }
 
-                var result = await _peerConnectionService.ConnectToDirectPeerAsync(
+                var payload = new PeerInvitationPayload(
                     targetHost.PublicIdentityId,
                     targetHost.MailboxRoutingToken,
                     targetHost.MailboxDeliveryToken,
-                    targetHost.BoundEndpoint,
-                    null);
+                    new[] { targetHost.BoundEndpoint.Host },
+                    PortRange.Single((ushort)targetHost.BoundPort));
 
+                var result = await _workflow.ConnectAsync(payload, TimeSpan.FromSeconds(3)).ConfigureAwait(true);
                 if (result.IsFailure)
                 {
                     ErrorMessage = result.Error.Description;
                     return;
                 }
+
+                await _host.FlushOutboxAsync().ConfigureAwait(false);
 
                 _toastService.ShowToast(
                     "Connected",
@@ -142,20 +146,14 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
                 }
 
                 var payload = decodeResult.Value!;
-                var endpoint = BuildUriFromPayload(payload);
-
-                var result = await _peerConnectionService.ConnectToDirectPeerAsync(
-                    payload.IdentityId,
-                    payload.RoutingToken,
-                    payload.DeliveryToken,
-                    endpoint,
-                    targetDeviceId: null);
-
+                var result = await _workflow.ConnectAsync(payload, TimeSpan.FromSeconds(3)).ConfigureAwait(true);
                 if (result.IsFailure)
                 {
                     ErrorMessage = result.Error.Description;
                     return;
                 }
+
+                await _host.FlushOutboxAsync().ConfigureAwait(false);
 
                 _toastService.ShowToast(
                     "Connected",
@@ -172,21 +170,5 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
         {
             IsConnecting = false;
         }
-    }
-
-    private static Uri BuildUriFromPayload(PeerInvitationPayload payload)
-    {
-        var rawHost = payload.EndpointHosts.FirstOrDefault(h => !string.IsNullOrWhiteSpace(h)) ?? "127.0.0.1";
-        var port = payload.PortRange?.MinPort ?? 5100;
-
-        if (rawHost.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-            rawHost.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-        {
-            var parsed = new Uri(rawHost);
-            return new UriBuilder(parsed) { Scheme = "https", Port = port }.Uri;
-        }
-
-        var formattedHost = rawHost.Contains(':') && !rawHost.StartsWith('[') ? $"[{rawHost}]" : rawHost;
-        return new Uri($"https://{formattedHost}:{port}");
     }
 }

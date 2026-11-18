@@ -3,6 +3,7 @@ namespace Percolator.Desktop.Common.Session;
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Connections;
 using Percolator.Application.Ports;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer;
@@ -53,6 +54,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<IOutboundPendingRetryWorker>(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
         services.AddHostedService(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
         services.AddSingleton<IPeerConnectionStateService, PeerConnectionStateService>();
+        services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
 
         // Inbound contact query service singleton facade (CONN-11)
         services.AddScoped<SqlPeerContactQueryService>();

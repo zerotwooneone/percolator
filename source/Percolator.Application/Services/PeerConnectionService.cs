@@ -5,6 +5,8 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
@@ -26,6 +28,7 @@ public sealed class PeerConnectionService : IPeerConnectionService
     private readonly IDateTimeProvider _timeProvider;
     private readonly IStreamRegistryManagement _streamRegistry;
     private readonly IPeerMailboxRoutingRepository _routingRepository;
+    private readonly IPeerContactRepository _contactRepository;
 
     public PeerConnectionService(
         PublicIdentityId localIdentityId,
@@ -35,7 +38,8 @@ public sealed class PeerConnectionService : IPeerConnectionService
         IChannelRepository channelRepository,
         IDateTimeProvider timeProvider,
         IStreamRegistryManagement streamRegistry,
-        IPeerMailboxRoutingRepository routingRepository)
+        IPeerMailboxRoutingRepository routingRepository,
+        IPeerContactRepository contactRepository)
     {
         _localIdentityId = localIdentityId;
         _localDeviceId = localDeviceId;
@@ -45,6 +49,7 @@ public sealed class PeerConnectionService : IPeerConnectionService
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
         _routingRepository = routingRepository ?? throw new ArgumentNullException(nameof(routingRepository));
+        _contactRepository = contactRepository ?? throw new ArgumentNullException(nameof(contactRepository));
     }
 
     public async Task<DomainResult<PeerConnectionResult>> ConnectToPeerAsync(
@@ -88,6 +93,9 @@ public sealed class PeerConnectionService : IPeerConnectionService
 
         // 3. Ensure DirectChannel exists
         var channelId = await EnsureDirectChannelAsync(targetPeerId, ct).ConfigureAwait(false);
+
+        // 4. Ensure PeerContact exists for the connected peer
+        await EnsureContactAsync(targetPeerId, bundle.IdentityKey, ct).ConfigureAwait(false);
 
         return DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(channelId, bundle.DeviceId));
     }
@@ -151,6 +159,9 @@ public sealed class PeerConnectionService : IPeerConnectionService
         // 5. Ensure DirectChannel exists
         var channelId = await EnsureDirectChannelAsync(targetPeerId, ct).ConfigureAwait(false);
 
+        // 6. Ensure PeerContact exists for the connected peer
+        await EnsureContactAsync(targetPeerId, bundle.IdentityKey, ct).ConfigureAwait(false);
+
         return DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(channelId, bundle.DeviceId));
     }
 
@@ -182,4 +193,22 @@ public sealed class PeerConnectionService : IPeerConnectionService
         SHA256.HashData(combined, hash);
         return ChannelId.FromBytes(hash[..16]);
     }
+
+    private async Task EnsureContactAsync(PublicIdentityId targetPeerId, IdentityKey identityKey, CancellationToken ct)
+    {
+        var existingContact = await _contactRepository.GetByPeerIdAsync(_localIdentityId, targetPeerId, ct).ConfigureAwait(false);
+        if (existingContact == null)
+        {
+            var contact = new PeerContact(
+                _localIdentityId,
+                targetPeerId,
+                ContactNickname.Create(null, targetPeerId),
+                PeerTrustLevel.Tofu,
+                _timeProvider.UtcNow,
+                identityKey,
+                ContactState.Active);
+            await _contactRepository.SaveAsync(contact, ct).ConfigureAwait(false);
+        }
+    }
 }
+

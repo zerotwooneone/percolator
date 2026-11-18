@@ -162,6 +162,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     public DiscoveryTabViewModel? DiscoveryTab { get; }
     public PersonaInvitationExportFlyoutViewModel? InvitationExport { get; }
     public PersonaConnectPeerFlyoutViewModel? ConnectPeer { get; }
+    public RelayRegistrationFlyoutViewModel? RelayRegistration { get; }
+
+    private readonly IServiceScope? _hostScope;
 
     public PersonaCardViewModel(
         SimulatedNodeSummary summary,
@@ -211,9 +214,11 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
         if (host is not null)
         {
+            _hostScope = host.Services.CreateScope();
+            var outboundWorkflow = _hostScope.ServiceProvider.GetRequiredService<Percolator.Application.Connections.IOutboundConnectionWorkflow>();
             InvitationExport = new PersonaInvitationExportFlyoutViewModel(host, deps.InvitationCodec, _toastService);
-            var peerConnectionService = new SimulatedPeerConnectionService(host);
-            ConnectPeer = new PersonaConnectPeerFlyoutViewModel(host, _worldState, deps.InvitationCodec, peerConnectionService, _toastService);
+            ConnectPeer = new PersonaConnectPeerFlyoutViewModel(host, _worldState, deps.InvitationCodec, outboundWorkflow, _toastService);
+            RelayRegistration = new RelayRegistrationFlyoutViewModel(host, _worldState, _relayCoordinator, _toastService, _flightRecorder);
 
             _isListening = host.IsListening.CurrentValue;
             _autoShareProfile = host.AutoShareProfile;
@@ -1156,6 +1161,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     public override void Dispose()
     {
         DiscoveryTab?.Dispose();
+        ConnectPeer?.Dispose();
+        RelayRegistration?.Dispose();
+        _hostScope?.Dispose();
         base.Dispose();
     }
 }

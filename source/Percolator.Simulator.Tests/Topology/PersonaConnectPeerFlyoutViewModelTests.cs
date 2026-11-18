@@ -5,6 +5,7 @@ using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using ObservableCollections;
+using Percolator.Application.Connections;
 using Percolator.Application.Invitations;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -23,7 +24,7 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     private Mock<ISimulatedPersonaHost> _hostMock = null!;
     private Mock<ISimulatedWorldStateService> _worldStateMock = null!;
     private IPeerInvitationCodec _codec = null!;
-    private Mock<IPeerConnectionService> _connectionServiceMock = null!;
+    private Mock<IOutboundConnectionWorkflow> _workflowMock = null!;
     private Mock<IStatusToastService> _toastServiceMock = null!;
 
     private SimulatedNodeId _hostNodeId;
@@ -48,10 +49,12 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         _hostMock = new Mock<ISimulatedPersonaHost>(MockBehavior.Strict);
         _hostMock.SetupGet(h => h.Id).Returns(_hostNodeId);
         _hostMock.SetupGet(h => h.PublicIdentityId).Returns(_hostIdentityId);
+        _hostMock.Setup(h => h.FlushOutboxAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult.Success());
 
         _worldStateMock = new Mock<ISimulatedWorldStateService>(MockBehavior.Strict);
         _codec = new PeerInvitationCodec();
-        _connectionServiceMock = new Mock<IPeerConnectionService>(MockBehavior.Strict);
+        _workflowMock = new Mock<IOutboundConnectionWorkflow>(MockBehavior.Strict);
         _toastServiceMock = new Mock<IStatusToastService>(MockBehavior.Loose);
     }
 
@@ -62,7 +65,7 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     }
 
     [Test]
-    public async Task ConnectAsync_InWorldMode_ResolvesTargetFromWorldStateAndInitiatesHandshake()
+    public async Task ConnectAsync_InWorldMode_ResolvesTargetFromWorldStateAndInitiatesWorkflow()
     {
         var targetSummary = new SimulatedNodeSummary(
             _targetNodeId,
@@ -75,42 +78,38 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         targetHostMock.SetupGet(h => h.MailboxRoutingToken).Returns(_targetRoutingToken);
         targetHostMock.SetupGet(h => h.MailboxDeliveryToken).Returns(_targetDeliveryToken);
         targetHostMock.SetupGet(h => h.BoundEndpoint).Returns(_targetEndpoint);
+        targetHostMock.SetupGet(h => h.BoundPort).Returns(5105);
         targetHostMock.SetupGet(h => h.DisplayName).Returns("Target Peer");
 
         var personasList = new ObservableList<SimulatedNodeSummary> { targetSummary };
         _worldStateMock.SetupGet(w => w.Personas).Returns(personasList);
         _worldStateMock.Setup(w => w.GetPersonaHost(_targetNodeId)).Returns(targetHostMock.Object);
 
-        _connectionServiceMock.Setup(c => c.ConnectToDirectPeerAsync(
-                _targetIdentityId,
-                _targetRoutingToken,
-                _targetDeliveryToken,
-                _targetEndpoint,
-                null,
+        _workflowMock.Setup(w => w.ConnectAsync(
+                It.Is<PeerInvitationPayload>(p => p.IdentityId == _targetIdentityId && p.RoutingToken == _targetRoutingToken),
+                It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult<PeerConnectionResult>.Success(
-                new PeerConnectionResult(new ChannelId(Guid.NewGuid()), DeviceId.Primary)));
+            .ReturnsAsync(DomainResult<OutboundConnectionResult>.Success(
+                new OutboundConnectionResult(OutboundConnectionStatus.Connected, _targetIdentityId, null!, _targetEndpoint)));
 
-        var vm = new PersonaConnectPeerFlyoutViewModel(
+        using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
-        vm.TargetKind = PeerConnectionTargetKind.InWorldSimulatedNode;
+        vm.SelectedTabIndex = 0;
         vm.SelectedInWorldTarget = targetSummary;
 
         await vm.ConnectAsync();
 
         vm.ErrorMessage.Should().BeNull();
-        _connectionServiceMock.Verify(c => c.ConnectToDirectPeerAsync(
-            _targetIdentityId,
-            _targetRoutingToken,
-            _targetDeliveryToken,
-            _targetEndpoint,
-            null,
+        _workflowMock.Verify(w => w.ConnectAsync(
+            It.Is<PeerInvitationPayload>(p => p.IdentityId == _targetIdentityId),
+            It.IsAny<TimeSpan>(),
             It.IsAny<CancellationToken>()), Times.Once);
+        _hostMock.Verify(h => h.FlushOutboxAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -118,14 +117,14 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     {
         _worldStateMock.SetupGet(w => w.Personas).Returns(new ObservableList<SimulatedNodeSummary>());
 
-        var vm = new PersonaConnectPeerFlyoutViewModel(
+        using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
-        vm.TargetKind = PeerConnectionTargetKind.InWorldSimulatedNode;
+        vm.SelectedTabIndex = 0;
         vm.SelectedInWorldTarget = null;
 
         await vm.ConnectAsync();
@@ -146,14 +145,14 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         _worldStateMock.SetupGet(w => w.Personas).Returns(personasList);
         _worldStateMock.Setup(w => w.GetPersonaHost(_targetNodeId)).Returns((ISimulatedPersonaHost?)null);
 
-        var vm = new PersonaConnectPeerFlyoutViewModel(
+        using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
-        vm.TargetKind = PeerConnectionTargetKind.InWorldSimulatedNode;
+        vm.SelectedTabIndex = 0;
         vm.SelectedInWorldTarget = targetSummary;
 
         await vm.ConnectAsync();
@@ -175,29 +174,27 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         targetHostMock.SetupGet(h => h.MailboxRoutingToken).Returns(_targetRoutingToken);
         targetHostMock.SetupGet(h => h.MailboxDeliveryToken).Returns(_targetDeliveryToken);
         targetHostMock.SetupGet(h => h.BoundEndpoint).Returns(_targetEndpoint);
+        targetHostMock.SetupGet(h => h.BoundPort).Returns(5105);
 
         var personasList = new ObservableList<SimulatedNodeSummary> { targetSummary };
         _worldStateMock.SetupGet(w => w.Personas).Returns(personasList);
         _worldStateMock.Setup(w => w.GetPersonaHost(_targetNodeId)).Returns(targetHostMock.Object);
 
-        _connectionServiceMock.Setup(c => c.ConnectToDirectPeerAsync(
-                _targetIdentityId,
-                _targetRoutingToken,
-                _targetDeliveryToken,
-                _targetEndpoint,
-                null,
+        _workflowMock.Setup(w => w.ConnectAsync(
+                It.IsAny<PeerInvitationPayload>(),
+                It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult<PeerConnectionResult>.Failure(
+            .ReturnsAsync(DomainResult<OutboundConnectionResult>.Failure(
                 new DomainError("CONNECTION_REFUSED", "Peer rejected TLS handshake.")));
 
-        var vm = new PersonaConnectPeerFlyoutViewModel(
+        using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
-        vm.TargetKind = PeerConnectionTargetKind.InWorldSimulatedNode;
+        vm.SelectedTabIndex = 0;
         vm.SelectedInWorldTarget = targetSummary;
 
         await vm.ConnectAsync();
@@ -219,87 +216,32 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
 
         var invitationUrl = _codec.Encode(payload);
 
-        var expectedUri = new Uri("https://192.168.1.99:5200");
-
-        _connectionServiceMock.Setup(c => c.ConnectToDirectPeerAsync(
-                _targetIdentityId,
-                _targetRoutingToken,
-                _targetDeliveryToken,
-                expectedUri,
-                null,
+        _workflowMock.Setup(w => w.ConnectAsync(
+                It.Is<PeerInvitationPayload>(p => p.IdentityId == _targetIdentityId),
+                It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult<PeerConnectionResult>.Success(
-                new PeerConnectionResult(new ChannelId(Guid.NewGuid()), DeviceId.Primary)));
+            .ReturnsAsync(DomainResult<OutboundConnectionResult>.Success(
+                new OutboundConnectionResult(OutboundConnectionStatus.Connected, _targetIdentityId, payload, new Uri("https://192.168.1.99:5200"))));
 
-        var vm = new PersonaConnectPeerFlyoutViewModel(
+        using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
-        vm.TargetKind = PeerConnectionTargetKind.ExternalInvitationCode;
+        vm.SelectedTabIndex = 1;
         vm.ExternalInvitationInput = invitationUrl;
 
         await vm.ConnectAsync();
 
         vm.ErrorMessage.Should().BeNull();
         vm.ExternalInvitationInput.Should().BeEmpty();
-        _connectionServiceMock.Verify(c => c.ConnectToDirectPeerAsync(
-            _targetIdentityId,
-            _targetRoutingToken,
-            _targetDeliveryToken,
-            expectedUri,
-            null,
+        _workflowMock.Verify(w => w.ConnectAsync(
+            It.Is<PeerInvitationPayload>(p => p.IdentityId == _targetIdentityId),
+            It.IsAny<TimeSpan>(),
             It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Test]
-    public async Task ConnectAsync_ExternalMode_WhenEndpointHostContainsScheme_ParsesSchemeCorrectly()
-    {
-        _worldStateMock.SetupGet(w => w.Personas).Returns(new ObservableList<SimulatedNodeSummary>());
-
-        var payload = new PeerInvitationPayload(
-            _targetIdentityId,
-            _targetRoutingToken,
-            _targetDeliveryToken,
-            new[] { "https://peer.remote.lan:5300" },
-            PortRange.Single(5300));
-
-        var invitationUrl = _codec.Encode(payload);
-
-        var expectedUri = new Uri("https://peer.remote.lan:5300");
-
-        _connectionServiceMock.Setup(c => c.ConnectToDirectPeerAsync(
-                _targetIdentityId,
-                _targetRoutingToken,
-                _targetDeliveryToken,
-                expectedUri,
-                null,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult<PeerConnectionResult>.Success(
-                new PeerConnectionResult(new ChannelId(Guid.NewGuid()), DeviceId.Primary)));
-
-        var vm = new PersonaConnectPeerFlyoutViewModel(
-            _hostMock.Object,
-            _worldStateMock.Object,
-            _codec,
-            _connectionServiceMock.Object,
-            _toastServiceMock.Object);
-
-        vm.TargetKind = PeerConnectionTargetKind.ExternalInvitationCode;
-        vm.ExternalInvitationInput = invitationUrl;
-
-        await vm.ConnectAsync();
-
-        vm.ErrorMessage.Should().BeNull();
-        _connectionServiceMock.Verify(c => c.ConnectToDirectPeerAsync(
-            _targetIdentityId,
-            _targetRoutingToken,
-            _targetDeliveryToken,
-            expectedUri,
-            null,
-            It.IsAny<CancellationToken>()), Times.Once);
+        _hostMock.Verify(h => h.FlushOutboxAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -307,14 +249,14 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     {
         _worldStateMock.SetupGet(w => w.Personas).Returns(new ObservableList<SimulatedNodeSummary>());
 
-        var vm = new PersonaConnectPeerFlyoutViewModel(
+        using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
-        vm.TargetKind = PeerConnectionTargetKind.ExternalInvitationCode;
+        vm.SelectedTabIndex = 1;
         vm.ExternalInvitationInput = "   ";
 
         await vm.ConnectAsync();
@@ -327,26 +269,23 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     {
         _worldStateMock.SetupGet(w => w.Personas).Returns(new ObservableList<SimulatedNodeSummary>());
 
-        var vm = new PersonaConnectPeerFlyoutViewModel(
+        using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
-        vm.TargetKind = PeerConnectionTargetKind.ExternalInvitationCode;
+        vm.SelectedTabIndex = 1;
         vm.ExternalInvitationInput = "percolator://not-a-valid-invitation";
 
         await vm.ConnectAsync();
 
         vm.ErrorMessage.Should().NotBeNull();
         vm.ErrorMessage.Should().Contain("Invalid invitation");
-        _connectionServiceMock.Verify(c => c.ConnectToDirectPeerAsync(
-            It.IsAny<PublicIdentityId>(),
-            It.IsAny<BlindedRoutingToken>(),
-            It.IsAny<DeliveryToken>(),
-            It.IsAny<Uri>(),
-            It.IsAny<DeviceId?>(),
+        _workflowMock.Verify(w => w.ConnectAsync(
+            It.IsAny<PeerInvitationPayload>(),
+            It.IsAny<TimeSpan>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -360,7 +299,7 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
             _hostMock.Object,
             _worldStateMock.Object,
             _codec,
-            _connectionServiceMock.Object,
+            _workflowMock.Object,
             _toastServiceMock.Object);
 
         vm.AvailableInWorldPersonas.Should().BeEmpty();

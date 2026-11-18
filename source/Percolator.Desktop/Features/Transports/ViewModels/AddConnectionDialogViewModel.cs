@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using IOutboundConnectionWorkflow = Percolator.Application.Connections.IOutboundConnectionWorkflow;
+using AppOutboundStatus = Percolator.Application.Connections.OutboundConnectionStatus;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Invitations;
 using Percolator.Desktop.Common.Services;
@@ -24,7 +26,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
 {
     private readonly IDialogContext<PublicIdentityId, AddConnectionDialogResult> _dialogContext;
     private readonly IPeerInvitationCodec _invitationCodec;
-    private readonly IPeerConnectionService _peerConnectionService;
+    private readonly IOutboundConnectionWorkflow _outboundWorkflow;
     private readonly IRelayDirectory _relayDirectory;
     private readonly IRelayMailboxProvisioner _relayProvisioner;
     private readonly IClipboardService _clipboardService;
@@ -37,7 +39,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
     public AddConnectionDialogViewModel(
         IDialogContext<PublicIdentityId, AddConnectionDialogResult> dialogContext,
         IPeerInvitationCodec invitationCodec,
-        IPeerConnectionService peerConnectionService,
+        IOutboundConnectionWorkflow outboundWorkflow,
         IRelayDirectory relayDirectory,
         IRelayMailboxProvisioner relayProvisioner,
         IClipboardService clipboardService,
@@ -47,7 +49,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
     {
         _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _invitationCodec = invitationCodec ?? throw new ArgumentNullException(nameof(invitationCodec));
-        _peerConnectionService = peerConnectionService ?? throw new ArgumentNullException(nameof(peerConnectionService));
+        _outboundWorkflow = outboundWorkflow ?? throw new ArgumentNullException(nameof(outboundWorkflow));
         _relayDirectory = relayDirectory ?? throw new ArgumentNullException(nameof(relayDirectory));
         _relayProvisioner = relayProvisioner ?? throw new ArgumentNullException(nameof(relayProvisioner));
         _clipboardService = clipboardService ?? throw new ArgumentNullException(nameof(clipboardService));
@@ -160,77 +162,26 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
 
         var payload = decodeResult.Value!;
         IsProbing = true;
-        ProbeStatusText = "Resolving endpoint...";
-
-        Uri directUri;
-        try
-        {
-            var rawHost = payload.EndpointHosts.FirstOrDefault(h => !string.IsNullOrWhiteSpace(h)) ?? "127.0.0.1";
-            var port = payload.PortRange?.MinPort ?? 5100;
-
-            if (rawHost.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-                rawHost.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-            {
-                var parsed = new Uri(rawHost);
-                directUri = new UriBuilder(parsed) { Scheme = "https", Port = port }.Uri;
-            }
-            else
-            {
-                directUri = new UriBuilder("https", rawHost, port).Uri;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse endpoint URI for peer invitation {PeerId}", payload.IdentityId);
-            ErrorMessage = $"Invalid endpoint address in invitation: {ex.Message}";
-            IsProbing = false;
-            ProbeStatusText = string.Empty;
-            return;
-        }
-
         ProbeStatusText = "Probing network route...";
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3), _timeProvider);
         try
         {
-            var connResult = await _peerConnectionService.ConnectToDirectPeerAsync(
-                payload.IdentityId,
-                payload.RoutingToken,
-                payload.DeliveryToken,
-                directUri,
-                ct: cts.Token).ConfigureAwait(true);
+            var workflowResult = await _outboundWorkflow.ConnectAsync(
+                payload,
+                TimeSpan.FromSeconds(3)).ConfigureAwait(true);
 
-            if (connResult.IsSuccess)
+            if (workflowResult.IsFailure)
             {
-                _logger.LogInformation("Direct connection to peer {PeerId} succeeded at {Endpoint}", payload.IdentityId, directUri);
-                CloseWithResult(new AddConnectionDialogResult(
-                    OutboundConnectionStatus.Connected,
-                    Invitation: payload,
-                    PeerId: payload.IdentityId));
+                ErrorMessage = workflowResult.Error.Description;
+                return;
             }
-            else
-            {
-                _logger.LogInformation("Direct peer {PeerId} probe returned failure ({Error}). Staging as PendingOffline.",
-                    payload.IdentityId, connResult.Error.Description);
-                CloseWithResult(new AddConnectionDialogResult(
-                    OutboundConnectionStatus.PendingOffline,
-                    Invitation: payload,
-                    PeerId: payload.IdentityId));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("Direct peer {PeerId} probe timed out after 3 seconds. Staging as PendingOffline.", payload.IdentityId);
+
+            var dialogStatus = workflowResult.Value!.Status == AppOutboundStatus.Connected
+                ? OutboundConnectionStatus.Connected
+                : OutboundConnectionStatus.PendingOffline;
+
             CloseWithResult(new AddConnectionDialogResult(
-                OutboundConnectionStatus.PendingOffline,
-                Invitation: payload,
-                PeerId: payload.IdentityId));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Exception encountered during direct peer probe for {PeerId}. Staging as PendingOffline.", payload.IdentityId);
-            CloseWithResult(new AddConnectionDialogResult(
-                OutboundConnectionStatus.PendingOffline,
+                dialogStatus,
                 Invitation: payload,
                 PeerId: payload.IdentityId));
         }

@@ -117,7 +117,7 @@ Implemented dual-mode candidate host resolution (Auto LAN IP, Loopback, and Cust
 
 ---
 
-### CONN-12b ⬜ Simulator Architecture Realignment: Ingress/Egress Wire Pipelines, Application Outbound Workflow & High-Density Card UI
+### CONN-12b ✅ Simulator Architecture Realignment: Ingress/Egress Wire Pipelines, Application Outbound Workflow & High-Density Card UI
 
 - **Specification Governance:** Aligns the Simulator's connection mechanics with Desktop by promoting outbound connection orchestration to a shared Application-layer workflow (`IOutboundConnectionWorkflow`). Intercepts Ingress and Egress at canonical transport seams (`ITransportDispatcher` and `IInboundIngressPipeline`), enabling fault injection (chaos envelope drops, latency, corruption), autopilot outbox auto-flushing, and wire telemetry without touching production code or hacking SQLite repositories (`ChaosPendingIngressStoreDecorator`). Eliminates coordinator database backdoors: removes manual `PeerContact` insertions from `DirectHandshakeOrchestrator` and `DirectChannel` insertions from `DirectChatCoordinator.EnsureChannelAsync`. Preserves multi-node developer utility ergonomics: eliminates modal dialog lockout by retaining non-blocking, high-density Avalonia Flyouts (`🔗 Connect Peer ▼`, `📋 Share Invite ▼`, `📬 Relay ▼`) on the card toolbar, while tucking away 14 checkboxes/actions (Capabilities, Autopilot, PreKey publish, Reroll) into a unified `⚙️ Persona Settings ▼` header menu.
 

@@ -7,6 +7,8 @@ using Google.Protobuf;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Connections;
+using Percolator.Application.Invitations;
 using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
 using Percolator.Domain.Channels.Model;
@@ -95,37 +97,20 @@ internal sealed class DirectHandshakeOrchestrator
             try
             {
                 using var scope = initiator.Services.CreateScope();
-                var connectionService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
+                var workflow = scope.ServiceProvider.GetRequiredService<IOutboundConnectionWorkflow>();
 
-                var connectResult = await connectionService.ConnectToDirectPeerAsync(
+                var payload = new PeerInvitationPayload(
                     target.PublicIdentityId,
                     target.MailboxRoutingToken,
                     target.MailboxDeliveryToken,
-                    target.BoundEndpoint,
-                    DeviceId.Primary,
-                    ct).ConfigureAwait(false);
+                    new[] { target.BoundEndpoint.Host },
+                    Percolator.Domain.Identities.ValueObjects.PortRange.Single((ushort)target.BoundPort));
 
+                var connectResult = await workflow.ConnectAsync(payload, TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
                 if (!connectResult.IsSuccess)
                 {
                     _toastService.ShowToast("Handshake Failed", connectResult.Error.Description, ToastSeverity.Error);
                     return false;
-                }
-
-                // Ensure contact exists on initiator side
-                var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
-                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var existingContact = await contactRepo.GetByPeerIdAsync(initiator.PublicIdentityId, target.PublicIdentityId, ct);
-                if (existingContact == null)
-                {
-                    var newContact = new PeerContact(
-                        initiator.PublicIdentityId,
-                        target.PublicIdentityId,
-                        ContactNickname.Create(null, target.PublicIdentityId),
-                        PeerTrustLevel.Tofu,
-                        timeProvider.UtcNow,
-                        target.IdentityPublicKey,
-                        ContactState.Active);
-                    await contactRepo.SaveAsync(newContact, ct);
                 }
 
                 // Immediately flush outbox to deliver handshake envelope via loopback gRPC TLS

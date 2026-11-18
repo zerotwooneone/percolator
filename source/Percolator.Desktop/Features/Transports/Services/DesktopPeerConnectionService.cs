@@ -13,6 +13,7 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
@@ -111,6 +112,7 @@ public sealed class DesktopPeerConnectionService : IPeerConnectionService
             sp.GetRequiredService<IChannelRepository>(),
             _timeProvider,
             _streamRegistry,
-            sp.GetRequiredService<IPeerMailboxRoutingRepository>());
+            sp.GetRequiredService<IPeerMailboxRoutingRepository>(),
+            sp.GetRequiredService<IPeerContactRepository>());
     }
 }

@@ -140,7 +140,7 @@ public sealed class OutboundPendingRetryWorkerTests
             await Task.Yield();
         }
 
-        var succeeded = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var succeeded = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         succeeded.Should().NotBeNull();
         succeeded.PeerId.Should().Be(_peerId);

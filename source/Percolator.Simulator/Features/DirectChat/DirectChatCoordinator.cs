@@ -65,9 +65,6 @@ internal sealed class DirectChatCoordinator
             {
                 var channelId = ChannelIdUtility.DeterministicFor(sender.PublicIdentityId, recipient.PublicIdentityId);
 
-                // Ensure channel exists in repositories
-                await EnsureChannelAsync(sender, recipient, channelId, ct);
-
                 using var scope = sender.Services.CreateScope();
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
@@ -306,34 +303,5 @@ internal sealed class DirectChatCoordinator
                 return false;
             }
         }, ct);
-    }
-
-    private static async Task EnsureChannelAsync(
-        ISimulatedPersonaHost sender,
-        ISimulatedPersonaHost recipient,
-        Percolator.Domain.Channels.ValueObjects.ChannelId channelId,
-        CancellationToken ct)
-    {
-        using (var scope = sender.Services.CreateScope())
-        {
-            var repo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-            var time = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-            if (await repo.GetDirectByIdAsync(channelId, ct) == null)
-            {
-                var ch = DirectChannel.Create(channelId, sender.PublicIdentityId, recipient.PublicIdentityId, time).Value!;
-                await repo.SaveDirectAsync(ch, ct);
-            }
-        }
-
-        using (var scope = recipient.Services.CreateScope())
-        {
-            var repo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-            var time = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-            if (await repo.GetDirectByIdAsync(channelId, ct) == null)
-            {
-                var ch = DirectChannel.Create(channelId, recipient.PublicIdentityId, sender.PublicIdentityId, time).Value!;
-                await repo.SaveDirectAsync(ch, ct);
-            }
-        }
     }
 }

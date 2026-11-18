@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Connections;
 using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Egress;
@@ -241,7 +242,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 sp.GetRequiredService<IChannelRepository>(),
                 sp.GetRequiredService<IDateTimeProvider>(),
                 sp.GetRequiredService<IStreamRegistryManagement>(),
-                sp.GetRequiredService<IPeerMailboxRoutingRepository>()));
+                sp.GetRequiredService<IPeerMailboxRoutingRepository>(),
+                sp.GetRequiredService<IPeerContactRepository>()));
+            services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
             // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
             services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
             services.AddScoped<ISimulatorRatchetQueryService, SimulatorRatchetQueryService>();
@@ -268,13 +271,14 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     sp.GetRequiredService<HandshakeService>(),
                     _stateBus,
                     Id));
-            // Decorate IPendingIngressStore for non-invasive chaos & fault injection
-            services.AddScoped<SqlitePendingIngressStore>();
-            services.AddScoped<IPendingIngressStore>(sp =>
-                new ChaosPendingIngressStoreDecorator(
-                    sp.GetRequiredService<SqlitePendingIngressStore>(),
+            // Decorate ITransportDispatcher for non-invasive egress chaos & fault injection
+            services.AddScoped<TransportDispatcher>();
+            services.AddScoped<ITransportDispatcher>(sp =>
+                new SimulatorChaosTransportDispatcherDecorator(
+                    sp.GetRequiredService<TransportDispatcher>(),
                     _chaosController,
-                    Id));
+                    Id,
+                    _logSink));
             services.AddScoped<OutboxWorker>();
             // 6. Direct Ingress for Kestrel Transport
             // DRAIN-04: ISealedEnvelopeUnwrapper is shared (AddTransportInfrastructure,

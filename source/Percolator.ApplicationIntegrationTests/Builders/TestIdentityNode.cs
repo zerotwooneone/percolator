@@ -356,7 +356,8 @@ public sealed class TestIdentityNode
             _channelRepo,
             TimeProvider,
             StreamRegistry,
-            PeerMailboxRoutingRepo);
+            PeerMailboxRoutingRepo,
+            _contactRepo);
 
         var discoveryClient = new LoopbackNearbyDiscoveryQueryClient(_networkSwitch);
         NearbyDiscovery = new NearbyPeerDiscoveryWorkflow(discoveryClient, PeerConnectionService);

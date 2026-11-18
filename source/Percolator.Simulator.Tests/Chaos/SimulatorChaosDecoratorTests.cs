@@ -121,93 +121,11 @@ public sealed class SimulatorChaosDecoratorTests
         inner.EnqueuedEnvelopes.Should().HaveCount(1);
     }
 
-    [Test]
-    public async Task PendingIngressStoreDecorator_WhenPass_DelegatesToInner()
-    {
-        var inner = new InMemoryPendingIngressStore();
-        var decorator = new ChaosPendingIngressStoreDecorator(inner, _chaosController, _nodeId);
-        _chaosController.SetFaultAction(_nodeId, ChaosFaultAction.Pass);
-
-        var ownerId = PublicIdentityId.New();
-        var envelope = CreateTestMailboxEnvelope("queue-1");
-
-        var record = await decorator.UpsertAsync(ownerId, envelope);
-
-        record.QueueId.Should().Be(envelope.QueueId);
-        inner.StoredRecords.Should().HaveCount(1);
-        inner.StoredRecords[0].QueueId.Should().Be(envelope.QueueId);
-    }
-
-    [Test]
-    public async Task PendingIngressStoreDecorator_WhenDropEnvelope_ReturnsSynthesizedRecordWithoutPersisting()
-    {
-        var inner = new InMemoryPendingIngressStore();
-        var decorator = new ChaosPendingIngressStoreDecorator(inner, _chaosController, _nodeId);
-        _chaosController.SetFaultAction(_nodeId, ChaosFaultAction.DropEnvelope);
-
-        var ownerId = PublicIdentityId.New();
-        var envelope = CreateTestMailboxEnvelope("queue-2");
-
-        var record = await decorator.UpsertAsync(ownerId, envelope);
-
-        record.QueueId.Should().Be(envelope.QueueId);
-        record.Attempts.Should().Be(0);
-        inner.StoredRecords.Should().BeEmpty();
-    }
-
-    [Test]
-    public async Task PendingIngressStoreDecorator_WhenSimulateTransientError_ThrowsInvalidOperationException()
-    {
-        var inner = new InMemoryPendingIngressStore();
-        var decorator = new ChaosPendingIngressStoreDecorator(inner, _chaosController, _nodeId);
-        _chaosController.SetFaultAction(_nodeId, ChaosFaultAction.SimulateTransientError);
-
-        var ownerId = PublicIdentityId.New();
-        var envelope = CreateTestMailboxEnvelope("queue-3");
-
-        var act = async () => await decorator.UpsertAsync(ownerId, envelope);
-
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*transient ingress failure*");
-        inner.StoredRecords.Should().BeEmpty();
-    }
-
-    [Test]
-    public async Task PendingIngressStoreDecorator_WhenInjectArtificialDelay_DelaysAndDelegates()
-    {
-        var inner = new InMemoryPendingIngressStore();
-        var decorator = new ChaosPendingIngressStoreDecorator(inner, _chaosController, _nodeId);
-        _chaosController.SetFaultAction(_nodeId, ChaosFaultAction.InjectArtificialDelay);
-
-        var ownerId = PublicIdentityId.New();
-        var envelope = CreateTestMailboxEnvelope("queue-4");
-
-        var sw = Stopwatch.StartNew();
-        var record = await decorator.UpsertAsync(ownerId, envelope);
-        sw.Stop();
-
-        sw.ElapsedMilliseconds.Should().BeGreaterThanOrEqualTo(400);
-        inner.StoredRecords.Should().HaveCount(1);
-        record.QueueId.Should().Be(envelope.QueueId);
-    }
-
     private static RelayQueuedEnvelopeRecord CreateTestRelayEnvelope(string id)
     {
         var queueId = MailboxQueueId.Parse(id);
         var payload = new byte[] { 1, 2, 3, 4 };
         return new RelayQueuedEnvelopeRecord(queueId, payload, DateTimeOffset.UtcNow);
-    }
-
-    private static QueuedMailboxEnvelope CreateTestMailboxEnvelope(string id)
-    {
-        var queueId = MailboxQueueId.Parse(id);
-        var envelope = new MailboxEnvelope(
-            EnvelopeId.New(),
-            BlindedRoutingToken.New(),
-            new byte[] { 5, 6, 7, 8 },
-            DateTimeOffset.UtcNow,
-            DateTimeOffset.UtcNow.AddHours(24));
-        return new QueuedMailboxEnvelope(queueId, envelope);
     }
 
     private sealed class InMemoryRelayMailboxStore : IRelayMailboxCapabilityStore
@@ -244,7 +162,7 @@ public sealed class SimulatorChaosDecoratorTests
             return ValueTask.FromResult(count);
         }
 
-        public IDisposable SubscribeMailbox(BlindedRoutingToken routingToken, ChannelWriter<RelayQueuedEnvelopeRecord> writer)
+        public IDisposable SubscribeMailbox(BlindedRoutingToken routingToken, System.Threading.Channels.ChannelWriter<RelayQueuedEnvelopeRecord> writer)
             => new NoOpDisposable();
 
         public ValueTask<bool> AcknowledgeEnvelopeAsync(BlindedRoutingToken routingToken, MailboxQueueId queueId, CancellationToken ct = default)
@@ -254,29 +172,5 @@ public sealed class SimulatorChaosDecoratorTests
         {
             public void Dispose() { }
         }
-    }
-
-    private sealed class InMemoryPendingIngressStore : IPendingIngressStore
-    {
-        public List<PendingIngressRecord> StoredRecords { get; } = new();
-
-        public Task<PendingIngressRecord> UpsertAsync(PublicIdentityId ownerId, QueuedMailboxEnvelope envelope, CancellationToken ct = default)
-        {
-            var record = new PendingIngressRecord(envelope.QueueId, envelope, 1, null);
-            StoredRecords.Add(record);
-            return Task.FromResult(record);
-        }
-
-        public Task<IReadOnlyList<PendingIngressRecord>> ListByOwnerAsync(PublicIdentityId ownerId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<PendingIngressRecord>>(StoredRecords.ToList());
-
-        public Task DeleteAsync(PublicIdentityId ownerId, MailboxQueueId queueId, CancellationToken ct = default)
-        {
-            StoredRecords.RemoveAll(r => r.QueueId == queueId);
-            return Task.CompletedTask;
-        }
-
-        public Task RecordTransientFailureAsync(PublicIdentityId ownerId, MailboxQueueId queueId, DomainError error, CancellationToken ct = default)
-            => Task.CompletedTask;
     }
 }
