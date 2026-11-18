@@ -42,14 +42,8 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<IShellWindowGeometryStore, VaultShellWindowGeometryStore>();
         services.AddTransient<IdentityGateViewModel>();
         services.AddTransient<MainWindowViewModel>();     // resolved at the WIN-02 seam
-        services.AddTransient<ExchangeManageViewModel>();
-        services.AddTransient<ExchangeCreationViewModel>();
-        services.AddTransient<CreatePersonaDialogViewModel>();
-        services.AddTransient<DeletePersonaDialogViewModel>();
-        services.AddTransient<StopUsingExchangeDialogViewModel>();
-        services.AddTransient<AddConnectionDialogViewModel>();
-        services.AddTransient<PendingRequestsPanelViewModel>();
-        services.AddTransient<ShareInvitationDialogViewModel>();
+        // Dialog ViewModels (CreatePersonaDialogViewModel, DeletePersonaDialogViewModel, etc.)
+        // are instantiated on-demand inside scoped dialog lifetimes via IWindowManager (ActivatorUtilities + IDialogContext).
         services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
         services.AddSingleton<ICurrentPersonaService, CurrentPersonaService>();
 

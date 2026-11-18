@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Validation;
+using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities.ValueObjects;
@@ -18,25 +19,33 @@ namespace Percolator.Desktop.Features.Startup.ViewModels;
 /// Create mode generates a candidate identity whose deterministic identicon the avatar
 /// picker previews; "re-roll" samples a new identity. Edit mode pins the existing
 /// identity — the avatar cannot change without changing the persona.
-/// The host window closes when <see cref="RequestClose"/> fires and reads <see cref="Result"/>.
+/// The host window closes when the injected dialog context completes.
 /// </summary>
 public partial class CreatePersonaDialogViewModel : ViewModelBase
 {
+    private readonly IDialogContext<PersonaEditorInput, PersonaEditorResult?> _dialogContext;
     private readonly IIdenticonGenerator _identicons;
     private PublicIdentityId _candidateId;
     private bool _isEdit;
 
-    public CreatePersonaDialogViewModel(IIdenticonGenerator identicons)
+    public CreatePersonaDialogViewModel(
+        IDialogContext<PersonaEditorInput, PersonaEditorResult?> dialogContext,
+        IIdenticonGenerator identicons)
     {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _identicons = identicons ?? throw new ArgumentNullException(nameof(identicons));
-        InitializeForCreate();
+
+        var input = dialogContext.Data;
+        if (input is not null && input.IsEdit && input.IdentityId.HasValue)
+        {
+            InitializeForEdit(input.DisplayName ?? string.Empty, input.PreferredPort ?? PersonaDirectoryService.DefaultPreferredPort, input.IdentityId.Value);
+        }
+        else
+        {
+            InitializeForCreate();
+        }
     }
 
-    /// <summary>Raised when the dialog should close (save or cancel); the window owns closing.</summary>
-    public event EventHandler? RequestClose;
-
-    /// <summary>Set on save; <c>null</c> means the dialog was cancelled or closed.</summary>
-    public PersonaEditorResult? Result { get; private set; }
 
     [ObservableProperty]
     private string _title = "Create Persona";
@@ -99,18 +108,17 @@ public partial class CreatePersonaDialogViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanSave))]
     private void Save()
     {
-        Result = new PersonaEditorResult(
+        var result = new PersonaEditorResult(
             _isEdit ? null : _candidateId,
             DisplayName.Trim(),
             PreferredPort);
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Close(result);
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        Result = null;
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Cancel();
     }
 
     private bool CanSave() => !HasErrors;

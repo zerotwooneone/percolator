@@ -8,10 +8,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using NUnit.Framework;
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
+using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.Features.Transports.ViewModels;
 using Percolator.Domain.Common;
@@ -44,9 +46,13 @@ public sealed class PendingRequestsPanelViewModelTests
         _requesterId = PublicIdentityId.New();
     }
 
-    private PendingRequestsPanelViewModel CreateViewModel()
+    private PendingRequestsPanelViewModel CreateViewModel(PublicIdentityId? identityId = null)
     {
+        var contextMock = new Mock<IDialogContext<PublicIdentityId>>();
+        contextMock.SetupGet(c => c.Data).Returns(identityId ?? _ownerId);
+
         return new PendingRequestsPanelViewModel(
+            contextMock.Object,
             _fakeQueryService,
             _fakeHandshakeService,
             _fakeContactCoordinator,
@@ -58,13 +64,17 @@ public sealed class PendingRequestsPanelViewModelTests
     public void Constructor_WithNullDependencies_ThrowsArgumentNullException()
     {
         var logger = NullLogger<PendingRequestsPanelViewModel>.Instance;
+        var contextMock = new Mock<IDialogContext<PublicIdentityId>>();
+        contextMock.SetupGet(c => c.Data).Returns(_ownerId);
 
-        Action act1 = () => new PendingRequestsPanelViewModel(null!, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, logger);
-        Action act2 = () => new PendingRequestsPanelViewModel(_fakeQueryService, null!, _fakeContactCoordinator, _fakePendingRepo, logger);
-        Action act3 = () => new PendingRequestsPanelViewModel(_fakeQueryService, _fakeHandshakeService, null!, _fakePendingRepo, logger);
-        Action act4 = () => new PendingRequestsPanelViewModel(_fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, null!, logger);
-        Action act5 = () => new PendingRequestsPanelViewModel(_fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, null!);
+        Action act0 = () => new PendingRequestsPanelViewModel(null!, _fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, logger);
+        Action act1 = () => new PendingRequestsPanelViewModel(contextMock.Object, null!, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, logger);
+        Action act2 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, null!, _fakeContactCoordinator, _fakePendingRepo, logger);
+        Action act3 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, _fakeHandshakeService, null!, _fakePendingRepo, logger);
+        Action act4 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, null!, logger);
+        Action act5 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, null!);
 
+        act0.Should().Throw<ArgumentNullException>();
         act1.Should().Throw<ArgumentNullException>();
         act2.Should().Throw<ArgumentNullException>();
         act3.Should().Throw<ArgumentNullException>();

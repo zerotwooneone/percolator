@@ -1,4 +1,3 @@
-using System;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Percolator.Desktop.ViewModels;
@@ -17,12 +16,30 @@ public interface IWindowManager
     void Show<TViewModel>() where TViewModel : ViewModelBase;
 
     /// <summary>
-    /// Shows a modal dialog for the given ViewModel, returning the dialog result upon closure.
+    /// Shows a parameterless modal dialog for the given ViewModel without a return result.
     /// </summary>
-    /// <param name="configure">Optional initializer invoked after the ViewModel resolves but before the window opens.</param>
-    /// <param name="owner">Optional explicit owner; defaults to the active window.</param>
+    Task ShowDialogAsync<TViewModel>(
+        Window? owner = null) where TViewModel : ViewModelBase;
+
+    /// <summary>
+    /// Shows a parameterized modal dialog for the given ViewModel without a return result.
+    /// </summary>
+    Task ShowDialogAsync<TViewModel, TData>(
+        TData parameter,
+        Window? owner = null) where TViewModel : ViewModelBase;
+
+    /// <summary>
+    /// Shows a parameterless modal dialog for the given ViewModel, returning the dialog result upon closure.
+    /// </summary>
     Task<TResult?> ShowDialogAsync<TViewModel, TResult>(
-        Action<TViewModel>? configure = null, Window? owner = null) where TViewModel : ViewModelBase;
+        Window? owner = null) where TViewModel : ViewModelBase;
+
+    /// <summary>
+    /// Shows a parameterized modal dialog for the given ViewModel, passing parameter via IDialogContext, returning the dialog result upon closure.
+    /// </summary>
+    Task<TResult?> ShowDialogAsync<TViewModel, TData, TResult>(
+        TData parameter,
+        Window? owner = null) where TViewModel : ViewModelBase;
 
     /// <summary>
     /// Returns the currently active top-level window.

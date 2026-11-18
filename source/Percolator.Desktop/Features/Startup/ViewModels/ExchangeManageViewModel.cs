@@ -17,6 +17,13 @@ using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 namespace Percolator.Desktop.Features.Startup.ViewModels;
 
 /// <summary>
+/// Input parameters for configuring the Exchange Manage surface dialog.
+/// </summary>
+public sealed record ExchangeManageInput(
+    ExchangeTileViewModel Exchange,
+    IReadOnlyList<PersonaDirectoryEntry> Personas);
+
+/// <summary>
 /// Manage surface for an exchange tile: the same persona-link checkbox component as the
 /// creation wizard. Checking a persona links it immediately (a vault-local row write);
 /// unchecking routes through the "Stop using this Exchange?" confirmation — unlinks are
@@ -25,6 +32,7 @@ namespace Percolator.Desktop.Features.Startup.ViewModels;
 /// </summary>
 public partial class ExchangeManageViewModel : ViewModelBase
 {
+    private readonly IDialogContext<ExchangeManageInput, bool> _dialogContext;
     private readonly IExchangeDirectory _exchanges;
     private readonly IWindowManager _windows;
     private readonly IIdenticonGenerator _identicons;
@@ -37,22 +45,24 @@ public partial class ExchangeManageViewModel : ViewModelBase
     private bool _changed;
 
     public ExchangeManageViewModel(
+        IDialogContext<ExchangeManageInput, bool> dialogContext,
         IExchangeDirectory exchanges,
         IWindowManager windows,
         IIdenticonGenerator identicons,
         ILogger<ExchangeManageViewModel> logger)
     {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _exchanges = exchanges ?? throw new ArgumentNullException(nameof(exchanges));
         _windows = windows ?? throw new ArgumentNullException(nameof(windows));
         _identicons = identicons ?? throw new ArgumentNullException(nameof(identicons));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        if (dialogContext.Data is not null)
+        {
+            Initialize(dialogContext.Data.Exchange, dialogContext.Data.Personas);
+        }
     }
 
-    /// <summary>Raised when the dialog should close; the window owns closing.</summary>
-    public event EventHandler? RequestClose;
-
-    /// <summary><c>true</c> when any link state changed — the gate refreshes the tile strip.</summary>
-    public bool Result { get; private set; }
 
     /// <summary>Exchange display name shown in the dialog header.</summary>
     public string ExchangeDisplayName { get; private set; } = string.Empty;
@@ -79,7 +89,6 @@ public partial class ExchangeManageViewModel : ViewModelBase
         _relayIdentityId = exchange.RelayIdentityId;
         _preferredPort = exchange.PreferredPort;
         _changed = false;
-        Result = false;
         ErrorMessage = null;
         ExchangeDisplayName = exchange.DisplayName;
         IsSelfHosted = exchange.IsSelfHosted;
@@ -99,13 +108,13 @@ public partial class ExchangeManageViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Checkbox toggle: check links immediately; uncheck opens the revocation dialog.
-    /// A cancelled or failed unlink reverts the checkbox.
+    /// Persona checkbox toggle. Checking writes the link immediately; unchecking
+    /// displays the confirmation dialog and rolls back if cancelled ([VM-006]).
     /// </summary>
     [RelayCommand]
     private async Task TogglePersonaAsync(LinkablePersonaModel? persona, System.Threading.CancellationToken ct)
     {
-        if (persona is null || !_initialized || _suppressToggle)
+        if (persona is null || _suppressToggle)
         {
             return;
         }
@@ -125,16 +134,11 @@ public partial class ExchangeManageViewModel : ViewModelBase
         }
         else
         {
-            StopUsingExchangeDialogViewModel? dialog = null;
-            var confirmed = await _windows
-                .ShowDialogAsync<StopUsingExchangeDialogViewModel, bool>(
-                    vm =>
-                    {
-                        vm.Initialize(persona.DisplayName, ExchangeDisplayName, IsSelfHosted);
-                        dialog = vm;
-                    })
+            var dialogResult = await _windows
+                .ShowDialogAsync<StopUsingExchangeDialogViewModel, StopUsingExchangeInput, StopUsingExchangeResult>(
+                    new StopUsingExchangeInput(persona.DisplayName, ExchangeDisplayName, IsSelfHosted))
                 .ConfigureAwait(true);
-            if (confirmed != true)
+            if (dialogResult?.Confirmed != true)
             {
                 Revert(persona, isLinked: true);
                 return;
@@ -144,7 +148,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
                 .UnlinkPersonaAsync(
                     new PublicIdentityId(_relayIdentityId),
                     persona.PersonaId,
-                    purgeQueuedEnvelopes: IsSelfHosted && dialog?.PurgeQueuedEnvelopes == true,
+                    purgeQueuedEnvelopes: IsSelfHosted && dialogResult.PurgeQueuedEnvelopes,
                     ct)
                 .ConfigureAwait(true);
             if (result.IsFailure)
@@ -173,8 +177,8 @@ public partial class ExchangeManageViewModel : ViewModelBase
         }
 
         var result = await _windows
-            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
-                vm => vm.InitializeForEdit(ExchangeDisplayName, _preferredPort, new PublicIdentityId(_relayIdentityId)))
+            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorInput, PersonaEditorResult?>(
+                PersonaEditorInput.ForEdit(ExchangeDisplayName, _preferredPort, new PublicIdentityId(_relayIdentityId)))
             .ConfigureAwait(true);
         if (result is null)
         {
@@ -206,8 +210,7 @@ public partial class ExchangeManageViewModel : ViewModelBase
     [RelayCommand]
     private void Done()
     {
-        Result = _changed;
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Close(_changed);
     }
 
     private void Revert(LinkablePersonaModel persona, bool isLinked)

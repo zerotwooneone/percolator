@@ -335,8 +335,8 @@ public partial class IdentityGateViewModel : ViewModelBase
     private async Task CreatePersonaAsync(CancellationToken ct)
     {
         var result = await _windows
-            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
-                vm => vm.InitializeForCreate())
+            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorInput, PersonaEditorResult?>(
+                PersonaEditorInput.ForCreate())
             .ConfigureAwait(true);
         if (result?.IdentityId is null)
         {
@@ -371,8 +371,8 @@ public partial class IdentityGateViewModel : ViewModelBase
         }
 
         var result = await _windows
-            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
-                vm => vm.InitializeForEdit(persona.DisplayName, persona.PreferredPort, persona.IdentityId))
+            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorInput, PersonaEditorResult?>(
+                PersonaEditorInput.ForEdit(persona.DisplayName, persona.PreferredPort, persona.IdentityId))
             .ConfigureAwait(true);
         if (result is null)
         {
@@ -407,8 +407,8 @@ public partial class IdentityGateViewModel : ViewModelBase
         }
 
         var confirmed = await _windows
-            .ShowDialogAsync<DeletePersonaDialogViewModel, bool>(
-                vm => vm.Initialize(persona.DisplayName))
+            .ShowDialogAsync<DeletePersonaDialogViewModel, string, bool>(
+                persona.DisplayName)
             .ConfigureAwait(true);
         if (confirmed != true)
         {
@@ -436,8 +436,8 @@ public partial class IdentityGateViewModel : ViewModelBase
     {
         var personas = _personaList.Select(ToPersonaEntry).ToList();
         var result = await _windows
-            .ShowDialogAsync<ExchangeCreationViewModel, ExchangeCreationResult?>(
-                vm => vm.Initialize(personas))
+            .ShowDialogAsync<ExchangeCreationViewModel, IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?>(
+                personas)
             .ConfigureAwait(true);
         if (result is null)
         {
@@ -484,8 +484,8 @@ public partial class IdentityGateViewModel : ViewModelBase
 
         var personas = _personaList.Select(ToPersonaEntry).ToList();
         var changed = await _windows
-            .ShowDialogAsync<ExchangeManageViewModel, bool>(
-                vm => vm.Initialize(exchange, personas))
+            .ShowDialogAsync<ExchangeManageViewModel, ExchangeManageInput, bool>(
+                new ExchangeManageInput(exchange, personas))
             .ConfigureAwait(true);
         if (changed != true)
         {

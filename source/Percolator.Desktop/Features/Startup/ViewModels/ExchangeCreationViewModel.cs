@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Validation;
+using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities.ValueObjects;
@@ -20,25 +21,24 @@ namespace Percolator.Desktop.Features.Startup.ViewModels;
 /// (1) advanced-feature framing + uptime warning, (2) display name + avatar + preferred port
 /// mirroring persona creation, (3) optional persona linking — every checkbox ships
 /// <em>unchecked</em> because linking has infrastructure-linkability semantics and must be
-/// explicit opt-in. The host window closes when <see cref="RequestClose"/> fires and reads
-/// <see cref="Result"/>; the created tile appears offline and inert.
+/// explicit opt-in. The host window closes when the injected dialog context completes;
+/// the created tile appears offline and inert.
 /// </summary>
 public partial class ExchangeCreationViewModel : ViewModelBase
 {
+    private readonly IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?> _dialogContext;
     private readonly IIdenticonGenerator _identicons;
     private PublicIdentityId _candidateId;
 
-    public ExchangeCreationViewModel(IIdenticonGenerator identicons)
+    public ExchangeCreationViewModel(
+        IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?> dialogContext,
+        IIdenticonGenerator identicons)
     {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _identicons = identicons ?? throw new ArgumentNullException(nameof(identicons));
-        Initialize(Array.Empty<PersonaDirectoryEntry>());
+        Initialize(dialogContext.Data ?? Array.Empty<PersonaDirectoryEntry>());
     }
 
-    /// <summary>Raised when the dialog should close (finish or cancel); the window owns closing.</summary>
-    public event EventHandler? RequestClose;
-
-    /// <summary>Set on finish; <c>null</c> means the wizard was cancelled or closed.</summary>
-    public ExchangeCreationResult? Result { get; private set; }
 
     /// <summary>0 = framing, 1 = profile, 2 = persona linking (optional, skippable).</summary>
     [ObservableProperty]
@@ -98,7 +98,6 @@ public partial class ExchangeCreationViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(personas);
 
-        Result = null;
         _candidateId = PublicIdentityId.New();
         Avatar = AvatarPresentation.FromIdenticon(_identicons.Generate(_candidateId.Value));
         DisplayName = string.Empty;
@@ -136,7 +135,7 @@ public partial class ExchangeCreationViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanFinish))]
     private void Finish()
     {
-        Result = new ExchangeCreationResult(
+        var result = new ExchangeCreationResult(
             _candidateId,
             DisplayName.Trim(),
             PreferredPort,
@@ -144,14 +143,13 @@ public partial class ExchangeCreationViewModel : ViewModelBase
                 .Where(p => p.IsLinked)
                 .Select(p => p.PersonaId)
                 .ToList());
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Close(result);
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        Result = null;
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Cancel();
     }
 
     private bool CanGoNext() =>

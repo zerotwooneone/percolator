@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using ObservableCollections;
 using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
+using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities;
@@ -25,6 +26,7 @@ namespace Percolator.Desktop.Features.Transports.ViewModels;
 /// </summary>
 public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
 {
+    private readonly IDialogContext<PublicIdentityId> _dialogContext;
     private readonly IPeerContactQueryService _contactQueryService;
     private readonly IHandshakeService _handshakeService;
     private readonly IContactRequestCoordinator _contactCoordinator;
@@ -35,12 +37,14 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
     private PublicIdentityId? _activePersonaId;
 
     public PendingRequestsPanelViewModel(
+        IDialogContext<PublicIdentityId> dialogContext,
         IPeerContactQueryService contactQueryService,
         IHandshakeService handshakeService,
         IContactRequestCoordinator contactCoordinator,
         IPendingHandshakeRepository pendingHandshakeRepo,
         ILogger<PendingRequestsPanelViewModel> logger)
     {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _contactQueryService = contactQueryService ?? throw new ArgumentNullException(nameof(contactQueryService));
         _handshakeService = handshakeService ?? throw new ArgumentNullException(nameof(handshakeService));
         _contactCoordinator = contactCoordinator ?? throw new ArgumentNullException(nameof(contactCoordinator));
@@ -51,6 +55,12 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
         Requests = view.ToNotifyCollectionChanged();
         Bag.Add(view);
         Bag.Add(Requests);
+
+        if (dialogContext.Data != default)
+        {
+            _activePersonaId = dialogContext.Data;
+            _ = InitializeAsync(dialogContext.Data);
+        }
     }
 
     /// <summary>

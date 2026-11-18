@@ -9,6 +9,8 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Invitations;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
@@ -39,30 +41,40 @@ public enum PortRangePrivacyPreset
 /// </summary>
 public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
 {
+    private readonly IDialogContext<ShareInvitationDialogParams> _dialogContext;
     private readonly IPeerInvitationCodec _invitationCodec;
     private readonly IClipboardService _clipboardService;
     private readonly IQrCodeGenerator _qrCodeGenerator;
     private readonly ILogger<ShareInvitationDialogViewModel> _logger;
 
-    private PublicIdentityId? _identityId;
-    private BlindedRoutingToken? _routingToken;
-    private DeliveryToken? _deliveryToken;
-    private IReadOnlyList<string> _endpointHosts = Array.Empty<string>();
-    private int _boundPort = 5100;
+    private readonly PublicIdentityId _identityId;
+    private readonly BlindedRoutingToken _routingToken;
+    private readonly DeliveryToken _deliveryToken;
+    private readonly IReadOnlyList<string> _endpointHosts;
+    private readonly int _boundPort;
 
     public ShareInvitationDialogViewModel(
+        IDialogContext<ShareInvitationDialogParams> dialogContext,
         IPeerInvitationCodec invitationCodec,
         IClipboardService clipboardService,
         IQrCodeGenerator qrCodeGenerator,
         ILogger<ShareInvitationDialogViewModel> logger)
     {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _invitationCodec = invitationCodec ?? throw new ArgumentNullException(nameof(invitationCodec));
         _clipboardService = clipboardService ?? throw new ArgumentNullException(nameof(clipboardService));
         _qrCodeGenerator = qrCodeGenerator ?? throw new ArgumentNullException(nameof(qrCodeGenerator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
-    public event EventHandler? RequestClose;
+        var p = dialogContext.Data ?? throw new ArgumentNullException(nameof(dialogContext.Data));
+        _identityId = p.IdentityId;
+        _routingToken = p.RoutingToken;
+        _deliveryToken = p.DeliveryToken;
+        _endpointHosts = p.EndpointHosts ?? Array.Empty<string>();
+        _boundPort = p.BoundPort;
+
+        UpdateInvitationPayload();
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCustomRangeVisible))]
@@ -125,36 +137,11 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
     partial void OnCustomRangeMaxChanged(int value) => UpdateInvitationPayload();
 
     /// <summary>
-    /// Initializes the dialog with active persona parameters and generates the initial invitation.
-    /// </summary>
-    public void Initialize(
-        PublicIdentityId identityId,
-        BlindedRoutingToken routingToken,
-        DeliveryToken deliveryToken,
-        IReadOnlyList<string> endpointHosts,
-        int boundPort)
-    {
-        _identityId = identityId;
-        _routingToken = routingToken;
-        _deliveryToken = deliveryToken;
-        _endpointHosts = endpointHosts ?? throw new ArgumentNullException(nameof(endpointHosts));
-        _boundPort = boundPort;
-
-        OnPropertyChanged(nameof(BoundPort));
-        UpdateInvitationPayload();
-    }
-
-    /// <summary>
     /// Re-encodes the invitation URL and QR code based on the current privacy preset and range settings.
     /// </summary>
     [RelayCommand]
     public void UpdateInvitationPayload()
     {
-        if (_identityId == null || _routingToken == null || _deliveryToken == null)
-        {
-            return;
-        }
-
         try
         {
             PortRange? portRange = SelectedPrivacyPreset switch
@@ -168,8 +155,8 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
             };
 
             var payload = new PeerInvitationPayload(
-                _identityId.Value,
-                _routingToken.Value,
+                _identityId,
+                _routingToken,
                 _deliveryToken,
                 _endpointHosts,
                 portRange);
@@ -211,12 +198,12 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
     [RelayCommand]
     private void Close()
     {
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Close();
     }
 
     protected override void DisposeCore()
     {
-        _deliveryToken?.Dispose();
+        _deliveryToken.Dispose();
         base.DisposeCore();
     }
 }

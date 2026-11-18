@@ -74,8 +74,8 @@ public sealed class DesktopStage2SessionFactoryTests
         peerConnectionService.Should().NotBeNull();
         peerConnectionService.Should().BeOfType<DesktopPeerConnectionService>();
 
-        var addConnectionVm = session.Services.GetRequiredService<AddConnectionDialogViewModel>();
-        addConnectionVm.Should().NotBeNull();
+        var windowManager = session.Services.GetRequiredService<IWindowManager>();
+        windowManager.Should().NotBeNull();
 
         var outboundWorker = session.Services.GetRequiredService<OutboundPendingRetryWorker>();
         outboundWorker.Should().NotBeNull();

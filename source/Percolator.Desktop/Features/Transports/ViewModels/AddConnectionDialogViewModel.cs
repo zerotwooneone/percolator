@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Invitations;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -21,6 +22,7 @@ namespace Percolator.Desktop.Features.Transports.ViewModels;
 
 public sealed partial class AddConnectionDialogViewModel : ViewModelBase
 {
+    private readonly IDialogContext<PublicIdentityId, AddConnectionDialogResult> _dialogContext;
     private readonly IPeerInvitationCodec _invitationCodec;
     private readonly IPeerConnectionService _peerConnectionService;
     private readonly IRelayDirectory _relayDirectory;
@@ -33,6 +35,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
     private PublicIdentityId? _activePersonaId;
 
     public AddConnectionDialogViewModel(
+        IDialogContext<PublicIdentityId, AddConnectionDialogResult> dialogContext,
         IPeerInvitationCodec invitationCodec,
         IPeerConnectionService peerConnectionService,
         IRelayDirectory relayDirectory,
@@ -42,6 +45,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
         ILogger<AddConnectionDialogViewModel> logger,
         TimeProvider timeProvider)
     {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _invitationCodec = invitationCodec ?? throw new ArgumentNullException(nameof(invitationCodec));
         _peerConnectionService = peerConnectionService ?? throw new ArgumentNullException(nameof(peerConnectionService));
         _relayDirectory = relayDirectory ?? throw new ArgumentNullException(nameof(relayDirectory));
@@ -50,11 +54,10 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
         _personaDirectory = personaDirectory ?? throw new ArgumentNullException(nameof(personaDirectory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+
+        _activePersonaId = dialogContext.Data;
     }
 
-    public event EventHandler? RequestClose;
-
-    public AddConnectionDialogResult? Result { get; private set; }
 
     [ObservableProperty]
     private int _selectedTabIndex;
@@ -200,40 +203,36 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
             if (connResult.IsSuccess)
             {
                 _logger.LogInformation("Direct connection to peer {PeerId} succeeded at {Endpoint}", payload.IdentityId, directUri);
-                Result = new AddConnectionDialogResult(
+                CloseWithResult(new AddConnectionDialogResult(
                     OutboundConnectionStatus.Connected,
                     Invitation: payload,
-                    PeerId: payload.IdentityId);
-                RequestClose?.Invoke(this, EventArgs.Empty);
+                    PeerId: payload.IdentityId));
             }
             else
             {
                 _logger.LogInformation("Direct peer {PeerId} probe returned failure ({Error}). Staging as PendingOffline.",
                     payload.IdentityId, connResult.Error.Description);
-                Result = new AddConnectionDialogResult(
+                CloseWithResult(new AddConnectionDialogResult(
                     OutboundConnectionStatus.PendingOffline,
                     Invitation: payload,
-                    PeerId: payload.IdentityId);
-                RequestClose?.Invoke(this, EventArgs.Empty);
+                    PeerId: payload.IdentityId));
             }
         }
         catch (OperationCanceledException)
         {
             _logger.LogInformation("Direct peer {PeerId} probe timed out after 3 seconds. Staging as PendingOffline.", payload.IdentityId);
-            Result = new AddConnectionDialogResult(
+            CloseWithResult(new AddConnectionDialogResult(
                 OutboundConnectionStatus.PendingOffline,
                 Invitation: payload,
-                PeerId: payload.IdentityId);
-            RequestClose?.Invoke(this, EventArgs.Empty);
+                PeerId: payload.IdentityId));
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Exception encountered during direct peer probe for {PeerId}. Staging as PendingOffline.", payload.IdentityId);
-            Result = new AddConnectionDialogResult(
+            CloseWithResult(new AddConnectionDialogResult(
                 OutboundConnectionStatus.PendingOffline,
                 Invitation: payload,
-                PeerId: payload.IdentityId);
-            RequestClose?.Invoke(this, EventArgs.Empty);
+                PeerId: payload.IdentityId));
         }
         finally
         {
@@ -390,10 +389,9 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
                 }
             }
 
-            Result = new AddConnectionDialogResult(
+            CloseWithResult(new AddConnectionDialogResult(
                 OutboundConnectionStatus.RelayAdded,
-                RelayEndpoint: relayEndpoint.ToString());
-            RequestClose?.Invoke(this, EventArgs.Empty);
+                RelayEndpoint: relayEndpoint.ToString()));
         }
         catch (Exception ex)
         {
@@ -410,7 +408,11 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
     [RelayCommand]
     private void Cancel()
     {
-        Result = new AddConnectionDialogResult(OutboundConnectionStatus.Cancelled);
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        CloseWithResult(new AddConnectionDialogResult(OutboundConnectionStatus.Cancelled));
+    }
+
+    private void CloseWithResult(AddConnectionDialogResult result)
+    {
+        _dialogContext.Close(result);
     }
 }

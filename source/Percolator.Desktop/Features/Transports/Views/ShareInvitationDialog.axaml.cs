@@ -4,10 +4,12 @@ using System;
 using System.IO;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
+using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Transports.ViewModels;
 
 namespace Percolator.Desktop.Features.Transports.Views;
 
+[DialogFor(typeof(ShareInvitationDialogViewModel))]
 public partial class ShareInvitationDialog : Window
 {
     private ShareInvitationDialogViewModel? _wired;
@@ -22,14 +24,12 @@ public partial class ShareInvitationDialog : Window
     {
         if (_wired is not null)
         {
-            _wired.RequestClose -= OnRequestClose;
             _wired.PropertyChanged -= OnViewModelPropertyChanged;
         }
 
         _wired = DataContext as ShareInvitationDialogViewModel;
         if (_wired is not null)
         {
-            _wired.RequestClose += OnRequestClose;
             _wired.PropertyChanged += OnViewModelPropertyChanged;
             UpdateQrCodeImage(_wired.QrCodePngBytes);
         }
@@ -61,10 +61,5 @@ public partial class ShareInvitationDialog : Window
         {
             QrCodeImage.Source = null;
         }
-    }
-
-    private void OnRequestClose(object? sender, EventArgs e)
-    {
-        Close();
     }
 }

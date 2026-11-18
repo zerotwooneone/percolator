@@ -12,6 +12,7 @@ using NUnit.Framework;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Invitations;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.Features.Transports.ViewModels;
@@ -37,6 +38,8 @@ public sealed class AddConnectionDialogViewModelTests
 
     private PublicIdentityId _testPersonaId;
     private PeerInvitationPayload _testInvitationPayload = null!;
+    private Mock<IDialogContext<PublicIdentityId, AddConnectionDialogResult>> _contextMock = null!;
+    private AddConnectionDialogResult? _dialogResult;
 
     [SetUp]
     public void SetUp()
@@ -55,11 +58,31 @@ public sealed class AddConnectionDialogViewModelTests
             DeliveryToken.GenerateRandom(),
             new[] { "127.0.0.1" },
             PortRange.Single(5100));
+
+        _dialogResult = null;
+        _contextMock = new Mock<IDialogContext<PublicIdentityId, AddConnectionDialogResult>>();
+        _contextMock.SetupGet(c => c.Data).Returns(_testPersonaId);
+        _contextMock.Setup(c => c.Close(It.IsAny<AddConnectionDialogResult>()))
+            .Callback<AddConnectionDialogResult>(r => _dialogResult = r);
+        _contextMock.Setup(c => c.Cancel())
+            .Callback(() => _dialogResult = new AddConnectionDialogResult(OutboundConnectionStatus.Cancelled));
     }
 
     private AddConnectionDialogViewModel CreateViewModel(bool initializeWithPersona = true)
     {
+        _dialogResult = null;
+        if (!initializeWithPersona)
+        {
+            _contextMock = new Mock<IDialogContext<PublicIdentityId, AddConnectionDialogResult>>();
+            _contextMock.SetupGet(c => c.Data).Returns((PublicIdentityId)default);
+            _contextMock.Setup(c => c.Close(It.IsAny<AddConnectionDialogResult>()))
+                .Callback<AddConnectionDialogResult>(r => _dialogResult = r);
+            _contextMock.Setup(c => c.Cancel())
+                .Callback(() => _dialogResult = new AddConnectionDialogResult(OutboundConnectionStatus.Cancelled));
+        }
+
         var vm = new AddConnectionDialogViewModel(
+            _contextMock.Object,
             _mockCodec.Object,
             _mockPeerConnectionService.Object,
             _mockRelayDirectory.Object,
@@ -69,11 +92,6 @@ public sealed class AddConnectionDialogViewModelTests
             NullLogger<AddConnectionDialogViewModel>.Instance,
             TimeProvider.System);
 
-        if (initializeWithPersona)
-        {
-            vm.Initialize(_testPersonaId);
-        }
-
         return vm;
     }
 
@@ -82,37 +100,46 @@ public sealed class AddConnectionDialogViewModelTests
     {
         var logger = NullLogger<AddConnectionDialogViewModel>.Instance;
         var time = TimeProvider.System;
+        var contextMock = new Mock<IDialogContext<PublicIdentityId, AddConnectionDialogResult>>();
+        contextMock.SetupGet(c => c.Data).Returns(_testPersonaId);
 
+        Action act0 = () => new AddConnectionDialogViewModel(
+            null!, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act1 = () => new AddConnectionDialogViewModel(
-            null!, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, null!, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act2 = () => new AddConnectionDialogViewModel(
-            _mockCodec.Object, null!, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, null!, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act3 = () => new AddConnectionDialogViewModel(
-            _mockCodec.Object, _mockPeerConnectionService.Object, null!,
+            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, null!,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act4 = () => new AddConnectionDialogViewModel(
-            _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
             null!, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
         Action act5 = () => new AddConnectionDialogViewModel(
-            _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, null!, _mockPersonaDirectory.Object, logger, time);
         Action act6 = () => new AddConnectionDialogViewModel(
-            _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, null!, logger, time);
         Action act7 = () => new AddConnectionDialogViewModel(
-            _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, null!, time);
         Action act8 = () => new AddConnectionDialogViewModel(
-            _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
+            contextMock.Object, _mockCodec.Object, _mockPeerConnectionService.Object, _mockRelayDirectory.Object,
             _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, null!);
 
+        act0.Should().Throw<ArgumentNullException>();
         act1.Should().Throw<ArgumentNullException>();
         act2.Should().Throw<ArgumentNullException>();
         act3.Should().Throw<ArgumentNullException>();
         act4.Should().Throw<ArgumentNullException>();
         act5.Should().Throw<ArgumentNullException>();
+        act6.Should().Throw<ArgumentNullException>();
+        act7.Should().Throw<ArgumentNullException>();
+        act8.Should().Throw<ArgumentNullException>();
         act6.Should().Throw<ArgumentNullException>();
         act7.Should().Throw<ArgumentNullException>();
         act8.Should().Throw<ArgumentNullException>();
@@ -127,7 +154,7 @@ public sealed class AddConnectionDialogViewModelTests
             "SYS-PRE-ACTIVATION-STEALTH mandates prekey bundle publication is opt-in and unchecked by default");
         vm.SelectedTabIndex.Should().Be(0);
         vm.IsProbing.Should().BeFalse();
-        vm.Result.Should().BeNull();
+        _dialogResult.Should().BeNull();
         vm.ErrorMessage.Should().BeNull();
     }
 
@@ -179,7 +206,7 @@ public sealed class AddConnectionDialogViewModelTests
         await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
 
         vm.ErrorMessage.Should().Be("Please enter a peer invitation.");
-        vm.Result.Should().BeNull();
+        _dialogResult.Should().BeNull();
     }
 
     [Test]
@@ -195,7 +222,7 @@ public sealed class AddConnectionDialogViewModelTests
         await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
 
         vm.ErrorMessage.Should().Be("Malformed invitation token.");
-        vm.Result.Should().BeNull();
+        _dialogResult.Should().BeNull();
     }
 
     [Test]
@@ -220,16 +247,12 @@ public sealed class AddConnectionDialogViewModelTests
         var vm = CreateViewModel();
         vm.PeerInvitationInput = "valid-token";
 
-        var closeRequested = false;
-        vm.RequestClose += (_, _) => closeRequested = true;
-
         await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
 
-        closeRequested.Should().BeTrue();
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.Connected);
-        vm.Result.PeerId.Should().Be(_testInvitationPayload.IdentityId);
-        vm.Result.Invitation.Should().Be(_testInvitationPayload);
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.Connected);
+        _dialogResult.PeerId.Should().Be(_testInvitationPayload.IdentityId);
+        _dialogResult.Invitation.Should().Be(_testInvitationPayload);
         vm.ErrorMessage.Should().BeNull();
     }
 
@@ -253,16 +276,12 @@ public sealed class AddConnectionDialogViewModelTests
         var vm = CreateViewModel();
         vm.PeerInvitationInput = "valid-token";
 
-        var closeRequested = false;
-        vm.RequestClose += (_, _) => closeRequested = true;
-
         await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
 
-        closeRequested.Should().BeTrue("offline peers must not trap the user in a blocking error modal");
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.PendingOffline);
-        vm.Result.PeerId.Should().Be(_testInvitationPayload.IdentityId);
-        vm.Result.Invitation.Should().Be(_testInvitationPayload);
+        _dialogResult.Should().NotBeNull("offline peers must not trap the user in a blocking error modal");
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.PendingOffline);
+        _dialogResult.PeerId.Should().Be(_testInvitationPayload.IdentityId);
+        _dialogResult.Invitation.Should().Be(_testInvitationPayload);
         vm.ErrorMessage.Should().BeNull("failing the fast offline probe stages background retry without UI error");
     }
 
@@ -286,15 +305,11 @@ public sealed class AddConnectionDialogViewModelTests
         var vm = CreateViewModel();
         vm.PeerInvitationInput = "valid-token";
 
-        var closeRequested = false;
-        vm.RequestClose += (_, _) => closeRequested = true;
-
         await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
 
-        closeRequested.Should().BeTrue();
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.PendingOffline);
-        vm.Result.PeerId.Should().Be(_testInvitationPayload.IdentityId);
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.PendingOffline);
+        _dialogResult.PeerId.Should().Be(_testInvitationPayload.IdentityId);
         vm.ErrorMessage.Should().BeNull();
     }
 
@@ -327,8 +342,8 @@ public sealed class AddConnectionDialogViewModelTests
 
         await vm.SubmitPeerConnectionCommand.ExecuteAsync(null);
 
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.Connected);
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.Connected);
     }
 
     [Test]
@@ -340,7 +355,7 @@ public sealed class AddConnectionDialogViewModelTests
         await vm.SubmitRelayConnectionCommand.ExecuteAsync(null);
 
         vm.ErrorMessage.Should().Be("Please enter a relay endpoint (host:port).");
-        vm.Result.Should().BeNull();
+        _dialogResult.Should().BeNull();
     }
 
     [TestCase("not-a-port")]
@@ -355,7 +370,7 @@ public sealed class AddConnectionDialogViewModelTests
         await vm.SubmitRelayConnectionCommand.ExecuteAsync(null);
 
         vm.ErrorMessage.Should().StartWith("Invalid relay endpoint format.");
-        vm.Result.Should().BeNull();
+        _dialogResult.Should().BeNull();
     }
 
     [Test]
@@ -403,8 +418,8 @@ public sealed class AddConnectionDialogViewModelTests
 
         await vm.SubmitRelayConnectionCommand.ExecuteAsync(null);
 
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
     }
 
     [Test]
@@ -440,9 +455,9 @@ public sealed class AddConnectionDialogViewModelTests
 
         await vm.SubmitRelayConnectionCommand.ExecuteAsync(null);
 
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
-        vm.Result.RelayEndpoint.Should().Be(expectedEndpoint.ToString());
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
+        _dialogResult.RelayEndpoint.Should().Be(expectedEndpoint.ToString());
     }
 
     [Test]
@@ -484,15 +499,11 @@ public sealed class AddConnectionDialogViewModelTests
         vm.RelayEndpointInput = "127.0.0.1:5100";
         vm.SeedPreKeysToRelay.Should().BeFalse();
 
-        var closeRequested = false;
-        vm.RequestClose += (_, _) => closeRequested = true;
-
         await vm.SubmitRelayConnectionCommand.ExecuteAsync(null);
 
-        closeRequested.Should().BeTrue();
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
-        vm.Result.RelayEndpoint.Should().Be(expectedEndpoint.ToString());
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
+        _dialogResult.RelayEndpoint.Should().Be(expectedEndpoint.ToString());
         vm.ErrorMessage.Should().BeNull();
 
         // State-based assertion on fake provisioner: zero prekeys published
@@ -547,14 +558,10 @@ public sealed class AddConnectionDialogViewModelTests
         vm.RelayEndpointInput = "127.0.0.1:5100";
         vm.SeedPreKeysToRelay = true;
 
-        var closeRequested = false;
-        vm.RequestClose += (_, _) => closeRequested = true;
-
         await vm.SubmitRelayConnectionCommand.ExecuteAsync(null);
 
-        closeRequested.Should().BeTrue();
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.RelayAdded);
         vm.ErrorMessage.Should().BeNull();
 
         // State-based assertion on fake provisioner: single published bundle recorded
@@ -587,29 +594,21 @@ public sealed class AddConnectionDialogViewModelTests
         var vm = CreateViewModel();
         vm.RelayEndpointInput = "127.0.0.1:5100";
 
-        var closeRequested = false;
-        vm.RequestClose += (_, _) => closeRequested = true;
-
         await vm.SubmitRelayConnectionCommand.ExecuteAsync(null);
 
-        closeRequested.Should().BeFalse();
-        vm.Result.Should().BeNull();
+        _dialogResult.Should().BeNull();
         vm.ErrorMessage.Should().Be("Remote host rejected TLS handshake.");
     }
 
     [Test]
-    public void CancelCommand_SetsCancelledStatusAndRaisesRequestClose()
+    public void CancelCommand_SetsCancelledStatusAndClosesDialog()
     {
         var vm = CreateViewModel();
 
-        var closeRequested = false;
-        vm.RequestClose += (_, _) => closeRequested = true;
-
         vm.CancelCommand.Execute(null);
 
-        closeRequested.Should().BeTrue();
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Status.Should().Be(OutboundConnectionStatus.Cancelled);
+        _dialogResult.Should().NotBeNull();
+        _dialogResult!.Status.Should().Be(OutboundConnectionStatus.Cancelled);
     }
 }
 

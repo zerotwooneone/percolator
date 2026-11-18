@@ -43,7 +43,7 @@ public sealed class WindowManager : IWindowManager
             try
             {
                 var viewModel = scope.ServiceProvider.GetRequiredService<TViewModel>();
-                var window = ResolveWindowByConvention(viewModel);
+                var window = GeneratedDialogRegistry.CreateDialog(viewModel);
 
                 window.DataContext = viewModel;
                 _openWindows[vmType] = (window, scope);
@@ -70,30 +70,90 @@ public sealed class WindowManager : IWindowManager
         }
     }
 
-    public async Task<TResult?> ShowDialogAsync<TViewModel, TResult>(
-        Action<TViewModel>? configure = null, Window? owner = null) where TViewModel : ViewModelBase
+    public async Task ShowDialogAsync<TViewModel>(
+        Window? owner = null) where TViewModel : ViewModelBase
     {
-        var desktop = DesktopLifetime;
-        var parent = owner ?? desktop?.MainWindow ?? GetActiveWindow();
+        var parent = owner ?? DesktopLifetime?.MainWindow ?? GetActiveWindow();
         if (parent == null)
         {
             throw new InvalidOperationException("Cannot show dialog without an active parent window.");
         }
 
         using var scope = _serviceProvider.CreateScope();
-        var viewModel = scope.ServiceProvider.GetRequiredService<TViewModel>();
-        configure?.Invoke(viewModel);
-        var window = ResolveWindowByConvention(viewModel);
+        Window? window = null;
+        var context = new DialogContext(() => window?.Close());
+
+        using var viewModel = ActivatorUtilities.CreateInstance<TViewModel>(scope.ServiceProvider, context);
+        window = GeneratedDialogRegistry.CreateDialog(viewModel);
         window.DataContext = viewModel;
 
-        if (window is IDialogWindow<TResult> dialogWindow)
+        window.Closed += (_, _) => context.Cancel();
+        await window.ShowDialog(parent);
+    }
+
+    public async Task ShowDialogAsync<TViewModel, TData>(
+        TData parameter, Window? owner = null) where TViewModel : ViewModelBase
+    {
+        var parent = owner ?? DesktopLifetime?.MainWindow ?? GetActiveWindow();
+        if (parent == null)
         {
-            await window.ShowDialog(parent);
-            return dialogWindow.DialogResult;
+            throw new InvalidOperationException("Cannot show dialog without an active parent window.");
         }
 
+        using var scope = _serviceProvider.CreateScope();
+        Window? window = null;
+        var context = new DialogContext<TData>(parameter, () => window?.Close());
+
+        using var viewModel = ActivatorUtilities.CreateInstance<TViewModel>(scope.ServiceProvider, context);
+        window = GeneratedDialogRegistry.CreateDialog(viewModel);
+        window.DataContext = viewModel;
+
+        window.Closed += (_, _) => context.Cancel();
         await window.ShowDialog(parent);
-        return default;
+    }
+
+    public async Task<TResult?> ShowDialogAsync<TViewModel, TResult>(
+        Window? owner = null) where TViewModel : ViewModelBase
+    {
+        var parent = owner ?? DesktopLifetime?.MainWindow ?? GetActiveWindow();
+        if (parent == null)
+        {
+            throw new InvalidOperationException("Cannot show dialog without an active parent window.");
+        }
+
+        using var scope = _serviceProvider.CreateScope();
+        Window? window = null;
+        var context = new DialogResultContext<TResult>(() => window?.Close());
+
+        using var viewModel = ActivatorUtilities.CreateInstance<TViewModel>(scope.ServiceProvider, context);
+        window = GeneratedDialogRegistry.CreateDialog(viewModel);
+        window.DataContext = viewModel;
+
+        window.Closed += (_, _) => context.Cancel();
+        await window.ShowDialog(parent);
+        return context.Result;
+    }
+
+    public async Task<TResult?> ShowDialogAsync<TViewModel, TData, TResult>(
+        TData parameter, Window? owner = null) where TViewModel : ViewModelBase
+    {
+        var parent = owner ?? DesktopLifetime?.MainWindow ?? GetActiveWindow();
+        if (parent == null)
+        {
+            throw new InvalidOperationException("Cannot show dialog without an active parent window.");
+        }
+
+        using var scope = _serviceProvider.CreateScope();
+        Window? window = null;
+        var context = new DialogContext<TData, TResult>(parameter, () => window?.Close());
+
+        using var viewModel = ActivatorUtilities.CreateInstance<TViewModel>(scope.ServiceProvider, context);
+        window = GeneratedDialogRegistry.CreateDialog(viewModel);
+        window.DataContext = viewModel;
+
+        window.Closed += (_, _) => context.Cancel();
+        await window.ShowDialog(parent);
+        return context.Result;
     }
 
     public Window? GetActiveWindow()
@@ -101,38 +161,4 @@ public sealed class WindowManager : IWindowManager
         var desktop = DesktopLifetime;
         return desktop?.Windows.FirstOrDefault(w => w.IsActive) ?? desktop?.MainWindow;
     }
-
-    private static Window ResolveWindowByConvention(object viewModel)
-    {
-        var vmType = viewModel.GetType();
-
-        // Convention: Features.X.ViewModels.FooViewModel -> Features.X.Views.FooWindow or FooView.
-        // Transform only the class-name suffix — a blanket Replace on the full name corrupts
-        // the "ViewModels" namespace segment into a nonexistent "Windows" namespace.
-        var baseName = vmType.Name.EndsWith("ViewModel", StringComparison.Ordinal)
-            ? vmType.Name[..^"ViewModel".Length]
-            : vmType.Name;
-        var viewNamespace = (vmType.Namespace ?? string.Empty).Replace("ViewModels", "Views");
-
-        foreach (var candidate in new[]
-                 {
-                     $"{viewNamespace}.{baseName}Window",
-                     $"{viewNamespace}.{baseName}View",
-                     $"{viewNamespace}.{baseName}"
-                 })
-        {
-            var windowType = Type.GetType(candidate) ?? vmType.Assembly.GetType(candidate);
-            if (windowType is not null && typeof(Window).IsAssignableFrom(windowType))
-            {
-                return (Window)Activator.CreateInstance(windowType)!;
-            }
-        }
-
-        throw new InvalidOperationException($"Could not locate a Window type matching ViewModel {vmType.FullName}");
-    }
-}
-
-public interface IDialogWindow<out TResult>
-{
-    TResult? DialogResult { get; }
 }

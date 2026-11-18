@@ -135,41 +135,36 @@ public sealed class MainWindowViewModelTests
     public async Task OpenAddConnectionCommand_OpensAddConnectionDialogViaWindowManager()
     {
         using var vm = CreateViewModel();
-        var dialogOpened = false;
-        Action<AddConnectionDialogViewModel>? capturedConfigure = null;
+        PublicIdentityId capturedPersonaId = default;
 
         _windowManagerMock
-            .Setup(w => w.ShowDialogAsync<AddConnectionDialogViewModel, OutboundConnectionStatus>(
-                It.IsAny<Action<AddConnectionDialogViewModel>>(), null))
-            .Callback<Action<AddConnectionDialogViewModel>?, object>((configure, _) =>
+            .Setup(w => w.ShowDialogAsync<AddConnectionDialogViewModel, PublicIdentityId, AddConnectionDialogResult>(
+                It.IsAny<PublicIdentityId>(), null))
+            .Callback<PublicIdentityId, Avalonia.Controls.Window?>((id, _) =>
             {
-                dialogOpened = true;
-                capturedConfigure = configure;
+                capturedPersonaId = id;
             })
-            .ReturnsAsync(OutboundConnectionStatus.Connected);
+            .ReturnsAsync(new AddConnectionDialogResult(OutboundConnectionStatus.Connected));
 
         await vm.OpenAddConnectionCommand.ExecuteAsync(null);
 
-        dialogOpened.Should().BeTrue("clicking Add Connection must launch AddConnectionDialog via IWindowManager");
-        capturedConfigure.Should().NotBeNull("Add Connection dialog must be configured with active persona");
+        capturedPersonaId.Should().Be(_activePersonaId, "Add Connection dialog must be configured with active persona");
     }
 
     [Test]
     public async Task OpenPendingRequestsCommand_OpensPendingRequestsDialogViaWindowManager()
     {
         using var vm = CreateViewModel();
-        var dialogOpened = false;
-        Action<PendingRequestsPanelViewModel>? capturedConfigure = null;
+        PublicIdentityId capturedPersonaId = default;
 
         _windowManagerMock
-            .Setup(w => w.ShowDialogAsync<PendingRequestsPanelViewModel, object>(
-                It.IsAny<Action<PendingRequestsPanelViewModel>>(), null))
-            .Callback<Action<PendingRequestsPanelViewModel>?, object>((configure, _) =>
+            .Setup(w => w.ShowDialogAsync<PendingRequestsPanelViewModel, PublicIdentityId>(
+                It.IsAny<PublicIdentityId>(), null))
+            .Callback<PublicIdentityId, Avalonia.Controls.Window?>((id, _) =>
             {
-                dialogOpened = true;
-                capturedConfigure = configure;
+                capturedPersonaId = id;
             })
-            .ReturnsAsync(new object());
+            .Returns(Task.CompletedTask);
 
         _contactQueryMock
             .Setup(q => q.GetContactSummariesAsync(_activePersonaId, It.IsAny<CancellationToken>()))
@@ -177,48 +172,29 @@ public sealed class MainWindowViewModelTests
 
         await vm.OpenPendingRequestsCommand.ExecuteAsync(null);
 
-        dialogOpened.Should().BeTrue("clicking Pending Requests must launch PendingRequestsPanelViewModel via IWindowManager");
-        capturedConfigure.Should().NotBeNull("Pending Requests panel must be configured with active persona");
+        capturedPersonaId.Should().Be(_activePersonaId, "Pending Requests panel must be configured with active persona");
     }
 
     [Test]
     public async Task OpenShareInvitationCommand_ConfiguresShareInvitationDialogWithPersonaParameters()
     {
         using var vm = CreateViewModel();
-        var dialogOpened = false;
-        Action<ShareInvitationDialogViewModel>? capturedConfigure = null;
+        ShareInvitationDialogParams? capturedParams = null;
 
         _windowManagerMock
-            .Setup(w => w.ShowDialogAsync<ShareInvitationDialogViewModel, object>(
-                It.IsAny<Action<ShareInvitationDialogViewModel>>(), null))
-            .Callback<Action<ShareInvitationDialogViewModel>?, object>((configure, _) =>
+            .Setup(w => w.ShowDialogAsync<ShareInvitationDialogViewModel, ShareInvitationDialogParams>(
+                It.IsAny<ShareInvitationDialogParams>(), null))
+            .Callback<ShareInvitationDialogParams, Avalonia.Controls.Window?>((p, _) =>
             {
-                dialogOpened = true;
-                capturedConfigure = configure;
+                capturedParams = p;
             })
-            .ReturnsAsync(new object());
+            .Returns(Task.CompletedTask);
 
         await vm.OpenShareInvitationCommand.ExecuteAsync(null);
 
-        dialogOpened.Should().BeTrue("clicking Share My Invitation must launch ShareInvitationDialog via IWindowManager");
-        capturedConfigure.Should().NotBeNull("Share Invitation dialog must be configured with active persona parameters");
-
-        var mockCodec = new Mock<IPeerInvitationCodec>();
-        mockCodec.Setup(c => c.Encode(It.IsAny<PeerInvitationPayload>())).Returns("percolator://invite?test=1");
-        var mockClipboard = new Mock<IClipboardService>();
-        var mockQr = new Mock<IQrCodeGenerator>();
-
-        using var testVm = new ShareInvitationDialogViewModel(
-            mockCodec.Object,
-            mockClipboard.Object,
-            mockQr.Object,
-            NullLogger<ShareInvitationDialogViewModel>.Instance);
-
-        capturedConfigure!.Invoke(testVm);
-
-        testVm.BoundPort.Should().Be(5124, "bound port from active persona model must be passed to invitation dialog");
-        mockCodec.Verify(c => c.Encode(It.Is<PeerInvitationPayload>(p => p.IdentityId == _activePersonaId)),
-            Times.Once, "invitation payload must be encoded for active persona");
+        capturedParams.Should().NotBeNull("Share Invitation dialog must be configured with active persona parameters");
+        capturedParams!.IdentityId.Should().Be(_activePersonaId);
+        capturedParams.BoundPort.Should().Be(5124, "bound port from active persona model must be passed to invitation dialog");
     }
 
     [Test]

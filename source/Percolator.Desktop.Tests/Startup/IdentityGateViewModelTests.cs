@@ -319,11 +319,9 @@ public sealed class IdentityGateViewModelTests
 
         var card = Personas[0];
         _windows
-            .Setup(w => w.ShowDialogAsync<DeletePersonaDialogViewModel, bool>(
-                It.IsAny<Action<DeletePersonaDialogViewModel>?>(),
+            .Setup(w => w.ShowDialogAsync<DeletePersonaDialogViewModel, string, bool>(
+                card.DisplayName,
                 It.IsAny<Avalonia.Controls.Window?>()))
-            .Callback<Action<DeletePersonaDialogViewModel>?, Avalonia.Controls.Window?>(
-                (configure, _) => configure?.Invoke(new DeletePersonaDialogViewModel()))
             .ReturnsAsync(true);
         _directory
             .Setup(d => d.ShredAndDeleteAsync(
@@ -514,8 +512,8 @@ public sealed class IdentityGateViewModelTests
         var identityId = PublicIdentityId.New();
         var created = new PersonaDirectoryEntry(identityId, "Bob", 5100, null, false, 0);
         _windows
-            .Setup(w => w.ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
-                It.IsAny<Action<CreatePersonaDialogViewModel>?>(),
+            .Setup(w => w.ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorInput, PersonaEditorResult?>(
+                It.IsAny<PersonaEditorInput>(),
                 It.IsAny<Avalonia.Controls.Window?>()))
             .ReturnsAsync(new PersonaEditorResult(identityId, "Bob", 5100));
         _directory

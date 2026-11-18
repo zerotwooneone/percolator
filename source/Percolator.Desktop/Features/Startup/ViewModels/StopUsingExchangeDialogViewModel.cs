@@ -3,6 +3,8 @@
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;
 
 namespace Percolator.Desktop.Features.Startup.ViewModels;
@@ -11,22 +13,27 @@ namespace Percolator.Desktop.Features.Startup.ViewModels;
 /// "Stop using this Exchange?" confirmation for a persona unlink ([INV-DESKTOP-PRESENTATION-MODELS]).
 /// The copy states plainly that nothing leaves the device — held envelopes stay on the
 /// exchange until they expire. Self-hosted exchanges additionally offer a verifiable local
-/// purge of the vault-resident queue. The host window closes when <see cref="RequestClose"/>
-/// fires and reads <see cref="Result"/>.
+/// purge of the vault-resident queue.
 /// </summary>
 public partial class StopUsingExchangeDialogViewModel : ViewModelBase
 {
-    /// <summary>Raised when the dialog should close (confirm or cancel); the window owns closing.</summary>
-    public event EventHandler? RequestClose;
+    private readonly IDialogContext<StopUsingExchangeInput, StopUsingExchangeResult> _dialogContext;
 
-    /// <summary><c>true</c> when the user confirmed the unlink; <c>false</c> on cancel/close.</summary>
-    public bool Result { get; private set; }
+    public StopUsingExchangeDialogViewModel(IDialogContext<StopUsingExchangeInput, StopUsingExchangeResult> dialogContext)
+    {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
+
+        var input = dialogContext.Data;
+        PersonaName = input?.PersonaName ?? string.Empty;
+        ExchangeName = input?.ExchangeName ?? string.Empty;
+        CanPurgeQueue = input?.CanPurgeQueue ?? false;
+    }
 
     /// <summary>The persona that will stop collecting mail.</summary>
-    public string PersonaName { get; private set; } = string.Empty;
+    public string PersonaName { get; }
 
     /// <summary>The exchange being unlinked from.</summary>
-    public string ExchangeName { get; private set; } = string.Empty;
+    public string ExchangeName { get; }
 
     /// <summary>Body copy — no wire traffic, held envelopes persist until expiry.</summary>
     public string Message =>
@@ -36,38 +43,22 @@ public partial class StopUsingExchangeDialogViewModel : ViewModelBase
         "To erase all trust material permanently, shred the persona instead.";
 
     /// <summary>Only self-hosted exchanges expose the local queue purge option.</summary>
-    public bool CanPurgeQueue { get; private set; }
+    public bool CanPurgeQueue { get; }
 
     /// <summary>User opt-in: also empty this mailbox's stored envelopes (self-hosted only).</summary>
     [ObservableProperty]
     private bool _purgeQueuedEnvelopes;
 
-    /// <summary>Seeds the dialog before it opens.</summary>
-    public void Initialize(string personaName, string exchangeName, bool canPurgeQueue)
-    {
-        PersonaName = personaName ?? string.Empty;
-        ExchangeName = exchangeName ?? string.Empty;
-        CanPurgeQueue = canPurgeQueue;
-        PurgeQueuedEnvelopes = false;
-        Result = false;
-        OnPropertyChanged(nameof(PersonaName));
-        OnPropertyChanged(nameof(ExchangeName));
-        OnPropertyChanged(nameof(Message));
-        OnPropertyChanged(nameof(CanPurgeQueue));
-    }
-
     /// <summary>[ Stop using ] — confirms the local revocation.</summary>
     [RelayCommand]
     private void StopUsing()
     {
-        Result = true;
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Close(new StopUsingExchangeResult(Confirmed: true, PurgeQueuedEnvelopes: PurgeQueuedEnvelopes));
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        Result = false;
-        RequestClose?.Invoke(this, EventArgs.Empty);
+        _dialogContext.Cancel();
     }
 }

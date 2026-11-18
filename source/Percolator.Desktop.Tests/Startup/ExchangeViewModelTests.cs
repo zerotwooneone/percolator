@@ -81,12 +81,21 @@ public sealed class ExchangeViewModelTests
 
     // ---- Creation wizard ----
 
+    // ---- Creation wizard ----
+
+    private (ExchangeCreationViewModel Vm, Mock<IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?>> ContextMock) CreateWizard(IReadOnlyList<PersonaDirectoryEntry>? personas = null)
+    {
+        var contextMock = new Mock<IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?>>();
+        contextMock.SetupGet(c => c.Data).Returns(personas ?? Array.Empty<PersonaDirectoryEntry>());
+        var vm = new ExchangeCreationViewModel(contextMock.Object, _identicons);
+        return (vm, contextMock);
+    }
+
     [Test]
     public void Wizard_PersonaCheckboxes_DefaultUnchecked()
     {
         var personas = new[] { Persona("Alice"), Persona("Bob"), Persona("Carol") };
-        var wizard = new ExchangeCreationViewModel(_identicons);
-        wizard.Initialize(personas);
+        var (wizard, _) = CreateWizard(personas);
 
         wizard.CurrentStep.Should().Be(0);
         wizard.FramingMessage.Should().Contain("only open while Percolator is unlocked");
@@ -99,10 +108,10 @@ public sealed class ExchangeViewModelTests
     public void Wizard_Navigation_ProfileGateAndFinishResult()
     {
         var personas = new[] { Persona("Alice"), Persona("Bob") };
-        var wizard = new ExchangeCreationViewModel(_identicons);
-        wizard.Initialize(personas);
-        var closed = false;
-        wizard.RequestClose += (_, _) => closed = true;
+        var (wizard, contextMock) = CreateWizard(personas);
+        ExchangeCreationResult? closedResult = null;
+        contextMock.Setup(c => c.Close(It.IsAny<ExchangeCreationResult?>()))
+            .Callback<ExchangeCreationResult?>(r => closedResult = r);
 
         wizard.NextCommand.CanExecute(null).Should().BeTrue("framing step advances freely");
         wizard.NextCommand.Execute(null);
@@ -118,24 +127,26 @@ public sealed class ExchangeViewModelTests
         wizard.LinkablePersonas[1].IsLinked = true;
         wizard.FinishCommand.Execute(null);
 
-        closed.Should().BeTrue();
-        wizard.Result.Should().NotBeNull();
-        wizard.Result!.DisplayName.Should().Be("My Post-Office");
-        wizard.Result.LinkedPersonaIds.Should().ContainSingle()
+        closedResult.Should().NotBeNull();
+        closedResult!.DisplayName.Should().Be("My Post-Office");
+        closedResult.LinkedPersonaIds.Should().ContainSingle()
             .Which.Should().Be(personas[1].IdentityId);
     }
 
     [Test]
     public void Wizard_FinishFromProfileStep_SkipsLinking()
     {
-        var wizard = new ExchangeCreationViewModel(_identicons);
-        wizard.Initialize(new[] { Persona("Alice") });
+        var (wizard, contextMock) = CreateWizard(new[] { Persona("Alice") });
+        ExchangeCreationResult? closedResult = null;
+        contextMock.Setup(c => c.Close(It.IsAny<ExchangeCreationResult?>()))
+            .Callback<ExchangeCreationResult?>(r => closedResult = r);
+
         wizard.NextCommand.Execute(null);
         wizard.DisplayName = "Solo Exchange";
         wizard.FinishCommand.Execute(null);
 
-        wizard.Result.Should().NotBeNull();
-        wizard.Result!.LinkedPersonaIds.Should().BeEmpty(
+        closedResult.Should().NotBeNull();
+        closedResult!.LinkedPersonaIds.Should().BeEmpty(
             "an exchange can launch with zero linked personas");
     }
 
@@ -144,19 +155,23 @@ public sealed class ExchangeViewModelTests
     private static (
         ExchangeManageViewModel vm,
         Mock<IExchangeDirectory> exchanges,
-        Mock<IWindowManager> windows) ManageFixture(
+        Mock<IWindowManager> windows,
+        Mock<IDialogContext<ExchangeManageInput, bool>> contextMock) ManageFixture(
             IReadOnlyList<PersonaDirectoryEntry> personas,
             ExchangeTileViewModel tile)
     {
         var exchanges = new Mock<IExchangeDirectory>(MockBehavior.Strict);
         var windows = new Mock<IWindowManager>(MockBehavior.Strict);
+        var contextMock = new Mock<IDialogContext<ExchangeManageInput, bool>>();
+        contextMock.SetupGet(c => c.Data).Returns(new ExchangeManageInput(tile, personas));
+
         var vm = new ExchangeManageViewModel(
+            contextMock.Object,
             exchanges.Object,
             windows.Object,
             new IdenticonGenerator(),
             NullLogger<ExchangeManageViewModel>.Instance);
-        vm.Initialize(tile, personas);
-        return (vm, exchanges, windows);
+        return (vm, exchanges, windows, contextMock);
     }
 
     [Test]
@@ -165,7 +180,7 @@ public sealed class ExchangeViewModelTests
         var personas = new[] { Persona("Alice"), Persona("Bob") };
         var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, _) = ManageFixture(personas, tile);
+        var (vm, exchanges, _, _) = ManageFixture(personas, tile);
 
         vm.Personas[0].IsLinked.Should().BeTrue("already-linked personas arrive checked");
         vm.Personas[1].IsLinked.Should().BeFalse();
@@ -195,22 +210,13 @@ public sealed class ExchangeViewModelTests
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Hub", linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, windows) = ManageFixture(personas, tile);
+        var (vm, exchanges, windows, _) = ManageFixture(personas, tile);
 
         windows
-            .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, bool>(
-                It.IsAny<Action<StopUsingExchangeDialogViewModel>?>(),
+            .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, StopUsingExchangeInput, StopUsingExchangeResult>(
+                It.Is<StopUsingExchangeInput>(i => i.CanPurgeQueue),
                 It.IsAny<Avalonia.Controls.Window?>()))
-            .Callback<Action<StopUsingExchangeDialogViewModel>?, Avalonia.Controls.Window?>(
-                (configure, _) =>
-                {
-                    var dialog = new StopUsingExchangeDialogViewModel();
-                    configure?.Invoke(dialog);
-                    dialog.CanPurgeQueue.Should().BeTrue(
-                        "self-hosted exchanges expose the local queue purge option");
-                    dialog.PurgeQueuedEnvelopes = true;
-                })
-            .ReturnsAsync(true);
+            .ReturnsAsync(new StopUsingExchangeResult(Confirmed: true, PurgeQueuedEnvelopes: true));
         exchanges
             .Setup(e => e.UnlinkPersonaAsync(
                 It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
@@ -238,13 +244,13 @@ public sealed class ExchangeViewModelTests
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Hub", selfHosted: false, linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, windows) = ManageFixture(personas, tile);
+        var (vm, exchanges, windows, _) = ManageFixture(personas, tile);
 
         windows
-            .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, bool>(
-                It.IsAny<Action<StopUsingExchangeDialogViewModel>?>(),
+            .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, StopUsingExchangeInput, StopUsingExchangeResult>(
+                It.IsAny<StopUsingExchangeInput>(),
                 It.IsAny<Avalonia.Controls.Window?>()))
-            .ReturnsAsync(false);
+            .ReturnsAsync(new StopUsingExchangeResult(Confirmed: false, PurgeQueuedEnvelopes: false));
 
         vm.Personas[0].IsLinked = false;
         await vm.TogglePersonaCommand.ExecutionTask!;
@@ -265,24 +271,22 @@ public sealed class ExchangeViewModelTests
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Remote", selfHosted: false, linkedPersonas: personas[0].IdentityId.Value);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, _, windows) = ManageFixture(personas, tile);
+        var (vm, _, windows, _) = ManageFixture(personas, tile);
 
+        StopUsingExchangeInput? capturedInput = null;
         windows
-            .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, bool>(
-                It.IsAny<Action<StopUsingExchangeDialogViewModel>?>(),
+            .Setup(w => w.ShowDialogAsync<StopUsingExchangeDialogViewModel, StopUsingExchangeInput, StopUsingExchangeResult>(
+                It.IsAny<StopUsingExchangeInput>(),
                 It.IsAny<Avalonia.Controls.Window?>()))
-            .Callback<Action<StopUsingExchangeDialogViewModel>?, Avalonia.Controls.Window?>(
-                (configure, _) =>
-                {
-                    var dialog = new StopUsingExchangeDialogViewModel();
-                    configure?.Invoke(dialog);
-                    dialog.CanPurgeQueue.Should().BeFalse(
-                        "remote exchanges never expose a queue purge — their mail is not in this vault");
-                })
-            .ReturnsAsync(false);
+            .Callback<StopUsingExchangeInput, Avalonia.Controls.Window?>((input, _) => capturedInput = input)
+            .ReturnsAsync(new StopUsingExchangeResult(Confirmed: false, PurgeQueuedEnvelopes: false));
 
         vm.Personas[0].IsLinked = false;
         await vm.TogglePersonaCommand.ExecutionTask!;
+
+        capturedInput.Should().NotBeNull();
+        capturedInput!.CanPurgeQueue.Should().BeFalse(
+            "remote exchanges never expose a queue purge — their mail is not in this vault");
     }
 
     [Test]
@@ -291,23 +295,13 @@ public sealed class ExchangeViewModelTests
         var personas = new[] { Persona("Alice") };
         var entry = Entry("Hub", port: 5200);
         var tile = new ExchangeTileViewModel(entry, Array.Empty<PersonaAvatarChip>(), Avatar());
-        var (vm, exchanges, windows) = ManageFixture(personas, tile);
+        var (vm, exchanges, windows, contextMock) = ManageFixture(personas, tile);
 
-        CreatePersonaDialogViewModel? dialog = null;
         windows
-            .Setup(w => w.ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorResult?>(
-                It.IsAny<Action<CreatePersonaDialogViewModel>?>(),
+            .Setup(w => w.ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorInput, PersonaEditorResult?>(
+                It.IsAny<PersonaEditorInput>(),
                 It.IsAny<Avalonia.Controls.Window?>()))
-            .Callback<Action<CreatePersonaDialogViewModel>?, Avalonia.Controls.Window?>(
-                (configure, _) =>
-                {
-                    dialog = new CreatePersonaDialogViewModel(new IdenticonGenerator());
-                    configure?.Invoke(dialog);
-                    dialog.DisplayName = "Renamed Hub";
-                    dialog.PreferredPort = 5300;
-                    dialog.SaveCommand.Execute(null);
-                })
-            .ReturnsAsync(() => dialog!.Result);
+            .ReturnsAsync(new PersonaEditorResult(null, "Renamed Hub", 5300));
         exchanges
             .Setup(e => e.UpdateSelfHostedProfileAsync(
                 It.Is<PublicIdentityId>(r => r.Value == tile.RelayIdentityId),
@@ -327,7 +321,7 @@ public sealed class ExchangeViewModelTests
             "the rename + port must flow to the vault through the directory");
         vm.ExchangeDisplayName.Should().Be("Renamed Hub");
         vm.DoneCommand.Execute(null);
-        vm.Result.Should().BeTrue("a saved profile edit must flag the tile for refresh");
+        contextMock.Verify(c => c.Close(true), Times.Once, "a saved profile edit must flag the tile for refresh");
     }
 
     // ---- Gate: onboarding + launch provisioning ----

@@ -97,8 +97,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (CurrentPersona is not { } persona) return;
 
-        await _windowManager.ShowDialogAsync<AddConnectionDialogViewModel, OutboundConnectionStatus>(
-            configure: vm => vm.Initialize(persona.IdentityId));
+        await _windowManager.ShowDialogAsync<AddConnectionDialogViewModel, PublicIdentityId, AddConnectionDialogResult>(persona.IdentityId);
     }
 
     [RelayCommand]
@@ -106,10 +105,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (CurrentPersona is not { } persona) return;
 
-        await _windowManager.ShowDialogAsync<PendingRequestsPanelViewModel, object>(configure: vm =>
-        {
-            _ = vm.InitializeAsync(persona.IdentityId);
-        });
+        await _windowManager.ShowDialogAsync<PendingRequestsPanelViewModel, PublicIdentityId>(persona.IdentityId);
         await RefreshPendingCountAsync();
     }
 
@@ -118,18 +114,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (CurrentPersona is not { } persona) return;
 
-        var routingToken = BlindedRoutingToken.New();
-        var deliveryToken = DeliveryToken.GenerateRandom();
+        var dialogParams = new ShareInvitationDialogParams(
+            IdentityId: persona.IdentityId,
+            RoutingToken: BlindedRoutingToken.New(),
+            DeliveryToken: DeliveryToken.GenerateRandom(),
+            EndpointHosts: new[] { "127.0.0.1" },
+            BoundPort: persona.BoundPort);
 
-        await _windowManager.ShowDialogAsync<ShareInvitationDialogViewModel, object>(configure: vm =>
-        {
-            vm.Initialize(
-                identityId: persona.IdentityId,
-                routingToken: routingToken,
-                deliveryToken: deliveryToken,
-                endpointHosts: new[] { "127.0.0.1" },
-                boundPort: persona.BoundPort);
-        });
+        await _windowManager.ShowDialogAsync<ShareInvitationDialogViewModel, ShareInvitationDialogParams>(dialogParams);
     }
 
     [RelayCommand]
