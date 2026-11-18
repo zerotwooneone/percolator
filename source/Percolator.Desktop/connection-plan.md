@@ -30,16 +30,21 @@ Implementation Gate: UNLOCKED
 | Application | `PeerInvitationCodec` | `Percolator.Application/Invitations/PeerInvitationCodec.cs` | Singleton |
 | Application | `IPeerConnectionService` | `Percolator.PluginSdk/IPeerConnectionService.cs` | Scoped |
 | Application | `PeerConnectionService` | `Percolator.Application/Services/PeerConnectionService.cs` | Scoped |
+| Application | `OutboundConnectionStatus` | `Percolator.Application/Connections/OutboundConnectionStatus.cs` | Transient (Enum) |
+| Application | `OutboundConnectionResult` | `Percolator.Application/Connections/OutboundConnectionResult.cs` | Transient (Record) |
+| Application | `IOutboundConnectionWorkflow` | `Percolator.Application/Connections/IOutboundConnectionWorkflow.cs` | Scoped |
+| Application | `OutboundConnectionWorkflow` | `Percolator.Application/Connections/OutboundConnectionWorkflow.cs` | Scoped |
 | Infrastructure | `PeerTransportServerOptions` | `Percolator.Infrastructure/Transport/PeerTransportServerOptions.cs` | Singleton |
 | Infrastructure | `TransportCertificateSanBuilder` | `Percolator.Infrastructure/Transport/TransportCertificateSanBuilder.cs` | Static (Internal Helper) |
 | Simulator | `ISimulatorChaosController` | `Percolator.Simulator/Features/Chaos/ISimulatorChaosController.cs` | Singleton |
 | Simulator | `SimulatorChaosController` | `Percolator.Simulator/Features/Chaos/SimulatorChaosController.cs` | Singleton |
+| Simulator | `SimulatorChaosTransportDispatcherDecorator` | `Percolator.Simulator/Features/Chaos/SimulatorChaosTransportDispatcherDecorator.cs` | Scoped (Egress Pipeline) |
+| Simulator | `SimulatorOutboxFlushingIngressPipelineDecorator` | `Percolator.Simulator/Features/Topology/SimulatorOutboxFlushingIngressPipelineDecorator.cs` | Scoped (Ingress Pipeline) |
 | Simulator | `ChaosRelayMailboxCapabilityStoreDecorator` | `Percolator.Simulator/Features/Chaos/ChaosRelayMailboxCapabilityStoreDecorator.cs` | Scoped / Singleton |
-| Simulator | `ChaosPendingIngressStoreDecorator` | `Percolator.Simulator/Features/Chaos/ChaosPendingIngressStoreDecorator.cs` | Scoped |
 | Simulator | `SimulatorAdvertisedHostKind` | `Percolator.Simulator/Features/Topology/SimulatorAdvertisedHostKind.cs` | Transient (Enum) |
-| Simulator | `PeerConnectionTargetKind` | `Percolator.Simulator/Features/Topology/PeerConnectionTargetKind.cs` | Transient (Enum) |
-| Simulator | `PersonaInvitationExportFlyoutViewModel` | `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs` | Transient |
 | Simulator | `PersonaConnectPeerFlyoutViewModel` | `Percolator.Simulator/Features/Topology/PersonaConnectPeerFlyoutViewModel.cs` | Transient |
+| Simulator | `PersonaInvitationExportFlyoutViewModel` | `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs` | Transient |
+| Simulator | `RelayRegistrationFlyoutViewModel` | `Percolator.Simulator/Features/Topology/RelayRegistrationFlyoutViewModel.cs` | Transient |
 | Simulator | `RelayEndpointExportFlyoutViewModel` | `Percolator.Simulator/Features/RelayedChat/RelayEndpointExportFlyoutViewModel.cs` | Transient |
 | Desktop | `MainWindowViewModel` | `Percolator.Desktop/Features/Shell/ViewModels/MainWindowViewModel.cs` | Transient |
 | Desktop | `PendingRequestsPanelWindow` | `Percolator.Desktop/Features/Transports/Views/PendingRequestsPanelWindow.axaml` | Transient (Window) |
@@ -103,145 +108,172 @@ Created `ShareInvitationDialog` and `ShareInvitationDialogViewModel` to generate
 ---
 
 ### CONN-11 ✅ Desktop Shell Realignment & Navigation Rail Dialog Orchestration (`shell-flow.md`)
-
-- **Specification Governance:** Strictly enforces layout, ordering, and privacy invariants from `Percolator.Desktop/shell-flow.md`. Wires the Left Sidebar navigation rail to open `AddConnectionDialog`, `PendingRequestsPanelWindow`, and `ShareInvitationDialog` via `IWindowManager.ShowDialogAsync`.
-
-- **Files:**
-  - `Create`: `Percolator.Desktop/Features/Transports/Views/PendingRequestsPanelWindow.axaml` & `Percolator.Desktop/Features/Transports/Views/PendingRequestsPanelWindow.axaml.cs`
-  - `Modify`: `Percolator.Desktop/Features/Shell/Views/MainWindow.axaml` (~L45-85, realign Left Sidebar Grid rows per `shell-flow.md`, bind `OpenAddConnectionCommand`, `OpenPendingRequestsCommand`, `OpenShareInvitationCommand`)
-  - `Modify`: `Percolator.Desktop/Features/Shell/ViewModels/MainWindowViewModel.cs` (inject `IWindowManager`, `IPeerContactQueryService`, `IActiveIdentitySet`; add commands; bind `PendingRequestCount`)
-  - `Modify`: `Percolator.Desktop/Common/Session/DesktopSessionServiceCollectionExtensions.cs` (register `MainWindowViewModel` with scoped session dependencies)
-
-- **Contracts & ViewModel:**
-  ```csharp
-  namespace Percolator.Desktop.Features.Shell.ViewModels;
-
-  public sealed partial class MainWindowViewModel : ViewModelBase
-  {
-      private readonly IWindowManager _windowManager;
-      private readonly IPeerContactQueryService _contactQueryService;
-      private readonly IActiveIdentitySet _activeIdentitySet;
-
-      [ObservableProperty] private bool _isInspectorOpen;
-      [ObservableProperty] private bool _isChatsSidebarOpen = true;
-      [ObservableProperty] private int _pendingRequestCount;
-      [ObservableProperty] private string _activeConversationTitle = string.Empty;
-
-      public bool HasPendingRequests => PendingRequestCount > 0;
-
-      public MainWindowViewModel(
-          IWindowManager windowManager,
-          IPeerContactQueryService contactQueryService,
-          IActiveIdentitySet activeIdentitySet)
-      {
-          _windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
-          _contactQueryService = contactQueryService ?? throw new ArgumentNullException(nameof(contactQueryService));
-          _activeIdentitySet = activeIdentitySet ?? throw new ArgumentNullException(nameof(activeIdentitySet));
-      }
-
-      [RelayCommand]
-      private async Task OpenAddConnectionAsync()
-      {
-          await _windowManager.ShowDialogAsync<AddConnectionDialogViewModel, OutboundConnectionStatus>();
-      }
-
-      [RelayCommand]
-      private async Task OpenPendingRequestsAsync()
-      {
-          await _windowManager.ShowDialogAsync<PendingRequestsPanelViewModel, object>();
-          await RefreshPendingCountAsync();
-      }
-
-      [RelayCommand]
-      private async Task OpenShareInvitationAsync()
-      {
-          await _windowManager.ShowDialogAsync<ShareInvitationDialogViewModel, object>();
-      }
-
-      [RelayCommand]
-      private void ToggleInspector() => IsInspectorOpen = !IsInspectorOpen;
-
-      [RelayCommand]
-      private void ToggleChatsSidebar() => IsChatsSidebarOpen = !IsChatsSidebarOpen;
-
-      [RelayCommand]
-      private async Task RefreshPendingCountAsync()
-      {
-          var activePersona = _activeIdentitySet.PrimaryActiveIdentity;
-          if (activePersona == null) return;
-          var contacts = await _contactQueryService.GetContactSummariesAsync(activePersona.Id);
-          PendingRequestCount = contacts.Count(c => c.State == ContactState.PendingApproval);
-      }
-  }
-  ```
-
-- **Algorithm:**
-  1. **PendingRequestsPanelWindow Creation:**
-     - Creates `PendingRequestsPanelWindow.axaml` (Window) hosting `<views:PendingRequestsPanelView />`. Matches `WindowManager.ResolveWindowByConvention` naming convention for `PendingRequestsPanelViewModel`.
-     - Window properties: `Title="Pending Connection Requests"`, `Width="480"`, `Height="560"`, `SizeToContent="Manual"`, `CanResize="False"`, `WindowStartupLocation="CenterOwner"`.
-  2. **Left Sidebar Realignment (`shell-flow.md`):**
-     - Left sidebar `Grid` configured with `RowDefinitions="Auto,*,Auto,Auto,Auto"`:
-       - Row 0 (Top Zone): `[Direct Messages]` button with chat bubble icon (`ui:SymbolIcon Symbol="Chat"`), tooltip *"Direct Messages"*. Bound to `SelectDirectMessagesCommand` (switches conversation list to DMs).
-       - Row 1 (Middle Zone): Connected Relays list (displays connected relay icons, or empty state placeholder *"Add a relay to discover public groups and post offices"*).
-       - Row 2 (Bottom Zone, Top): `+` ("Add Connection") button anchored strictly above `[Pending Requests]`. Bound to `OpenAddConnectionCommand`.
-       - Row 3 (Bottom Zone, Middle): `[Pending Requests]` button with silent notification indicator badge. Anchored strictly above Avatar per `shell-flow.md` to prevent spam from distracting the user (`INV-UNSOLICITED-CONNECTION-SILENCE`). Bound to `OpenPendingRequestsCommand`.
-       - Row 4 (Bottom Zone, Bottom): User Avatar and compact display name. Bound to `OpenShareInvitationCommand`.
-  3. **Inbound Consent Gate & Privacy Silence:**
-     - Handshake offers arrive silently without OS popups or toasts (`INV-UNSOLICITED-CONNECTION-SILENCE`).
-     - `MainWindowViewModel.RefreshPendingCountAsync` queries `IPeerContactQueryService` to illuminate the sidebar badge.
-     - Clicking `[Pending Requests]` opens `PendingRequestsPanelWindow` via `_windowManager.ShowDialogAsync`, allowing the user to Accept, Reject, or Block.
-
-- **Verify:**
-  - `Percolator.Desktop.Tests/Features/Shell/MainWindowViewModelTests.cs`:
-    - `OpenAddConnectionCommand_OpensAddConnectionDialogViaWindowManager`
-    - `OpenPendingRequestsCommand_OpensPendingRequestsPanelWindowAndRefreshesCount`
-    - `OpenShareInvitationCommand_OpensShareInvitationDialogViaWindowManager`
-    - `RefreshPendingCountAsync_WithPendingApprovals_UpdatesCountAndHasPendingFlag`
-    - `RefreshPendingCountAsync_WithNoPending_HasPendingRequestsIsFalse`
-    - `ToggleInspector_InvertsIsInspectorOpenState`
-    - `ToggleChatsSidebar_InvertsIsChatsSidebarOpenState`
-  - Command: `dotnet test Percolator.Desktop.Tests --filter "FullyQualifiedName~MainWindowViewModel"`
-
-- **QMS:** [`DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`], [`INV-UNSOLICITED-CONNECTION-SILENCE`], [`SYS-CONTACT-CONSENT-GATE`], [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`], [`HAZ-UNSOLICITED-WIRE-SPAM`]
+Realigned the Desktop Left Sidebar navigation rail grid per `shell-flow.md` layout invariants, wiring `AddConnectionDialog`, `PendingRequestsPanelWindow`, and `ShareInvitationDialog` through `IWindowManager.ShowDialogAsync`. Wired dynamic pending request count badges while enforcing inbound privacy silence (`INV-UNSOLICITED-CONNECTION-SILENCE`).
 
 ---
 
 ### CONN-12 ✅ Simulator Dual-Mode Peer & Relay Interoperability (In-World & External with IP Override)
+Implemented dual-mode candidate host resolution (Auto LAN IP, Loopback, and Custom Host) and port privacy presets for simulated persona invitation URLs and relay endpoints. Added flyouts on persona and relay cards to export `percolator://invite?...` URLs and connect to peers or register relays across real network interfaces.
 
-- **Specification Governance:** Refactors the Simulator topology UI so that personas and relays can seamlessly interoperate both internally (between simulated nodes in the same world) and externally (across real TCP/TLS sockets to `Percolator.Desktop` or another network host), with customizable IP address and port configuration.
+---
+
+### CONN-12b ⬜ Simulator Architecture Realignment: Ingress/Egress Wire Pipelines, Application Outbound Workflow & High-Density Card UI
+
+- **Specification Governance:** Aligns the Simulator's connection mechanics with Desktop by promoting outbound connection orchestration to a shared Application-layer workflow (`IOutboundConnectionWorkflow`). Intercepts Ingress and Egress at canonical transport seams (`ITransportDispatcher` and `IInboundIngressPipeline`), enabling fault injection (chaos envelope drops, latency, corruption), autopilot outbox auto-flushing, and wire telemetry without touching production code or hacking SQLite repositories (`ChaosPendingIngressStoreDecorator`). Eliminates coordinator database backdoors: removes manual `PeerContact` insertions from `DirectHandshakeOrchestrator` and `DirectChannel` insertions from `DirectChatCoordinator.EnsureChannelAsync`. Preserves multi-node developer utility ergonomics: eliminates modal dialog lockout by retaining non-blocking, high-density Avalonia Flyouts (`🔗 Connect Peer ▼`, `📋 Share Invite ▼`, `📬 Relay ▼`) on the card toolbar, while tucking away 14 checkboxes/actions (Capabilities, Autopilot, PreKey publish, Reroll) into a unified `⚙️ Persona Settings ▼` header menu.
 
 - **Files:**
-  - `Create`: `Percolator.Simulator/Features/Topology/SimulatorAdvertisedHostKind.cs`
-  - `Create`: `Percolator.Simulator/Features/Topology/PeerConnectionTargetKind.cs`
-  - `Create`: `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs`
-  - `Create`: `Percolator.Simulator/Features/Topology/PersonaConnectPeerFlyoutViewModel.cs`
-  - `Create`: `Percolator.Simulator/Features/RelayedChat/RelayEndpointExportFlyoutViewModel.cs`
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardView.axaml` & `PersonaCardView.axaml.cs` (~L68, add "📋 Share Invite" and "🔗 Connect Peer" flyout buttons)
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs` (bind invitation export, peer connection, and relay registration flyouts)
-  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayCardView.axaml` & `RelayCardView.axaml.cs` (add "📋 Copy Endpoint" flyout button)
-  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayCardViewModel.cs` (bind endpoint export flyout)
+  - `Create`: `Percolator.Application/Connections/OutboundConnectionStatus.cs`
+  - `Create`: `Percolator.Application/Connections/OutboundConnectionResult.cs`
+  - `Create`: `Percolator.Application/Connections/IOutboundConnectionWorkflow.cs`
+  - `Create`: `Percolator.Application/Connections/OutboundConnectionWorkflow.cs`
+  - `Create`: `Percolator.Simulator/Features/Chaos/SimulatorChaosTransportDispatcherDecorator.cs`
+  - `Create`: `Percolator.Simulator/Features/Topology/RelayRegistrationFlyoutViewModel.cs`
+  - `Modify`: `Percolator.Application/DependencyInjection/ApplicationServiceCollectionExtensions.cs` (register `IOutboundConnectionWorkflow` as Scoped)
+  - `Modify`: `Percolator.Desktop/Features/Transports/ViewModels/AddConnectionDialogViewModel.cs` (delegate direct peer connection to `IOutboundConnectionWorkflow`)
+  - `Modify`: `Percolator.Desktop/Features/Transports/Models/AddConnectionDialogModels.cs` (reference `Percolator.Application.Connections.OutboundConnectionStatus`)
+  - `Modify`: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (decorate `ITransportDispatcher` with `SimulatorChaosTransportDispatcherDecorator`, decorate `IInboundIngressPipeline` with `SimulatorOutboxFlushingIngressPipelineDecorator`, remove `ChaosPendingIngressStoreDecorator`)
+  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardView.axaml` (realign header with `⚙️ Persona Settings ▼` menu; consolidate Row 1 into 3 compact flyout buttons: `🔗 Connect Peer ▼`, `📋 Share Invite ▼`, `📬 Relay ▼`)
+  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs` (bind settings dropdown, wire flyout view models)
+  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaConnectPeerFlyoutViewModel.cs` (dispatch through `IOutboundConnectionWorkflow`, auto-fill payload from selected in-world peer)
+  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs` (add 1-click clipboard copy with port/host presets)
+  - `Modify`: `Percolator.Simulator/Features/DirectChat/DirectHandshakeOrchestrator.cs` (dispatch outbound handshakes through `IOutboundConnectionWorkflow`, eliminate manual `PeerContact` DB insertion)
+  - `Modify`: `Percolator.Simulator/Features/DirectChat/DirectChatCoordinator.cs` (eliminate `EnsureChannelAsync` manual DB insertion)
+  - `Modify`: `Percolator.Simulator/Features/Scenarios/ScenarioRunnerService.cs` (invoke `IOutboundConnectionWorkflow` for scenario handshakes)
+  - `Delete`: `Percolator.Simulator/Features/Topology/PeerConnectionTargetKind.cs`
+  - `Delete`: `Percolator.Simulator/Features/Topology/SimulatedPeerConnectionService.cs`
+  - `Delete`: `Percolator.Simulator/Features/Chaos/ChaosPendingIngressStoreDecorator.cs`
+  - `Create`: `Percolator.Application.Tests/Connections/OutboundConnectionWorkflowTests.cs`
+  - `Create`: `Percolator.Simulator.Tests/Chaos/SimulatorChaosTransportDispatcherDecoratorTests.cs`
+  - `Modify`: `Percolator.Simulator.Tests/Topology/PersonaConnectPeerFlyoutViewModelTests.cs`
+  - `Modify`: `Percolator.Simulator.Tests/Topology/PersonaInvitationExportFlyoutViewModelTests.cs`
 
 - **Contracts & ViewModels:**
   ```csharp
-  namespace Percolator.Simulator.Features.Topology;
+  namespace Percolator.Application.Connections;
 
-  public enum SimulatorAdvertisedHostKind
+  public enum OutboundConnectionStatus
   {
-      AutoLanIp = 0,
-      Loopback = 1,
-      Custom = 2
+      Connected = 0,
+      PendingOffline = 1
   }
 
-  public enum PeerConnectionTargetKind
+  public sealed record OutboundConnectionResult(
+      OutboundConnectionStatus Status,
+      PublicIdentityId PeerId,
+      PeerInvitationPayload Invitation,
+      Uri ResolvedEndpoint);
+
+  public interface IOutboundConnectionWorkflow
   {
-      InWorldSimulatedNode = 0,
-      ExternalInvitationCode = 1
+      Task<DomainResult<OutboundConnectionResult>> ConnectAsync(
+          PeerInvitationPayload payload,
+          TimeSpan probeTimeout,
+          CancellationToken ct = default);
+  }
+
+  public sealed class OutboundConnectionWorkflow : IOutboundConnectionWorkflow
+  {
+      private readonly IPeerConnectionService _connectionService;
+      private readonly ILogger<OutboundConnectionWorkflow> _logger;
+
+      public OutboundConnectionWorkflow(
+          IPeerConnectionService connectionService,
+          ILogger<OutboundConnectionWorkflow> logger)
+      {
+          _connectionService = connectionService ?? throw new ArgumentNullException(nameof(connectionService));
+          _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+      }
+
+      public async Task<DomainResult<OutboundConnectionResult>> ConnectAsync(
+          PeerInvitationPayload payload,
+          TimeSpan probeTimeout,
+          CancellationToken ct = default)
+      {
+          // 1. Resolve direct URI from payload.EndpointHosts and PortRange
+          // 2. Execute _connectionService.ConnectToDirectPeerAsync with timeout cts
+          // 3. If success: return OutboundConnectionResult(Connected, ...)
+          // 4. If probe failure / timeout: return OutboundConnectionResult(PendingOffline, ...)
+      }
+  }
+
+  namespace Percolator.Simulator.Features.Chaos;
+
+  public sealed class SimulatorChaosTransportDispatcherDecorator : ITransportDispatcher
+  {
+      private readonly ITransportDispatcher _inner;
+      private readonly ISimulatorChaosController _chaos;
+      private readonly SimulatedNodeId _nodeId;
+      private readonly ISimulatorLogSink _logSink;
+
+      public SimulatorChaosTransportDispatcherDecorator(
+          ITransportDispatcher inner,
+          ISimulatorChaosController chaos,
+          SimulatedNodeId nodeId,
+          ISimulatorLogSink logSink)
+      {
+          _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+          _chaos = chaos ?? throw new ArgumentNullException(nameof(chaos));
+          _nodeId = nodeId;
+          _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
+      }
+
+      public async ValueTask<DomainResult> SendAsync(OutboxJob job, CancellationToken ct = default)
+      {
+          var fault = _chaos.EvaluateDeliveryFault(_nodeId);
+          if (fault == ChaosFaultAction.DropEnvelope)
+          {
+              _logSink.Log(new SimulatorLogEntry(DateTimeOffset.UtcNow, LogLevel.Warning, _nodeId.ToString(), _nodeId, "Chaos", "Outbound envelope dropped by chaos fault injection."));
+              return DomainResult.Failure(new DomainError("CHAOS_DROPPED", "Envelope dropped by simulator chaos controller."));
+          }
+          if (fault == ChaosFaultAction.InjectArtificialDelay)
+          {
+              await Task.Delay(500, ct).ConfigureAwait(false);
+          }
+          return await _inner.SendAsync(job, ct).ConfigureAwait(false);
+      }
+  }
+
+  namespace Percolator.Simulator.Features.Topology;
+
+  public sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
+  {
+      private readonly ISimulatedPersonaHost _host;
+      private readonly ISimulatedWorldStateService _worldState;
+      private readonly IPeerInvitationCodec _codec;
+      private readonly IOutboundConnectionWorkflow _connectionWorkflow;
+
+      [ObservableProperty] private int _selectedTabIndex;
+      [ObservableProperty] private IReadOnlyList<SimulatedNodeSummary> _availableInWorldPersonas = [];
+      [ObservableProperty] private SimulatedNodeSummary? _selectedInWorldPersona;
+      [ObservableProperty] private string _externalInvitationInput = string.Empty;
+      [ObservableProperty] private bool _isConnecting;
+      [ObservableProperty] private string? _errorMessage;
+
+      [RelayCommand] private Task ConnectAsync();
+  }
+
+  public sealed partial class RelayRegistrationFlyoutViewModel : ViewModelBase
+  {
+      private readonly ISimulatedPersonaHost _host;
+      private readonly ISimulatedWorldStateService _worldState;
+      private readonly IRelayMailboxProvisioner _relayProvisioner;
+
+      [ObservableProperty] private int _selectedTabIndex;
+      [ObservableProperty] private IReadOnlyList<SimulatedNodeSummary> _availableInWorldRelays = [];
+      [ObservableProperty] private SimulatedNodeSummary? _selectedInWorldRelay;
+      [ObservableProperty] private string _externalRelayInput = string.Empty;
+      [ObservableProperty] private bool _seedPreKeysToRelay;
+      [ObservableProperty] private bool _isRegistering;
+      [ObservableProperty] private string? _errorMessage;
+
+      [RelayCommand] private Task RegisterRelayAsync();
   }
 
   public sealed partial class PersonaInvitationExportFlyoutViewModel : ViewModelBase
   {
       private readonly ISimulatedPersonaHost _host;
       private readonly IPeerInvitationCodec _codec;
+      private readonly IClipboardService _clipboard;
 
       [ObservableProperty] private SimulatorAdvertisedHostKind _selectedHostKind;
       [ObservableProperty] private string _detectedLanIp = string.Empty;
@@ -251,100 +283,44 @@ Created `ShareInvitationDialog` and `ShareInvitationDialogViewModel` to generate
       [ObservableProperty] private int _customPortMax = 5120;
       [ObservableProperty] private string _generatedInvitationUrl = string.Empty;
 
-      public PersonaInvitationExportFlyoutViewModel(
-          ISimulatedPersonaHost host,
-          IPeerInvitationCodec codec)
-      {
-          _host = host ?? throw new ArgumentNullException(nameof(host));
-          _codec = codec ?? throw new ArgumentNullException(nameof(codec));
-      }
-
       [RelayCommand] private Task CopyInvitationUrlAsync();
       [RelayCommand] private void UpdateGeneratedInvitation();
-  }
-
-  public sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
-  {
-      private readonly ISimulatedPersonaHost _host;
-      private readonly ISimulatedWorldStateService _worldState;
-      private readonly IPeerInvitationCodec _codec;
-      private readonly IPeerConnectionService _peerConnectionService;
-
-      [ObservableProperty] private PeerConnectionTargetKind _targetKind;
-      [ObservableProperty] private IReadOnlyList<SimulatedNodeSummary> _availableInWorldPersonas = [];
-      [ObservableProperty] private SimulatedNodeSummary? _selectedInWorldTarget;
-      [ObservableProperty] private string _externalInvitationInput = string.Empty;
-      [ObservableProperty] private bool _isConnecting;
-      [ObservableProperty] private string? _errorMessage;
-
-      public PersonaConnectPeerFlyoutViewModel(
-          ISimulatedPersonaHost host,
-          ISimulatedWorldStateService worldState,
-          IPeerInvitationCodec codec,
-          IPeerConnectionService peerConnectionService)
-      {
-          _host = host ?? throw new ArgumentNullException(nameof(host));
-          _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
-          _codec = codec ?? throw new ArgumentNullException(nameof(codec));
-          _peerConnectionService = peerConnectionService ?? throw new ArgumentNullException(nameof(peerConnectionService));
-      }
-
-      [RelayCommand] private Task ConnectAsync();
-  }
-
-  public sealed partial class RelayEndpointExportFlyoutViewModel : ViewModelBase
-  {
-      private readonly ISimulatedRelayHost _relayHost;
-
-      [ObservableProperty] private SimulatorAdvertisedHostKind _selectedHostKind;
-      [ObservableProperty] private string _detectedLanIp = string.Empty;
-      [ObservableProperty] private string _customHostInput = string.Empty;
-      [ObservableProperty] private string _generatedRelayUrl = string.Empty;
-
-      public RelayEndpointExportFlyoutViewModel(ISimulatedRelayHost relayHost)
-      {
-          _relayHost = relayHost ?? throw new ArgumentNullException(nameof(relayHost));
-      }
-
-      [RelayCommand] private Task CopyRelayUrlAsync();
-      [RelayCommand] private void UpdateGeneratedRelayUrl();
   }
   ```
 
 - **Algorithm:**
-  1. **Persona Card: Share / Export Invitation Button:**
-     - Renders a DropDownButton with Flyout on `PersonaCardView`:
-       - Discovers all candidate host addresses: primary LAN IP (from network interfaces), `127.0.0.1` (loopback), and custom IP input field.
-       - Configures port range mode: Default dynamic (`5100-5299`), custom range, or bound single port.
-       - Generates `percolator://invite?...` using `_codec.Encode(payload)`.
-       - One-click copy button copies the URL to the system clipboard.
-  2. **Persona Card: Connect to Peer Button:**
-     - Renders a DropDownButton with Flyout on `PersonaCardView`:
-       - **Mode 0 (In-World Simulated Node):** Dropdown listing all other active simulated personas in the world (filtered to exclude self). Selecting a persona extracts the remote peer ID, tokens, and bound endpoint from `_worldState.GetPersonaHost(targetId)`, then initiates direct handshake via `_peerConnectionService.ConnectToDirectPeerAsync`. Enforces Observer Isolation (Anti-Shortcut Rule 2): never accesses target's DI container or private storage.
-       - **Mode 1 (External Node / Desktop):** Input text box accepting a `percolator://invite?...` URL or base64 code. Automatically cleanses scheme prefix, decodes payload via `_codec.Decode`, and calls `_peerConnectionService.ConnectToDirectPeerAsync`.
-  3. **Persona Card: Register Relay Button:**
-     - Extends existing button with a Flyout allowing selection of either an in-world simulated relay host OR an external relay URL (`https://<host>:<port>`).
-  4. **Relay Card: Copy Endpoint Button:**
-     - Renders a DropDownButton with Flyout on `RelayCardView` allowing host selection (Auto-detected LAN IP, `127.0.0.1`, or Custom Host/IP) and copies the normalized relay URL (`https://<host>:<port>`) to clipboard for direct entry into Desktop's Add Relay tab.
+  1. **Promote Application Outbound Connection Workflow:** Create `IOutboundConnectionWorkflow` and `OutboundConnectionWorkflow` in `Percolator.Application/Connections/`. Consolidates host candidate resolution, defensive `UriBuilder` parsing, 3-second probing timeout, and fallback staging as `OutboundConnectionStatus.PendingOffline`. Registers in DI as `services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>()`.
+  2. **Refactor Desktop Add Connection Dialog:** Update `AddConnectionDialogViewModel` to delegate direct peer probing to `IOutboundConnectionWorkflow`, eliminating duplicate probing and URI resolution logic.
+  3. **Egress Pipeline Decoration (Non-Invasive Network Chaos):** Create `SimulatorChaosTransportDispatcherDecorator` implementing `ITransportDispatcher`. Intercepts `SendAsync(job)` in `SimulatedPersonaHost`: drops frames on `DropEnvelope`, delays on `InjectArtificialDelay`, and logs wire activity to `ISimulatorLogSink`. Deletes `ChaosPendingIngressStoreDecorator`, removing persistence-layer SQLite store hacking.
+  4. **Ingress Pipeline Decoration (Non-Invasive Ingress Control):** Register `SimulatorOutboxFlushingIngressPipelineDecorator` on `IInboundIngressPipeline` in `SimulatedPersonaHost`. Ingress envelopes auto-flush outbox responses and log wire traffic naturally.
+  5. **Eliminate Coordinator Database Backdoors:**
+     - Remove manual `PeerContact` construction and DB saving from `DirectHandshakeOrchestrator.InitiateDirectHandshakeAsync`. Dispatches handshake through `IOutboundConnectionWorkflow` and flushes outbox; contact creation occurs naturally via the wire handshake pipeline.
+     - Remove `EnsureChannelAsync` from `DirectChatCoordinator`. Messaging operations rely on standard wire channels and ingress discovery.
+     - Remove `PeerConnectionTargetKind.cs` and `SimulatedPeerConnectionService.cs`. Selecting an in-world persona simply reads its public tokens to auto-fill `PeerInvitationPayload`.
+  6. **High-Density Utility UI Consolidation in `PersonaCardView`:**
+     - Consolidate Capabilities (4 checkboxes), Autopilot (7 checkboxes), `Publish PreKeys`, and `Reroll Profile` into a single `⚙️ Persona Settings ▼` dropdown menu in the card header beside `🟢`.
+     - Consolidate the Row 1 action toolbar into exactly 3 compact buttons with non-blocking inline flyouts: `🔗 Connect Peer ▼`, `📋 Share Invite ▼`, and `📬 Relay ▼`. Zero modal dialogs blocking the workbench.
 
 - **Verify:**
-  - `Percolator.Simulator.Tests/Topology/PersonaInvitationExportFlyoutViewModelTests.cs`:
-    - `UpdateGeneratedInvitation_WithAutoLan_EncodesLanEndpointInUrl`
-    - `UpdateGeneratedInvitation_WithLoopback_EncodesLoopbackInUrl`
-    - `UpdateGeneratedInvitation_WithCustomHost_EncodesCustomHostInUrl`
-    - `UpdateGeneratedInvitation_WithPortPresetDefault_OmitsPortRange`
-    - `UpdateGeneratedInvitation_WithPortPresetCustom_EncodesPortRange`
+  - `Percolator.Application.Tests/Connections/OutboundConnectionWorkflowTests.cs`:
+    - `ConnectAsync_WithReachablePeer_ReturnsConnectedStatus`
+    - `ConnectAsync_WhenProbeTimesOut_ReturnsPendingOfflineStatus`
+    - `ConnectAsync_WithInvalidHostOrPort_ReturnsDomainError`
+  - `Percolator.Simulator.Tests/Chaos/SimulatorChaosTransportDispatcherDecoratorTests.cs`:
+    - `SendAsync_WhenFaultActionPass_DelegatesToInnerDispatcher`
+    - `SendAsync_WhenFaultActionDropEnvelope_ReturnsFailureWithoutCallingInner`
+    - `SendAsync_WhenFaultActionDelay_DelaysExecution`
   - `Percolator.Simulator.Tests/Topology/PersonaConnectPeerFlyoutViewModelTests.cs`:
-    - `ConnectAsync_InWorldMode_ResolvesTargetFromWorldStateAndInitiatesHandshake`
-    - `ConnectAsync_ExternalMode_CleansesSchemeAndDecodesUrl`
-    - `ConnectAsync_WithInvalidUrl_SetsErrorMessageWithoutCrashing`
-  - `Percolator.Simulator.Tests/RelayedChat/RelayEndpointExportFlyoutViewModelTests.cs`:
-    - `UpdateGeneratedRelayUrl_WithAutoLan_GeneratesCorrectHttpsUrl`
-    - `UpdateGeneratedRelayUrl_WithLoopback_GeneratesLoopbackUrl`
-  - Command: `dotnet test Percolator.Simulator.Tests --filter "FullyQualifiedName~FlyoutViewModel"`
+    - `ConnectAsync_InWorldSelection_SynthesizesPayloadAndDispatchesWorkflow`
+    - `ConnectAsync_ExternalCode_DecodesUrlAndDispatchesWorkflow`
+  - `Percolator.Simulator.Tests/Topology/PersonaInvitationExportFlyoutViewModelTests.cs`:
+    - `UpdateGeneratedInvitation_WithAutoLan_GeneratesValidUrl`
+  - Command: `dotnet test Percolator.Application.Tests --filter "FullyQualifiedName~OutboundConnectionWorkflow"`
+  - Command: `dotnet test Percolator.Simulator.Tests --filter "FullyQualifiedName~Simulator"`
   - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
+  - Command: `dotnet test Percolator.sln`
 
-- **QMS:** [`SYS-CONTACT-CONSENT-GATE`], [`SYS-PRE-ACTIVATION-STEALTH`], [`DEP-DESKTOP-OUT-OF-BAND-VERIFICATION`], [`SYS-DISCOVERY-PREKEY-ISOLATION`], [`HAZ-METADATA-IP-LEAKAGE`], [`HAZ-TRANSPORT-SPOOFING`]
+- **QMS:** [`SYS-CONTACT-CONSENT-GATE`], [`SYS-PRE-ACTIVATION-STEALTH`], [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`], [`SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`], [`DEP-DESKTOP-OUT-OF-BAND-VERIFICATION`], [`HAZ-TRANSPORT-SPOOFING`], [`HAZ-PREKEY-STARVATION`]
 
 ---
 
