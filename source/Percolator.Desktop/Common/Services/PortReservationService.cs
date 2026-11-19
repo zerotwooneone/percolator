@@ -7,14 +7,14 @@ using System.Threading.Tasks;
 namespace Percolator.Desktop.Common.Services;
 
 /// <summary>
-/// Default <see cref="IPortReservationService"/> probing loopback TCP ports in the 5100–5299
+/// Default <see cref="IPortReservationService"/> probing loopback TCP ports in the 5100–5199
 /// persona activation range. Probes open and immediately close; acquired leases hold the
 /// bound listener so a later bind cannot be claimed by another process in the meantime.
 /// </summary>
 public sealed class PortReservationService : IPortReservationService
 {
     private const int DefaultRangeStart = 5100;
-    private const int DefaultRangeEnd = 5299;
+    private const int DefaultRangeEnd = 5199;
 
     public int RangeStart { get; }
     public int RangeEnd { get; }

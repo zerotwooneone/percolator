@@ -132,13 +132,5 @@ public sealed class DiscoveryQueryClient : INearbyDiscoveryQueryClientPort
         return results;
     }
 
-    private static Uri ToUri(RelayEndpoint endpoint)
-    {
-        if (endpoint.Value.Contains("://") && Uri.TryCreate(endpoint.Value, UriKind.Absolute, out var uri))
-        {
-            return uri;
-        }
-
-        return new Uri($"https://{endpoint.Value}");
-    }
+    private static Uri ToUri(RelayEndpoint endpoint) => endpoint.ToUri();
 }

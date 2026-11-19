@@ -218,7 +218,7 @@ public sealed class GrpcRelayMailboxProvisioner : IRelayMailboxProvisioner
 
     private AuthenticatedRelayService.AuthenticatedRelayServiceClient CreateClient(RelayEndpoint endpoint)
     {
-        var channel = _channelFactory.GetOrCreateChannel(new Uri($"https://{endpoint.Value}"));
+        var channel = _channelFactory.GetOrCreateChannel(endpoint.ToUri());
         return new AuthenticatedRelayService.AuthenticatedRelayServiceClient(channel);
     }
 }

@@ -354,19 +354,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             BoundPort = _transportServer.BoundPort.Value.Value;
         }
 
-        try
-        {
-            var discovery = _host.Services.GetRequiredService<INetworkEndpointDiscoveryPort>();
-            var candidates = await discovery.DiscoverLocalCandidatesAsync(Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectWanPolicy.DisabledByDefault, ct);
-            var primaryLan = candidates.FirstOrDefault(c => c.Kind == Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectCandidateKind.DirectLan && IPAddress.TryParse(c.Host.Value, out var ip) && !IPAddress.IsLoopback(ip))
-                             ?? candidates.FirstOrDefault();
-            var host = primaryLan?.Host.Value ?? "127.0.0.1";
-            BoundEndpoint = new Uri($"https://{host}:{BoundPort}");
-        }
-        catch (Exception)
-        {
-            BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
-        }
+        BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");
         // 3. Populate IActiveIdentitySet before hosted services start so the drain
         // scheduler's first reconciliation sees this persona; bridge IsListening so a
         // paused persona leaves the active set (scheduler cancels its stream).

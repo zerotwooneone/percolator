@@ -71,6 +71,10 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
     {
         ArgumentNullException.ThrowIfNull(address);
 
+        var targetAddress = address.Scheme.Equals("percolator", StringComparison.OrdinalIgnoreCase)
+            ? new UriBuilder(address) { Scheme = Uri.UriSchemeHttps }.Uri
+            : address;
+
         lock (_lock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -78,7 +82,7 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
             var now = _timeProvider.UtcNow;
             EvictExpiredUnderLock(now);
 
-            if (_channels.TryGetValue(address, out var existing))
+            if (_channels.TryGetValue(targetAddress, out var existing))
             {
                 existing.LastAccessedAtUtc = now;
                 return existing.Channel;
@@ -104,8 +108,8 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
                 DisposeHttpClient = true
             };
 
-            var channel = _channelFactory(address, channelOptions);
-            _channels[address] = new CachedChannelEntry
+            var channel = _channelFactory(targetAddress, channelOptions);
+            _channels[targetAddress] = new CachedChannelEntry
             {
                 Channel = channel,
                 LastAccessedAtUtc = now
@@ -119,6 +123,10 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
     {
         ArgumentNullException.ThrowIfNull(address);
 
+        var targetAddress = address.Scheme.Equals("percolator", StringComparison.OrdinalIgnoreCase)
+            ? new UriBuilder(address) { Scheme = Uri.UriSchemeHttps }.Uri
+            : address;
+
         lock (_lock)
         {
             if (_disposed)
@@ -126,7 +134,7 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
                 return;
             }
 
-            if (_channels.Remove(address, out var entry))
+            if (_channels.Remove(targetAddress, out var entry))
             {
                 entry.Channel.Dispose();
             }

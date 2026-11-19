@@ -120,13 +120,5 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
             $"No prekey bundle hosted for peer '{peerId}'."));
     }
 
-    private static Uri ToUri(RelayEndpoint endpoint)
-    {
-        if (endpoint.Value.Contains("://") && Uri.TryCreate(endpoint.Value, UriKind.Absolute, out var uri))
-        {
-            return uri;
-        }
-
-        return new Uri($"https://{endpoint.Value}");
-    }
+    private static Uri ToUri(RelayEndpoint endpoint) => endpoint.ToUri();
 }

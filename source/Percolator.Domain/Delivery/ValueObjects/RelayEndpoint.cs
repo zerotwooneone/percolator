@@ -30,11 +30,25 @@ public sealed record RelayEndpoint
 
         var trimmed = endpoint.Trim();
 
-        if (trimmed.Contains("://") && Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        if (trimmed.Contains("://"))
         {
+            if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+            {
+                return DomainResult<RelayEndpoint>.Failure(new DomainError(
+                    "INVALID_RELAY_ENDPOINT", "Relay endpoint is not a valid URI."));
+            }
+
+            if (!uri.Scheme.Equals("percolator", StringComparison.OrdinalIgnoreCase))
+            {
+                return DomainResult<RelayEndpoint>.Failure(new DomainError(
+                    "INVALID_RELAY_SCHEME", $"Invalid scheme '{uri.Scheme}'. Only 'percolator://' is supported."));
+            }
+
             var host = uri.Host;
             var port = uri.Port > 0 ? (int?)uri.Port : null;
-            return DomainResult<RelayEndpoint>.Success(new RelayEndpoint(trimmed, host, port));
+            var formattedHost = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
+            var normalizedValue = port.HasValue ? $"percolator://{formattedHost}:{port.Value}" : $"percolator://{formattedHost}";
+            return DomainResult<RelayEndpoint>.Success(new RelayEndpoint(normalizedValue, host, port));
         }
 
         if (trimmed.StartsWith('[') && trimmed.IndexOf(']') is var closingBracket && closingBracket > 0)
@@ -45,14 +59,14 @@ public sealed record RelayEndpoint
                 var portPart = trimmed.Substring(closingBracket + 2);
                 if (int.TryParse(portPart, out var port) && port is >= 1 and <= 65535)
                 {
-                    return DomainResult<RelayEndpoint>.Success(new RelayEndpoint(trimmed, hostPart, port));
+                    return DomainResult<RelayEndpoint>.Success(new RelayEndpoint($"percolator://[{hostPart}]:{port}", hostPart, port));
                 }
 
                 return DomainResult<RelayEndpoint>.Failure(new DomainError(
                     "INVALID_RELAY_PORT", $"Port '{portPart}' in relay endpoint must be an integer between 1 and 65535."));
             }
 
-            return DomainResult<RelayEndpoint>.Success(new RelayEndpoint(trimmed, hostPart, null));
+            return DomainResult<RelayEndpoint>.Success(new RelayEndpoint($"percolator://[{hostPart}]", hostPart, null));
         }
 
         var colonIndex = trimmed.LastIndexOf(':');
@@ -65,7 +79,7 @@ public sealed record RelayEndpoint
 
                 if (int.TryParse(portPart, out var port) && port is >= 1 and <= 65535)
                 {
-                    return DomainResult<RelayEndpoint>.Success(new RelayEndpoint(trimmed, hostPart, port));
+                    return DomainResult<RelayEndpoint>.Success(new RelayEndpoint($"percolator://{hostPart}:{port}", hostPart, port));
                 }
 
                 return DomainResult<RelayEndpoint>.Failure(new DomainError(
@@ -73,7 +87,7 @@ public sealed record RelayEndpoint
             }
         }
 
-        return DomainResult<RelayEndpoint>.Success(new RelayEndpoint(trimmed, trimmed, null));
+        return DomainResult<RelayEndpoint>.Success(new RelayEndpoint($"percolator://{trimmed}", trimmed, null));
     }
 
     public static RelayEndpoint Parse(string endpoint)
@@ -100,16 +114,17 @@ public sealed record RelayEndpoint
         }
 
         var trimmedHost = host.Trim();
-        return new RelayEndpoint($"{trimmedHost}:{port}", trimmedHost, port);
+        var formattedHost = trimmedHost.Contains(':') && !trimmedHost.StartsWith('[') ? $"[{trimmedHost}]" : trimmedHost;
+        return new RelayEndpoint($"percolator://{formattedHost}:{port}", trimmedHost, port);
     }
 
     public static RelayEndpoint FromUri(Uri uri)
     {
         ArgumentNullException.ThrowIfNull(uri);
-        var host = uri.Host;
-        var port = uri.Port > 0 ? (int?)uri.Port : null;
-        return new RelayEndpoint(uri.ToString(), host, port);
+        return Parse(uri.ToString());
     }
+
+    public Uri ToUri() => new(Value);
 
     public override string ToString() => Value;
 }

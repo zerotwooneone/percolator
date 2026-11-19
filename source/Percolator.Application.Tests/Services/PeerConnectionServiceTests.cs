@@ -316,12 +316,12 @@ public sealed class PeerConnectionServiceTests
         route.RoutingToken.Should().Be(routingToken);
         route.DeliveryToken.Should().Be(deliveryToken);
         route.RelayEndpoint.Should().NotBeNull();
-        route.RelayEndpoint!.Value.Should().Be("192.168.1.100:5150");
+        route.RelayEndpoint!.Value.Should().Be("percolator://192.168.1.100:5150");
 
         // Verify prekey bundle requested with direct endpoint
         _bundleProvider.LastRequestedPeerId.Should().Be(targetPeerId);
         _bundleProvider.LastRequestedEndpoint.Should().NotBeNull();
-        _bundleProvider.LastRequestedEndpoint!.Value.Should().Be("192.168.1.100:5150");
+        _bundleProvider.LastRequestedEndpoint!.Value.Should().Be("percolator://192.168.1.100:5150");
     }
 
     [Test]

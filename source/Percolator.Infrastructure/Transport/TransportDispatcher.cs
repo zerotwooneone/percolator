@@ -144,9 +144,17 @@ public sealed class TransportDispatcher : ITransportDispatcher
 
     private static Uri ParseEndpointUri(string endpointStr)
     {
-        return endpointStr.Contains("://")
-            ? new Uri(endpointStr)
-            : new Uri($"https://{endpointStr}");
+        if (endpointStr.StartsWith("percolator://", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Uri(endpointStr);
+        }
+
+        if (endpointStr.Contains("://"))
+        {
+            return new Uri(endpointStr);
+        }
+
+        return new Uri($"percolator://{endpointStr}");
     }
 
     public async ValueTask<DomainResult> SendAsync(OutboxJob job, CancellationToken ct = default)

@@ -207,7 +207,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
 
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.Listen(IPAddress.Any, BoundPort, listenOptions =>
+            options.Listen(IPAddress.Loopback, BoundPort, listenOptions =>
             {
                 listenOptions.Protocols = HttpProtocols.Http2;
                 listenOptions.UseHttps(cert, httpsOptions =>
@@ -254,19 +254,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         await _app.StartAsync(ct);
         _isRunning = true;
 
-        try
-        {
-            var discovery = new Percolator.Infrastructure.Plugins.FileTransfer.NetworkInterfaceEndpointDiscoveryPort(BoundPort, allowLoopback: true);
-            var candidates = await discovery.DiscoverLocalCandidatesAsync(Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectWanPolicy.DisabledByDefault, ct);
-            var primaryLan = candidates.FirstOrDefault(c => c.Kind == Percolator.Apps.FileTransfer.Features.TransferNegotiation.DirectCandidateKind.DirectLan && IPAddress.TryParse(c.Host.Value, out var ip) && !IPAddress.IsLoopback(ip))
-                             ?? candidates.FirstOrDefault();
-            var host = primaryLan?.Host.Value ?? "127.0.0.1";
-            BoundEndpoint = new Uri($"https://{host}:{BoundPort}");
-        }
-        catch (Exception)
-        {
-            BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
-        }
+        BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");
 
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,
@@ -274,7 +262,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             DisplayName,
             Id,
             "RelayLifecycle",
-            $"Relay host started and listening on https://127.0.0.1:{BoundPort}"));
+            $"Relay host started and listening on percolator://127.0.0.1:{BoundPort}"));
     }
 
     public async Task StopAsync(CancellationToken ct = default)

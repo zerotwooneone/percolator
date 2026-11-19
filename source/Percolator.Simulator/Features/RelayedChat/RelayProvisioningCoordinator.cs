@@ -310,83 +310,27 @@ internal sealed class RelayProvisioningCoordinator
                 await routingRepo.SaveAsync(cap, ct);
             }
 
-            // 4. Fetch consumable PreKeyBundle via IPreKeyBundleProvider (consumes 1 OPK)
-            PreKeyBundle remoteBundle;
+            // 4. Connect to peer via IPeerConnectionService (fetches consumable prekey, initiates X3DH, provisions direct channel and contact)
             using (var scope = initiator.Services.CreateScope())
             {
-                var bundleProvider = scope.ServiceProvider.GetRequiredService<IPreKeyBundleProvider>();
-                var bundleResult = await bundleProvider.FetchConsumableBundleAsync(
-                    target.PublicIdentityId, DeviceId.Primary, relayEndpoint, ct);
-                if (bundleResult.IsFailure)
+                var peerConnectionService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
+                var connectResult = await peerConnectionService.ConnectToPeerAsync(
+                    target.PublicIdentityId,
+                    DeviceId.Primary,
+                    relayEndpoint,
+                    ct).ConfigureAwait(false);
+
+                if (connectResult.IsFailure)
                 {
-                    if (bundleResult.Error.Description?.Contains("Unable to consume") == true)
+                    if (connectResult.Error.Description?.Contains("Unable to consume") == true)
                     {
                         _toastService.ShowToast("OPK Depleted", "No available one-time prekeys left on relay.", ToastSeverity.Warning);
                     }
                     else
                     {
-                        _toastService.ShowToast("PreKey Missing", $"Failed to fetch prekey from relay: {bundleResult.Error.Description}", ToastSeverity.Error);
+                        _toastService.ShowToast("Handshake Failed", connectResult.Error.Description ?? "Unknown error", ToastSeverity.Error);
                     }
                     return false;
-                }
-                remoteBundle = bundleResult.Value!;
-            }
-
-            // 5. Save the target's routing capability for the initiator
-            using (var scope = target.Services.CreateScope())
-            {
-                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                var cap = new PeerMailboxRoutingCapability(
-                    initiator.PublicIdentityId,
-                    initiator.MailboxRoutingToken,
-                    initiator.MailboxDeliveryToken,
-                    relayEndpoint,
-                    LastObservedAtUtc: DateTimeOffset.UtcNow);
-                await routingRepo.SaveAsync(cap, ct);
-            }
-
-            // 5. Initiator initiates X3DH handshake
-            using (var scope = initiator.Services.CreateScope())
-            {
-                var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
-                var hsResult = await handshakeService.InitiateHandshakeAsync(
-                    initiator.PublicIdentityId,
-                    DeviceId.Primary,
-                    target.PublicIdentityId,
-                    remoteBundle,
-                    ct: ct);
-
-                if (!hsResult.IsSuccess)
-                {
-                    _toastService.ShowToast("Handshake Failed", hsResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-
-                // Ensure DirectChannel exists on initiator
-                var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, target.PublicIdentityId);
-                var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
-                if (directChannel == null)
-                {
-                    var channel = DirectChannel.Create(channelId, initiator.PublicIdentityId, target.PublicIdentityId, timeProvider).Value!;
-                    await channelRepo.SaveDirectAsync(channel, ct);
-                }
-
-                // Ensure contact exists on initiator
-                var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
-                var existingContact = await contactRepo.GetByPeerIdAsync(initiator.PublicIdentityId, target.PublicIdentityId, ct);
-                if (existingContact == null)
-                {
-                    var newContact = new PeerContact(
-                        initiator.PublicIdentityId,
-                        target.PublicIdentityId,
-                        ContactNickname.Create(null, target.PublicIdentityId),
-                        PeerTrustLevel.Tofu,
-                        timeProvider.UtcNow,
-                        target.IdentityPublicKey,
-                        ContactState.Active);
-                    await contactRepo.SaveAsync(newContact, ct);
                 }
             }
 

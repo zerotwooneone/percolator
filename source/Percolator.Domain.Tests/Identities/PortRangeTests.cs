@@ -55,11 +55,11 @@ public sealed class PortRangeTests
     }
 
     [Test]
-    public void DefaultDynamicRange_Is5100To5299()
+    public void DefaultDynamicRange_Is5100To5199()
     {
         var defaultRange = PortRange.DefaultDynamicRange;
         defaultRange.MinPort.Should().Be(5100);
-        defaultRange.MaxPort.Should().Be(5299);
+        defaultRange.MaxPort.Should().Be(5199);
         defaultRange.IsSinglePort.Should().BeFalse();
     }
 
@@ -83,7 +83,7 @@ public sealed class PortRangeTests
     [Test]
     public void ToString_Range_ReturnsHyphenatedRange()
     {
-        new PortRange(5100, 5299).ToString().Should().Be("5100-5299");
+        new PortRange(5100, 5199).ToString().Should().Be("5100-5199");
     }
 
     [Test]

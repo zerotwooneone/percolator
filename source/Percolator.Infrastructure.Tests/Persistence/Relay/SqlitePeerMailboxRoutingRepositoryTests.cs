@@ -39,7 +39,7 @@ public class SqlitePeerMailboxRoutingRepositoryTests
         var peerId = Domain.Identities.PublicIdentityId.New();
         var routingToken = BlindedRoutingToken.New();
         var deliveryToken = DeliveryToken.FromSpan(new byte[32]);
-        var relayEndpoint = RelayEndpoint.Parse("relay://relay.example.com:8443");
+        var relayEndpoint = RelayEndpoint.Parse("percolator://relay.example.com:8443");
         var now = DateTimeOffset.UtcNow;
 
         var capability = new PeerMailboxRoutingCapability(

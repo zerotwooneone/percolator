@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
+using Percolator.Application.Routing;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
@@ -68,19 +69,12 @@ internal sealed class DirectChatCoordinator
                 using var scope = sender.Services.CreateScope();
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
-                // Auto-detect whether to route via DirectP2P or RelayedOneToOne based on registered direct endpoint and peer mailbox routing capability
-                var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-                var route = DeliveryRoute.DirectP2P;
-                if (streamRegistry.GetDirectEndpoint(recipient.PublicIdentityId) == null && recipient.HomeRelay != null)
-                {
-                    var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                    var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
-                    var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, now, ct);
-                    if (bestRoute != null)
-                    {
-                        route = DeliveryRoute.RelayedOneToOne;
-                    }
-                }
+                // Auto-detect whether to route via DirectP2P or RelayedOneToOne based on IRoutingCoordinator
+                var routingCoordinator = scope.ServiceProvider.GetRequiredService<IRoutingCoordinator>();
+                var routeResult = await routingCoordinator.ResolveRouteAsync(recipient.PublicIdentityId, ct).ConfigureAwait(false);
+                var route = (routeResult.IsSuccess && routeResult.Value.Mode == DeliveryRoutingMode.RelayMailbox)
+                    ? DeliveryRoute.RelayedOneToOne
+                    : DeliveryRoute.DirectP2P;
 
                 var command = new SendMessageCommand(
                     ChannelId: channelId,

@@ -32,7 +32,7 @@ public sealed record PortRange
 
     public bool Contains(int port) => port >= MinPort && port <= MaxPort;
 
-    public static PortRange DefaultDynamicRange => new(5100, 5299);
+    public static PortRange DefaultDynamicRange => new(5100, 5199);
 
     public static PortRange Single(int port) => new(port, port);
 

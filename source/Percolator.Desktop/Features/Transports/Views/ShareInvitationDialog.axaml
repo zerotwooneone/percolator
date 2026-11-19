@@ -57,7 +57,7 @@
                     <!-- Presets Selection -->
                     <StackPanel Spacing="6" Margin="0,4,0,0">
                         <RadioButton GroupName="PrivacyPreset"
-                                     Content="Default Range (omit port; probes 5100-5299 for maximum privacy)"
+                                     Content="Default Range (omit port; probes 5100-5199 for maximum privacy)"
                                      IsChecked="{Binding IsDefaultRangePreset, Mode=TwoWay}" />
 
                         <RadioButton GroupName="PrivacyPreset"

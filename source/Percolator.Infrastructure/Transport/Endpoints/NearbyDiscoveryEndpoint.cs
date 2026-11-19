@@ -80,7 +80,7 @@ public sealed class NearbyDiscoveryEndpoint : NearbyDiscoveryService.NearbyDisco
             {
                 PeerId = ByteString.CopyFrom(reg.PeerId.ToByteArray()),
                 Route = (int)DeliveryRoute.RelayedOneToOne,
-                RelayEndpoint = $"https://127.0.0.1:{_boundPort}"
+                RelayEndpoint = $"percolator://127.0.0.1:{_boundPort}"
             };
 
             // Tokens advertised at registration — the directory record is the single

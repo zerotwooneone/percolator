@@ -7,13 +7,13 @@ namespace Percolator.Domain.Tests.Delivery;
 [TestFixture]
 public class RelayEndpointTests
 {
-    [TestCase("localhost:15003", "localhost", 15003)]
-    [TestCase("127.0.0.1:8080", "127.0.0.1", 8080)]
-    [TestCase("relay.example.com:443", "relay.example.com", 443)]
-    [TestCase("http://relay.example.com:8080", "relay.example.com", 8080)]
-    [TestCase("https://relay.example.com:443", "relay.example.com", 443)]
-    [TestCase("[::1]:9000", "::1", 9000)]
-    public void Create_ValidHostAndPort_ReturnsSuccessWithExpectedProperties(string input, string expectedHost, int expectedPort)
+    [TestCase("localhost:15003", "localhost", 15003, "percolator://localhost:15003")]
+    [TestCase("127.0.0.1:8080", "127.0.0.1", 8080, "percolator://127.0.0.1:8080")]
+    [TestCase("relay.example.com:443", "relay.example.com", 443, "percolator://relay.example.com:443")]
+    [TestCase("percolator://relay.example.com:8080", "relay.example.com", 8080, "percolator://relay.example.com:8080")]
+    [TestCase("percolator://relay.example.com:443", "relay.example.com", 443, "percolator://relay.example.com:443")]
+    [TestCase("[::1]:9000", "::1", 9000, "percolator://[::1]:9000")]
+    public void Create_ValidHostAndPort_ReturnsSuccessWithExpectedProperties(string input, string expectedHost, int expectedPort, string expectedValue)
     {
         var result = RelayEndpoint.Create(input);
 
@@ -21,14 +21,25 @@ public class RelayEndpointTests
         result.Value.Should().NotBeNull();
         result.Value!.Host.Should().Be(expectedHost);
         result.Value.Port.Should().Be(expectedPort);
-        result.Value.Value.Should().Be(input);
-        result.Value.ToString().Should().Be(input);
+        result.Value.Value.Should().Be(expectedValue);
+        result.Value.ToString().Should().Be(expectedValue);
     }
 
-    [TestCase("localhost", "localhost")]
-    [TestCase("relay.example.com", "relay.example.com")]
-    [TestCase("[::1]", "::1")]
-    public void Create_HostWithoutPort_ReturnsSuccessWithNullPort(string input, string expectedHost)
+    [TestCase("http://relay.example.com:8080")]
+    [TestCase("https://relay.example.com:443")]
+    [TestCase("relay://relay.example.com:443")]
+    public void Create_DisallowedScheme_ReturnsInvalidSchemeError(string input)
+    {
+        var result = RelayEndpoint.Create(input);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_RELAY_SCHEME");
+    }
+
+    [TestCase("localhost", "localhost", "percolator://localhost")]
+    [TestCase("relay.example.com", "relay.example.com", "percolator://relay.example.com")]
+    [TestCase("[::1]", "::1", "percolator://[::1]")]
+    public void Create_HostWithoutPort_ReturnsSuccessWithNullPort(string input, string expectedHost, string expectedValue)
     {
         var result = RelayEndpoint.Create(input);
 
@@ -36,6 +47,7 @@ public class RelayEndpointTests
         result.Value.Should().NotBeNull();
         result.Value!.Host.Should().Be(expectedHost);
         result.Value.Port.Should().BeNull();
+        result.Value.Value.Should().Be(expectedValue);
     }
 
     [TestCase(null)]
@@ -69,17 +81,19 @@ public class RelayEndpointTests
 
         endpoint.Host.Should().Be("relay.percolator.net");
         endpoint.Port.Should().Be(443);
-        endpoint.Value.Should().Be("relay.percolator.net:443");
+        endpoint.Value.Should().Be("percolator://relay.percolator.net:443");
+        endpoint.ToUri().Should().Be(new Uri("percolator://relay.percolator.net:443"));
     }
 
     [Test]
     public void FromUri_ValidUri_ConstructsRelayEndpoint()
     {
-        var uri = new Uri("https://relay.percolator.net:8443");
+        var uri = new Uri("percolator://relay.percolator.net:8443");
         var endpoint = RelayEndpoint.FromUri(uri);
 
         endpoint.Host.Should().Be("relay.percolator.net");
         endpoint.Port.Should().Be(8443);
+        endpoint.Value.Should().Be("percolator://relay.percolator.net:8443");
     }
 
     [Test]

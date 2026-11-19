@@ -86,7 +86,7 @@
                                 CornerRadius="4,0,0,4"
                                 Padding="10,0"
                                 VerticalAlignment="Stretch">
-                            <TextBlock Text="relay://"
+                            <TextBlock Text="percolator://"
                                        VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextMutedBrush}"
                                        FontFamily="Consolas,Menlo,monospace" />

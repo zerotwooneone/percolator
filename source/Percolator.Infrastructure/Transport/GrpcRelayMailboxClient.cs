@@ -35,7 +35,7 @@ public sealed class GrpcRelayMailboxClient : IRelayMailboxClient
             {
                 ArgumentNullException.ThrowIfNull(endpoint);
                 return new AuthenticatedRelayService.AuthenticatedRelayServiceClient(
-                    channelFactory.GetOrCreateChannel(new Uri($"https://{endpoint.Value}")));
+                    channelFactory.GetOrCreateChannel(endpoint.ToUri()));
             },
             timeProvider)
     {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -42,8 +43,6 @@ internal sealed partial class RelayCardViewModel : ViewModelBase
 
     public ObservableCollection<HeldEnvelopeItemViewModel> HeldEnvelopes { get; } = new();
 
-    public RelayEndpointExportFlyoutViewModel? EndpointExport { get; }
-
     public RelayCardViewModel(
         SimulatedNodeSummary summary,
         IStatusToastService toastService,
@@ -61,7 +60,6 @@ internal sealed partial class RelayCardViewModel : ViewModelBase
 
         if (_host != null)
         {
-            EndpointExport = new RelayEndpointExportFlyoutViewModel(_host, _toastService);
             _heldEnvelopeCount = _host.TotalHeldEnvelopeCount;
             _hostedOpkCount = _host.TotalHostedOpkCount;
             RefreshHeldEnvelopes();
@@ -197,5 +195,15 @@ internal sealed partial class RelayCardViewModel : ViewModelBase
         {
             _toastService.ShowToast("Cannot Shuffle", "Need at least 2 envelopes in mailbox to shuffle.", ToastSeverity.Warning);
         }
+    }
+
+    [RelayCommand]
+    private async Task CopyEndpointAsync()
+    {
+        var endpoint = _host?.BoundEndpoint?.ToString() ?? $"percolator://127.0.0.1:{_host?.BoundPort ?? 0}";
+        await ClipboardHelper.SetClipboardTextAsync(
+            endpoint,
+            "Relay endpoint copied to clipboard.",
+            _toastService).ConfigureAwait(false);
     }
 }

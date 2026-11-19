@@ -173,8 +173,8 @@ public sealed class AddConnectionDialogViewModelTests
 
     [TestCase("percolator://127.0.0.1:5100", "127.0.0.1:5100")]
     [TestCase("  percolator://127.0.0.1:5100  ", "127.0.0.1:5100")]
-    [TestCase("relay://10.0.0.1:5200", "10.0.0.1:5200")]
-    [TestCase("  RELAY://10.0.0.1:5200  ", "10.0.0.1:5200")]
+    [TestCase("percolator://10.0.0.1:5100", "10.0.0.1:5100")]
+    [TestCase("  PERCOLATOR://10.0.0.1:5100  ", "10.0.0.1:5100")]
     [TestCase("127.0.0.1:5100", "127.0.0.1:5100")]
     public void RelayEndpointInput_CleansesPrefix_Automatically(string input, string expected)
     {
@@ -328,6 +328,9 @@ public sealed class AddConnectionDialogViewModelTests
     [TestCase("127.0.0.1:")]
     [TestCase("127.0.0.1:99999")]
     [TestCase("127.0.0.1:0")]
+    [TestCase("relay://127.0.0.1:5100")]
+    [TestCase("https://127.0.0.1:5100")]
+    [TestCase("http://127.0.0.1:5100")]
     public async Task SubmitRelayConnectionAsync_WhenEndpointInvalid_SetsErrorMessage(string invalidEndpoint)
     {
         var vm = CreateViewModel();
@@ -337,6 +340,15 @@ public sealed class AddConnectionDialogViewModelTests
 
         vm.ErrorMessage.Should().StartWith("Invalid relay endpoint format.");
         _dialogResult.Should().BeNull();
+    }
+
+    [Test]
+    public void RelayEndpointInput_WhenPercolatorSchemeEntered_StripsSchemePrefix()
+    {
+        var vm = CreateViewModel();
+        vm.RelayEndpointInput = "percolator://127.0.0.1:5100";
+
+        vm.RelayEndpointInput.Should().Be("127.0.0.1:5100");
     }
 
     [Test]

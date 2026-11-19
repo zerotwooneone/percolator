@@ -183,7 +183,7 @@ public sealed class RelayDirectoryServiceTests
 
         var registration = await _relayRepository.GetByIdAsync(relayId);
         registration.Should().NotBeNull();
-        registration!.Endpoint.Value.Should().Be("127.0.0.1:5100");
+        registration!.Endpoint.Value.Should().Be("percolator://127.0.0.1:5100");
         registration.Bindings.Select(b => b.OwnerIdentityId).Should().BeEquivalentTo(new[] { owner1, owner2 });
     }
 

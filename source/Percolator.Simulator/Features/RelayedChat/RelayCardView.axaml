@@ -17,34 +17,10 @@
                     <TextBlock Text="{Binding BoundEndpoint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
-                <DropDownButton Grid.Column="1" Content="📋 Copy Endpoint ▼" VerticalAlignment="Center">
-                    <DropDownButton.Flyout>
-                        <Flyout Placement="BottomEdgeAlignedRight">
-                            <StackPanel DataContext="{Binding EndpointExport}" Spacing="8" MinWidth="260" Margin="4">
-                                <TextBlock Text="Export Relay Endpoint" FontWeight="Bold" FontSize="12" />
-
-                                <TextBlock Text="Advertised Host / IP:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <ComboBox ItemsSource="{Binding AvailableHostKinds}"
-                                          SelectedItem="{Binding SelectedHostKind}"
-                                          HorizontalAlignment="Stretch" />
-
-                                <StackPanel Spacing="4" IsVisible="{Binding IsCustomHostVisible}">
-                                    <TextBlock Text="Custom Host / IP:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                    <TextBox Text="{Binding CustomHostInput}" Watermark="e.g. 192.168.1.50 or myhost.local" />
-                                </StackPanel>
-
-                                <TextBlock Text="Relay Endpoint URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <TextBox Text="{Binding GeneratedRelayUrl}" IsReadOnly="True" FontSize="10" />
-
-                                <Button Content="📋 Copy Endpoint URL"
-                                        Command="{Binding CopyRelayUrlCommand}"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Center"
-                                        Classes="accent" />
-                            </StackPanel>
-                        </Flyout>
-                    </DropDownButton.Flyout>
-                </DropDownButton>
+                <Button Grid.Column="1"
+                        Content="📋 Copy Endpoint"
+                        Command="{Binding CopyEndpointCommand}"
+                        VerticalAlignment="Center" />
             </Grid>
 
             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">

@@ -147,28 +147,24 @@ internal sealed partial class RelayRegistrationFlyoutViewModel : ViewModelBase
                     return;
                 }
 
+                if (input.StartsWith("relay://", StringComparison.OrdinalIgnoreCase) ||
+                    input.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                    input.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                {
+                    ErrorMessage = "Invalid relay endpoint format. Expected percolator://host:port or host:port (e.g. 127.0.0.1:5100).";
+                    return;
+                }
+
                 if (input.StartsWith("percolator://", StringComparison.OrdinalIgnoreCase))
                 {
                     input = input["percolator://".Length..];
-                }
-                else if (input.StartsWith("relay://", StringComparison.OrdinalIgnoreCase))
-                {
-                    input = input["relay://".Length..];
-                }
-                else if (input.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    input = input["https://".Length..];
-                }
-                else if (input.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-                {
-                    input = input["http://".Length..];
                 }
 
                 input = input.TrimEnd('/');
                 var colonIndex = input.LastIndexOf(':');
                 if (colonIndex <= 0 || !int.TryParse(input[(colonIndex + 1)..], out var port) || port < 1 || port > 65535)
                 {
-                    ErrorMessage = "Invalid relay endpoint format. Expected host:port (e.g. 127.0.0.1:5100).";
+                    ErrorMessage = "Invalid relay endpoint format. Expected percolator://host:port or host:port (e.g. 127.0.0.1:5100).";
                     return;
                 }
 

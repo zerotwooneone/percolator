@@ -118,4 +118,27 @@ public sealed class PeerGrpcChannelFactoryTests
         handler.SslOptions.RemoteCertificateValidationCallback!(null!, null!, null!, default)
             .Should().BeTrue();
     }
+
+    [Test]
+    public void GetOrCreateChannel_WithPercolatorScheme_MapsToHttpsForUnderlyingSocket()
+    {
+        Uri? capturedAddress = null;
+        var percolatorUri = new Uri("percolator://127.0.0.1:5100");
+
+        using var factory = new PeerGrpcChannelFactory(
+            new PeerGrpcChannelFactoryOptions(),
+            new MutableTimeProvider(),
+            (addr, opts) =>
+            {
+                capturedAddress = addr;
+                return GrpcChannel.ForAddress(addr, opts);
+            });
+
+        factory.GetOrCreateChannel(percolatorUri);
+
+        capturedAddress.Should().NotBeNull();
+        capturedAddress!.Scheme.Should().Be("https");
+        capturedAddress.Host.Should().Be("127.0.0.1");
+        capturedAddress.Port.Should().Be(5100);
+    }
 }

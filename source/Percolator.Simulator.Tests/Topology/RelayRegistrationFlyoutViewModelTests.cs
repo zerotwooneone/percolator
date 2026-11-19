@@ -81,7 +81,7 @@ public sealed class RelayRegistrationFlyoutViewModelTests
 
         vm.AvailableInWorldRelays.Should().BeEmpty();
 
-        var relaySummary = new SimulatedNodeSummary(_relayNodeId, "Relay Alpha", SimulatedNodeType.Relay, "https://127.0.0.1:5100");
+        var relaySummary = new SimulatedNodeSummary(_relayNodeId, "Relay Alpha", SimulatedNodeType.Relay, "percolator://127.0.0.1:5100");
         relaysList.Add(relaySummary);
 
         vm.RefreshAvailableInWorldRelays();
@@ -114,7 +114,7 @@ public sealed class RelayRegistrationFlyoutViewModelTests
     [Test]
     public async Task RegisterRelayAsync_InWorldMode_WhenRelayNotRunning_SetsErrorMessage()
     {
-        var relaySummary = new SimulatedNodeSummary(_relayNodeId, "Relay Alpha", SimulatedNodeType.Relay, "https://127.0.0.1:5100");
+        var relaySummary = new SimulatedNodeSummary(_relayNodeId, "Relay Alpha", SimulatedNodeType.Relay, "percolator://127.0.0.1:5100");
         _worldStateMock.SetupGet(w => w.Relays).Returns(new ObservableList<SimulatedNodeSummary> { relaySummary });
         _worldStateMock.Setup(w => w.GetRelayHost(_relayNodeId)).Returns((ISimulatedRelayHost?)null);
 
@@ -153,8 +153,10 @@ public sealed class RelayRegistrationFlyoutViewModelTests
         vm.ErrorMessage.Should().Be("Please enter a relay endpoint (host:port).");
     }
 
-    [Test]
-    public async Task RegisterRelayAsync_ExternalMode_WhenInvalidEndpointFormat_SetsErrorMessage()
+    [TestCase("invalid-no-port")]
+    [TestCase("relay://127.0.0.1:5100")]
+    [TestCase("https://127.0.0.1:5100")]
+    public async Task RegisterRelayAsync_ExternalMode_WhenInvalidEndpointFormat_SetsErrorMessage(string endpoint)
     {
         _worldStateMock.SetupGet(w => w.Relays).Returns(new ObservableList<SimulatedNodeSummary>());
 
@@ -166,7 +168,7 @@ public sealed class RelayRegistrationFlyoutViewModelTests
             _flightRecorderMock.Object);
 
         vm.SelectedTabIndex = 1;
-        vm.ExternalRelayInput = "invalid-no-port";
+        vm.ExternalRelayInput = endpoint;
 
         await vm.RegisterRelayAsync();
 

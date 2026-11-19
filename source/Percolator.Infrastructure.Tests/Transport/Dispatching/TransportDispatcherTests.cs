@@ -190,7 +190,7 @@ public sealed class TransportDispatcherTests
         var payload = Encoding.UTF8.GetBytes("EncryptedPayloadData");
 
         var directUri = new Uri("https://peer.example.com:5000");
-        var relayEndpoint = RelayEndpoint.Create("https://relay.example.com:443").Value!;
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
         var routingToken = BlindedRoutingToken.New();
         var deliveryToken = DeliveryToken.FromSpan(new byte[32]);
 
@@ -216,7 +216,7 @@ public sealed class TransportDispatcherTests
 
         var relayResult = await dispatcher.SendAsync(relayJob);
         relayResult.IsSuccess.Should().BeTrue();
-        invoker.LastRelayEndpoint.Should().Be(new Uri("https://relay.example.com:443"));
+        invoker.LastRelayEndpoint.Should().Be(new Uri("percolator://relay.example.com:443"));
         invoker.LastRelayRequest.Should().NotBeNull();
         invoker.LastRelayRequest!.RecipientRoutingToken.ToByteArray().Should().Equal(routingToken.ToByteArray());
         invoker.LastRelayRequest.DeliveryToken.ToByteArray().Should().Equal(deliveryToken.Span.ToArray());
@@ -323,14 +323,14 @@ public sealed class TransportDispatcherTests
         var recipientId = Domain.Identities.PublicIdentityId.New();
         var payload = Encoding.UTF8.GetBytes("EncryptedGroupMessage");
 
-        var relayEndpoint = RelayEndpoint.Create("https://group-relay.example.com:443").Value!;
+        var relayEndpoint = RelayEndpoint.Create("percolator://group-relay.example.com:443").Value!;
         var groupRoute = new DeliveryRoute(DeliveryRouteType.RelayedGroup, null, null, relayEndpoint, null);
         var groupJob = OutboxJob.Create(channelId, ownerId, recipientId, groupRoute, payload, timeProvider).Value!;
 
         var result = await dispatcher.SendAsync(groupJob);
         result.IsSuccess.Should().BeTrue();
 
-        invoker.LastGroupEndpoint.Should().Be(new Uri("https://group-relay.example.com:443"));
+        invoker.LastGroupEndpoint.Should().Be(new Uri("percolator://group-relay.example.com:443"));
         invoker.LastGroupRequest.Should().NotBeNull();
         invoker.LastGroupRequest!.ConversationId.ToByteArray().Should().Equal(channelId.ToByteArray());
         invoker.LastGroupRequest.ZkPresentationProof.Length.Should().Be(72);

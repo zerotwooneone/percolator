@@ -116,14 +116,6 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
                     RelayEndpointInput = stripped;
                 }
             }
-            else if (trimmed.StartsWith("relay://", StringComparison.OrdinalIgnoreCase))
-            {
-                var stripped = trimmed["relay://".Length..].Trim();
-                if (stripped != value)
-                {
-                    RelayEndpointInput = stripped;
-                }
-            }
         }
     }
 
@@ -203,28 +195,24 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
         }
 
         var clean = RelayEndpointInput.Trim();
+        if (clean.StartsWith("relay://", StringComparison.OrdinalIgnoreCase) ||
+            clean.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            clean.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            ErrorMessage = "Invalid relay endpoint format. Expected percolator://host:port or host:port (e.g. 127.0.0.1:5100).";
+            return;
+        }
+
         if (clean.StartsWith("percolator://", StringComparison.OrdinalIgnoreCase))
         {
             clean = clean["percolator://".Length..];
-        }
-        else if (clean.StartsWith("relay://", StringComparison.OrdinalIgnoreCase))
-        {
-            clean = clean["relay://".Length..];
-        }
-        else if (clean.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            clean = clean["https://".Length..];
-        }
-        else if (clean.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-        {
-            clean = clean["http://".Length..];
         }
 
         clean = clean.TrimEnd('/');
         var colonIndex = clean.LastIndexOf(':');
         if (colonIndex <= 0 || !int.TryParse(clean[(colonIndex + 1)..], out var port) || port < 1 || port > 65535)
         {
-            ErrorMessage = "Invalid relay endpoint format. Expected host:port (e.g. 127.0.0.1:5100).";
+            ErrorMessage = "Invalid relay endpoint format. Expected percolator://host:port or host:port (e.g. 127.0.0.1:5100).";
             return;
         }
 
