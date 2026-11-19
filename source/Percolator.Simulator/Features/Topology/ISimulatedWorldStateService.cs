@@ -193,6 +193,8 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
                 }
                 catch { }
             }
+
+            LoopbackPortAllocator.Reset();
         });
     }
 

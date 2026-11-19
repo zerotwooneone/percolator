@@ -296,6 +296,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         }
 
         _masterKeyHandle.Dispose();
+        LoopbackPortAllocator.ReleasePort(BoundPort);
 
         try
         {

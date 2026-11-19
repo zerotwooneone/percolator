@@ -399,7 +399,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             DisplayName,
             Id,
             "HostLifecycle",
-            $"Persona host started and listening on https://127.0.0.1:{BoundPort} (Identity: {PublicIdentityId})"));
+            $"Persona host started and listening on percolator://127.0.0.1:{BoundPort} (Identity: {PublicIdentityId})"));
     }
     public void RotateProfileKey()
     {
@@ -867,6 +867,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         if (_disposed) return;
         _disposed = true;
         await StopAsync();
+        LoopbackPortAllocator.ReleasePort(BoundPort);
         _host?.Dispose();
         _listeningGate.Dispose();
         _drainGate.Dispose();

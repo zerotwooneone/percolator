@@ -181,7 +181,7 @@
                                     <TabItem Header="External Relay">
                                         <StackPanel Spacing="6" Margin="0,8,0,0">
                                             <TextBlock Text="Relay Endpoint (host:port):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                            <TextBox Text="{Binding ExternalRelayInput}" Watermark="e.g. 127.0.0.1:5100 or relay://..." />
+                                            <TextBox Text="{Binding ExternalRelayInput}" Watermark="e.g. 127.0.0.1:5100 or percolator://..." />
                                         </StackPanel>
                                     </TabItem>
                                 </TabControl>
