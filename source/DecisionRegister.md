@@ -70,3 +70,22 @@ Spec: [decision-register-spec](spec/decision-register-spec.md)
    - **Rejected Alternatives:**
      1. *Idiomatic .NET Exception Throwing for Validation:* Rejected due to 1,000–10,000 cycle unmanaged stack-walk overhead and GC object allocation per invalid frame, enabling Denial of Service under network packet flooding.
    - **Safety, Risk, and Security Impact:** Protective control (ISO 14971 Clause 7.1) mitigating [`HAZ-INGRESS-RESOURCE-EXHAUSTION`](RiskRegister.md#2-endpoint-availability-and-integrity-hazards).
+
+2. **`DEC-CANONICAL-PORT-RANGE` (Canonical Port Range 5100–5199 for Peers and Relays):**
+   - **Status & Review Record:** `Approved` (2026-11-18 | Architecture Review)
+   - **Context & Problem Statement:** Dynamic peer listening and relay hosting require a deterministic, bounded port allocation range that avoids collisions with well-known IANA services (0–1023), registered application ports (e.g., 5000/5001 ASP.NET defaults), and wide ephemeral dynamic ranges ([`SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`](SystemRequirements.md#3-external-interfaces-and-resource-boundaries)). Previous revisions loosely referenced 5100–5299.
+   - **Decision & Technical Rationale:** Standardize Percolator's canonical listening range to `5100–5199` inclusive (100 discrete ports) for both Peer nodes and Relay nodes. Domain value object `PortRange.DefaultDynamicRange` defaults to `[5100, 5199]`. `IPortReservationService` probes and reserves sequential loopback/LAN ports within this boundary. Direct peer invitations omit the port or specify an explicit sub-range within `[5100, 5199]`.
+   - **Rejected Alternatives:**
+     1. *Unbounded Ephemeral Allocation (Port 0 / 49152–65535):* Rejected because firewalls and router NAT pinholes cannot be pre-configured, and invitation payloads would require broadcasting ephemeral port shifts.
+     2. *Wide 5100–5299 Range (200 ports):* Rejected as unnecessarily wide; 100 ports is more than sufficient for multi-persona developer workspaces while tightening the local port-scanning attack surface.
+   - **Safety, Risk, and Security Impact:** Protective control (ISO 14971 Clause 7.1) mitigating [`HAZ-INGRESS-RESOURCE-EXHAUSTION`](RiskRegister.md#2-endpoint-availability-and-integrity-hazards) and port collision denial-of-service.
+
+3. **`DEC-CANONICAL-URI-SCHEME` (Unified `percolator://` Application and Network URI Scheme):**
+   - **Status & Review Record:** `Approved` (2026-11-18 | Architecture Review)
+   - **Context & Problem Statement:** Peer invitation payloads and relay endpoint descriptors previously used inconsistent schemes across presentation and transport layers (`percolator://`, `relay://`, and `https://`), complicating OS protocol registration and violating user interface cohesion ([`SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`](SystemRequirements.md#3-external-interfaces-and-resource-boundaries)).
+   - **Decision & Technical Rationale:** Enforce `percolator://` as the sole canonical URI scheme for all Percolator network and out-of-band links: `percolator://invite?...` for peer invitations and `percolator://{host}:{port}` for relay endpoints. The OS registers a single application protocol handler (`percolator://`). Outward infrastructure transport adapters (`PeerGrpcChannelFactory`) transparently translate `percolator://` endpoints to underlying HTTP/2 TLS sockets (`https://`) exclusively when invoking the .NET gRPC client, ensuring all application, domain, and presentation surfaces remain decoupled from transport-specific scheme requirements.
+   - **Rejected Alternatives:**
+     1. *Dual Schemes (`percolator://` for peers and `relay://` for relays):* Rejected because relays and peers share the same transport layer and crypto protocol (relays are network topology roles, not distinct protocols), and registering multiple custom protocol handlers with host operating systems creates installation friction and link routing failures.
+     2. *Raw `https://` Schemes:* Rejected because generic HTTPS URIs trigger web browsers rather than launching or routing to the Percolator desktop application, leaking user network topology to browser process pools.
+   - **Safety, Risk, and Security Impact:** Protective control (ISO 14971 Clause 7.1) mitigating [`HAZ-TRANSPORT-SPOOFING`](RiskRegister.md#1-cryptographic-identity-and-privacy-hazards) and host protocol confusion.
+
