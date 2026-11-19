@@ -163,10 +163,11 @@ public sealed class DrainScheduler
 
         var active = _activeIdentities.Current;
         var desired = entries
-            .SelectMany(e => e.LinkedOwnerIdentityIds
+            .SelectMany(e => e.EnabledOwnerIdentityIds
                 .Where(active.Contains)
                 .Select(o => new MailboxDrainTarget(o, e.RelayIdentityId, e.Endpoint)))
             .ToHashSet();
+
 
         List<MailboxDrainTarget> toCancel;
         List<MailboxDrainTarget> toEnqueue;

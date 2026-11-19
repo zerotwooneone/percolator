@@ -73,8 +73,10 @@ public sealed class RelayDirectoryService : IRelayDirectory
                 isLocal ? profile!.DisplayName : registration.Endpoint.Value,
                 registration.Endpoint,
                 isLocal,
-                registration.Bindings.Select(b => b.OwnerIdentityId).ToList()));
+                registration.Bindings.Select(b => b.OwnerIdentityId).ToList(),
+                registration.Bindings.Where(b => b.Status == RelayLinkStatus.Enabled).Select(b => b.OwnerIdentityId).ToList()));
         }
+
 
         return entries;
     }
@@ -231,6 +233,37 @@ public sealed class RelayDirectoryService : IRelayDirectory
         return DomainResult.Success();
     }
 
+    public async Task<DomainResult> SetMailboxBindingStatusAsync(
+        PublicIdentityId relayIdentityId,
+        PublicIdentityId ownerIdentityId,
+        RelayLinkStatus status,
+        CancellationToken ct = default)
+    {
+        var registration = await _relayRepository.GetByIdAsync(relayIdentityId, ct).ConfigureAwait(false);
+        if (registration is null)
+        {
+            return DomainResult.Failure(
+                new DomainError("RELAY_NOT_FOUND", "No relay registration exists for the given relay identity."));
+        }
+
+        var result = registration.SetBindingStatus(ownerIdentityId, status);
+        if (result.IsFailure)
+        {
+            return result;
+        }
+
+        await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+        await _eventPublisher.PublishAsync(
+            new MailboxBindingChangedEvent(
+                ownerIdentityId,
+                relayIdentityId,
+                status == RelayLinkStatus.Enabled ? MailboxBindingChangeKind.Linked : MailboxBindingChangeKind.Unlinked),
+            ct).ConfigureAwait(false);
+
+        return DomainResult.Success();
+    }
+
+
     public async Task<DomainResult> EnsureMailboxProvisionedAsync(
         PublicIdentityId relayIdentityId,
         PublicIdentityId ownerIdentityId,
@@ -326,6 +359,12 @@ public sealed class RelayDirectoryService : IRelayDirectory
         var registrations = await _relayRepository.GetByOwnerIdentityAsync(ownerIdentityId, ct).ConfigureAwait(false);
         foreach (var registration in registrations)
         {
+            var binding = registration.Bindings.FirstOrDefault(b => b.OwnerIdentityId == ownerIdentityId);
+            if (binding is null || binding.Status != RelayLinkStatus.Enabled)
+            {
+                continue;
+            }
+
             var tokensResult = await GetMailboxTokensAsync(ownerIdentityId, registration.Id, ct).ConfigureAwait(false);
             if (tokensResult.IsFailure)
             {

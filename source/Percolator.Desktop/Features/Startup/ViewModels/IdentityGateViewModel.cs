@@ -185,12 +185,13 @@ public partial class IdentityGateViewModel : ViewModelBase
 
             _exchangeList.Clear();
             var exchangeEntries = await _exchanges.ListAsync(ct).ConfigureAwait(true);
-            foreach (var exchangeEntry in exchangeEntries)
+            foreach (var exchangeEntry in exchangeEntries.Where(e => e.IsSelfHosted))
             {
                 var tile = BuildExchangeTile(exchangeEntry);
                 _exchangeList.Add(tile);
                 await ProbeExchangeAsync(tile, ct).ConfigureAwait(true);
             }
+
 
             RefreshDerivedState();
             SetAutoStartCheckedSilently(SingleSelected?.AutoStart ?? false);

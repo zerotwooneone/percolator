@@ -4,6 +4,7 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Connections;
+using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer;
@@ -16,8 +17,10 @@ using Percolator.Desktop.Features.Shell.ViewModels;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Desktop.Features.Transports.Services;
 using Percolator.Desktop.Features.Transports.ViewModels;
+using Percolator.Infrastructure.Persistence.Queries;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.PluginSdk;
+
 
 /// <summary>
 /// Session-container registrations owned by the Desktop executable (CTX-03). Session-bound
@@ -59,6 +62,9 @@ internal static class DesktopSessionServiceCollectionExtensions
         // Inbound contact query service singleton facade (CONN-11)
         services.AddScoped<SqlPeerContactQueryService>();
         services.AddSingleton<IPeerContactQueryService, DesktopPeerContactQueryService>();
+
+        // Persona relay query service (CONN-12d)
+        services.AddScoped<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
 
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as

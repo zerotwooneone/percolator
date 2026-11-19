@@ -506,6 +506,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.RoutingToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.DrainToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.PreviousDrainToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.Status).HasDefaultValue(1);
             entity.HasOne<RelayRegistrationEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.RelayIdentityId)

@@ -10,7 +10,12 @@ public sealed record RelayDirectoryEntry(
     string DisplayName,
     RelayEndpoint Endpoint,
     bool IsLocalRelayHost,
-    IReadOnlyList<PublicIdentityId> LinkedOwnerIdentityIds);
+    IReadOnlyList<PublicIdentityId> LinkedOwnerIdentityIds,
+    IReadOnlyList<PublicIdentityId>? EnabledOwnerIdentityIds = null)
+{
+    public IReadOnlyList<PublicIdentityId> EnabledOwnerIdentityIds { get; init; } =
+        EnabledOwnerIdentityIds ?? LinkedOwnerIdentityIds;
+}
 
 public interface IRelayDirectory
 {
@@ -36,6 +41,11 @@ public interface IRelayDirectory
         PublicIdentityId relayIdentityId,
         PublicIdentityId ownerIdentityId,
         CancellationToken ct = default);
+    Task<DomainResult> SetMailboxBindingStatusAsync(
+        PublicIdentityId relayIdentityId,
+        PublicIdentityId ownerIdentityId,
+        RelayLinkStatus status,
+        CancellationToken ct = default);
     Task<DomainResult<MailboxTokenTriad>> GetMailboxTokensAsync(
         PublicIdentityId ownerIdentityId,
         PublicIdentityId relayIdentityId,
@@ -53,3 +63,4 @@ public interface IRelayDirectory
         PublicIdentityId ownerIdentityId,
         CancellationToken ct = default);
 }
+

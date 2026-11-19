@@ -86,6 +86,10 @@ public sealed class IdentityGateViewModelTests
     private IList<SelectablePersonaModel> Personas =>
         (IList<SelectablePersonaModel>)_vm.Personas;
 
+    private IList<ExchangeTileViewModel> Exchanges =>
+        (IList<ExchangeTileViewModel>)_vm.Exchanges;
+
+
     private static PersonaDirectoryEntry Entry(
         string name, int port, bool autoStart = false, int? lastBound = null) =>
         new(PublicIdentityId.New(), name, port, lastBound, autoStart, 0);
@@ -577,4 +581,35 @@ public sealed class IdentityGateViewModelTests
         capturedInput.Should().NotBeNull();
         capturedInput!.InitialPreferredPort.Should().Be(5101, "probed available port must be forwarded to the exchange creation dialog");
     }
+
+    [Test]
+    public async Task LoadAsync_OnlyAddsSelfHostedExchangesToExchangesList()
+    {
+        var alice = Entry("Alice", 5100);
+        ArrangeDirectory(alice);
+        _ports
+            .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
+
+        var selfHosted = new ExchangeDirectoryEntry(
+            Guid.NewGuid(), "Local Relay", "percolator://127.0.0.1:5102", 5102, IsSelfHosted: true, Array.Empty<Guid>());
+        var remote = new ExchangeDirectoryEntry(
+            Guid.NewGuid(), "Remote Relay", "percolator://remote.example.com:5102", 5102, IsSelfHosted: false, Array.Empty<Guid>());
+
+        _exchanges
+            .Setup(e => e.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { selfHosted, remote });
+
+        _ports
+            .Setup(p => p.ProbeAsync(5102, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5102));
+
+        await _vm.LoadAsync(_session);
+
+        Exchanges.Count.Should().Be(1);
+        Exchanges[0].DisplayName.Should().Be("Local Relay");
+        Exchanges[0].IsSelfHosted.Should().BeTrue();
+    }
 }
+
+

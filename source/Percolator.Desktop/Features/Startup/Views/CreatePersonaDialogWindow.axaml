@@ -45,7 +45,34 @@
                      Text="{Binding DisplayName, Mode=TwoWay}" />
             <TextBox Watermark="Preferred port (e.g. 5100)"
                      Text="{Binding PreferredPort, Mode=TwoWay}" />
+
+            <!-- Connected Relays (visible in edit mode when the persona has linked relays) -->
+            <StackPanel Spacing="8" IsVisible="{Binding HasConnectedRelays}" Margin="0,8,0,0">
+                <TextBlock Text="Connected Relays"
+                           Theme="{StaticResource CaptionTextBlockStyle}"
+                           FontWeight="SemiBold" />
+                <ItemsControl ItemsSource="{Binding ConnectedRelays}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PersonaRelayItemViewModel">
+                            <Border Classes="persona-card" Padding="8" Margin="0,0,0,6">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Endpoint}" Theme="{StaticResource CaptionTextBlockStyle}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1"
+                                                  IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                                                  OnContent="Enabled"
+                                                  OffContent="Disabled"
+                                                  VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
         </StackPanel>
+
 
         <Grid Grid.Row="1" ColumnDefinitions="*,*">
             <Button Grid.Column="0"

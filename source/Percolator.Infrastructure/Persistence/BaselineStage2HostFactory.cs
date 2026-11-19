@@ -20,6 +20,7 @@ using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Events;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Persistence.Queries;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Vault;
@@ -94,6 +95,7 @@ public sealed class BaselineStage2HostFactory
             services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
             services.AddScoped<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
             services.AddScoped<IRelayDirectory, RelayDirectoryService>();
+            services.AddScoped<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
 
             // Platform singletons required by the two services above.
             services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();

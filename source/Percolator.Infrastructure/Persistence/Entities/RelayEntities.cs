@@ -77,7 +77,9 @@ public sealed class RelayMailboxBindingEntity
     public byte[]? PreviousDrainToken { get; set; }
     public DateTimeOffset LinkedAtUtc { get; set; }
     public DateTimeOffset? MailboxProvisionedUtc { get; set; }
+    public int Status { get; set; } = 1; // 1 = Enabled, 2 = Disabled
 }
+
 
 public sealed class RelayMailboxCapabilityEntity
 {

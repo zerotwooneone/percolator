@@ -131,7 +131,7 @@ Enforced `percolator://` as canonical URI scheme across all network/UI surfaces 
 
 ---
 
-### CONN-12d ⬜ Persona-Scoped Relay Management, CQRS Query Service & Honest Identity Gate Exchanges
+### CONN-12d ✅ Persona-Scoped Relay Management, CQRS Query Service & Honest Identity Gate Exchanges
 
 - **Specification Governance:**
   1. **Pre-Activation Seam & CQRS Query Port Discipline:**

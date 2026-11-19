@@ -258,8 +258,12 @@ public sealed class PreKeyMaintenanceServiceTests
         public Task<DomainResult> UnlinkIdentityAsync(
             PublicIdentityId relayIdentityId, PublicIdentityId ownerIdentityId, CancellationToken ct = default) =>
             throw new NotSupportedException();
+        public Task<DomainResult> SetMailboxBindingStatusAsync(
+            PublicIdentityId relayIdentityId, PublicIdentityId ownerIdentityId, RelayLinkStatus status, CancellationToken ct = default) =>
+            throw new NotSupportedException();
         public Task<DomainResult> ProvisionLinkedMailboxesAsync(
             PublicIdentityId ownerIdentityId, CancellationToken ct = default) =>
             throw new NotSupportedException();
     }
+
 }

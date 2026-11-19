@@ -16,4 +16,6 @@ public sealed record RelayMailboxBinding(
     DeliveryToken DrainToken,
     DateTimeOffset LinkedAtUtc,
     DeliveryToken? PreviousDrainToken = null,
-    DateTimeOffset? MailboxProvisionedUtc = null);
+    DateTimeOffset? MailboxProvisionedUtc = null,
+    RelayLinkStatus Status = RelayLinkStatus.Enabled);
+

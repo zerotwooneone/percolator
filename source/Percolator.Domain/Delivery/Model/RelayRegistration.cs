@@ -124,6 +124,23 @@ public sealed class RelayRegistration : AggregateRoot<PublicIdentityId>
     }
 
     /// <summary>
+    /// Updates the operational status (Enabled/Disabled) of an identity's mailbox binding.
+    /// </summary>
+    public DomainResult SetBindingStatus(PublicIdentityId ownerIdentityId, RelayLinkStatus status)
+    {
+        var index = _bindings.FindIndex(b => b.OwnerIdentityId == ownerIdentityId);
+        if (index < 0)
+        {
+            return DomainResult.Failure(
+                new DomainError("MAILBOX_BINDING_NOT_FOUND", "Identity is not linked to this relay."));
+        }
+
+        _bindings[index] = _bindings[index] with { Status = status };
+        return DomainResult.Success();
+    }
+
+
+    /// <summary>
     /// Generates a fresh drain token for the linked identity's mailbox, retaining the
     /// prior token in PreviousDrainToken for RegisterMailboxRequest.existing_drain_token.
     /// </summary>

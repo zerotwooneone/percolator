@@ -124,7 +124,8 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
                     RoutingToken = binding.RoutingToken.ToByteArray(),
                     DrainToken = binding.DrainToken.Span.ToArray(),
                     PreviousDrainToken = binding.PreviousDrainToken?.Span.ToArray(),
-                    LinkedAtUtc = binding.LinkedAtUtc
+                    LinkedAtUtc = binding.LinkedAtUtc,
+                    Status = (int)binding.Status
                 });
             }
             else
@@ -133,6 +134,7 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
                 row.DrainToken = binding.DrainToken.Span.ToArray();
                 row.PreviousDrainToken = binding.PreviousDrainToken?.Span.ToArray();
                 row.LinkedAtUtc = binding.LinkedAtUtc;
+                row.Status = (int)binding.Status;
             }
         }
 
@@ -162,7 +164,8 @@ public sealed class SqliteRelayRegistrationRepository : IRelayRegistrationReposi
             DeliveryToken.FromSpan(b.DrainToken),
             b.LinkedAtUtc,
             b.PreviousDrainToken == null ? null : DeliveryToken.FromSpan(b.PreviousDrainToken),
-            b.MailboxProvisionedUtc));
+            b.MailboxProvisionedUtc,
+            (RelayLinkStatus)b.Status));
 
         return RelayRegistration.Rehydrate(
             new Domain.Identities.PublicIdentityId(entity.RelayIdentityId),

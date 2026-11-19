@@ -41,6 +41,7 @@ using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Events;
 using Percolator.Infrastructure.Maintenance;
 using Percolator.Infrastructure.Persistence;
+using Percolator.Infrastructure.Persistence.Queries;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.BlobStorage;
 using Percolator.Infrastructure.Plugins.FileTransfer;
@@ -208,6 +209,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<IPeerContactRepository, SqlitePeerContactRepository>();
         services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
+        services.AddScoped<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
         services.AddScoped<IChannelRepository, SqliteChannelRepository>();
 
         services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>()));

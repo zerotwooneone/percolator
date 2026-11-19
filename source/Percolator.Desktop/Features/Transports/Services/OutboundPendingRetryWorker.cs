@@ -59,11 +59,24 @@ public sealed class OutboundPendingRetryWorker : IOutboundPendingRetryWorker
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Stopping outbound pending retry worker; cancelling all active retry loops");
         _stoppingCts.Cancel();
-        return Task.CompletedTask;
+
+        var tasks = _activeRetries.Values.Select(v => v.WorkerTask).ToArray();
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(tasks).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception while awaiting retry tasks shutdown");
+            }
+        }
     }
 
     public void EnqueueRetry(OutboundPendingConnectionModel model)
