@@ -82,13 +82,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _currentPersona = _currentPersonaService.CurrentPersona;
 
         _currentPersonaService.CurrentPersonaChanged
+            .ObserveOnCurrentSynchronizationContext()
             .Subscribe(p => CurrentPersona = p)
             .AddTo(ref Bag);
     }
 
     partial void OnCurrentPersonaChanged(ActivePersonaModel? value)
     {
-        _ = RefreshPendingCountAsync();
+        RefreshPendingCountCommand.Execute(null);
     }
 
     [RelayCommand]
@@ -142,7 +143,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public async Task RefreshPendingCountAsync()
+    public async Task RefreshPendingCountAsync(CancellationToken ct = default)
     {
         if (CurrentPersona is not { } persona || !persona.IdentityId.IsValid)
         {
@@ -150,7 +151,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        var contacts = await _contactQueryService.GetContactSummariesAsync(persona.IdentityId);
+        var contacts = await _contactQueryService.GetContactSummariesAsync(persona.IdentityId, ct).ConfigureAwait(true);
         PendingRequestCount = contacts.Count(c => c.State == ContactState.PendingApproval);
     }
 }

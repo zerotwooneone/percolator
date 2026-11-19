@@ -33,10 +33,20 @@ public sealed class MainWindowViewModelTests
     private Subject<ActivePersonaModel?> _currentPersonaChanged = null!;
     private PublicIdentityId _activePersonaId;
     private ActivePersonaModel _testPersonaModel = null!;
+    private SynchronizationContext? _previousSyncContext;
+
+    private sealed class ImmediateSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) => d(state);
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+    }
 
     [SetUp]
     public void SetUp()
     {
+        _previousSyncContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(new ImmediateSynchronizationContext());
+
         _windowManagerMock = new Mock<IWindowManager>();
         _contactQueryMock = new Mock<IPeerContactQueryService>();
         _currentPersonaServiceMock = new Mock<ICurrentPersonaService>();
@@ -52,6 +62,7 @@ public sealed class MainWindowViewModelTests
     [TearDown]
     public void TearDown()
     {
+        SynchronizationContext.SetSynchronizationContext(_previousSyncContext);
         _currentPersonaChanged.Dispose();
     }
 

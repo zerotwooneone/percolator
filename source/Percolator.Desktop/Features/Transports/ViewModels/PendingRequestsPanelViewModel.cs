@@ -15,6 +15,7 @@ using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Model;
+using R3;
 
 namespace Percolator.Desktop.Features.Transports.ViewModels;
 
@@ -52,8 +53,12 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
 
         var view = _requestsList.CreateView(r => r);
         Requests = view.ToNotifyCollectionChanged();
-        Bag.Add(view);
-        Bag.Add(Requests);
+        view.AddTo(ref Bag);
+        Requests.AddTo(ref Bag);
+
+        view.ObserveCountChanged(notifyCurrentCount: true)
+            .Subscribe(count => RequestCount = count)
+            .AddTo(ref Bag);
 
         if (dialogContext.Data != default)
         {
@@ -80,14 +85,16 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
     [ObservableProperty]
     private string? _errorMessage;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRequests))]
+    [NotifyPropertyChangedFor(nameof(IsEmpty))]
+    private int _requestCount;
+
     /// <summary>True when one or more pending requests are queued.</summary>
-    public bool HasRequests => _requestsList.Count > 0;
+    public bool HasRequests => RequestCount > 0;
 
     /// <summary>True when no pending requests exist and background loading is not active.</summary>
-    public bool IsEmpty => _requestsList.Count == 0 && !IsLoading;
-
-    /// <summary>Number of pending inbound requests currently staged.</summary>
-    public int RequestCount => _requestsList.Count;
+    public bool IsEmpty => RequestCount == 0 && !IsLoading;
 
     /// <summary>The active persona identity whose incoming contact queue is managed.</summary>
     public PublicIdentityId? ActivePersonaId => _activePersonaId;
@@ -140,9 +147,6 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
         finally
         {
             IsLoading = false;
-            OnPropertyChanged(nameof(IsEmpty));
-            OnPropertyChanged(nameof(HasRequests));
-            OnPropertyChanged(nameof(RequestCount));
         }
     }
 
@@ -179,9 +183,6 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
             }
 
             _requestsList.Remove(request);
-            OnPropertyChanged(nameof(HasRequests));
-            OnPropertyChanged(nameof(IsEmpty));
-            OnPropertyChanged(nameof(RequestCount));
             StatusMessage = $"Accepted connection with {request.DisplayName}.";
         }
         catch (Exception ex)
@@ -215,9 +216,6 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
             }
 
             _requestsList.Remove(request);
-            OnPropertyChanged(nameof(HasRequests));
-            OnPropertyChanged(nameof(IsEmpty));
-            OnPropertyChanged(nameof(RequestCount));
             StatusMessage = $"Dismissed request from {request.DisplayName}.";
         }
         catch (Exception ex)
@@ -251,9 +249,6 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
             }
 
             _requestsList.Remove(request);
-            OnPropertyChanged(nameof(HasRequests));
-            OnPropertyChanged(nameof(IsEmpty));
-            OnPropertyChanged(nameof(RequestCount));
             StatusMessage = $"Blocked {request.DisplayName}. Future packets will be silently dropped.";
         }
         catch (Exception ex)

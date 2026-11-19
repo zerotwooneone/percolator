@@ -24,7 +24,7 @@ namespace Percolator.Desktop.Features.Startup.ViewModels;
 /// <summary>
 /// Presentation model for an individual connected relay item inside the persona customize dialog.
 /// </summary>
-public sealed partial class PersonaRelayItemViewModel : ObservableObject
+public sealed partial class PersonaRelayItemViewModel : ViewModelBase
 {
     public PublicIdentityId RelayId { get; }
     public string DisplayName { get; }
@@ -33,6 +33,7 @@ public sealed partial class PersonaRelayItemViewModel : ObservableObject
     public RelayLinkStatus InitialStatus { get; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasChanged))]
     private bool _isEnabled;
 
     public bool HasChanged => IsEnabled != (InitialStatus == RelayLinkStatus.Enabled);
