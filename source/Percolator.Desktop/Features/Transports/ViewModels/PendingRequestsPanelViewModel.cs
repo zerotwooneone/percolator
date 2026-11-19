@@ -52,7 +52,9 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var view = _requestsList.CreateView(r => r);
-        Requests = view.ToNotifyCollectionChanged();
+        Requests = SynchronizationContext.Current != null
+            ? view.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current)
+            : view.ToNotifyCollectionChanged();
         view.AddTo(ref Bag);
         Requests.AddTo(ref Bag);
 

@@ -32,6 +32,8 @@ Any file governed by this specification MUST include this header comment on line
 | **[VM-015]** | **Computed Properties vs. Converters** | Expose UI state transformations (e.g. `HasErrors`, `FormattedCount`, `IsActionVisible`) as computed ViewModel properties or R3 projections. | MUST NOT create single-use `IValueConverter` classes for simple boolean or formatting transformations that can be tested in pure C#. |
 | **[VM-016]** | **Form Validation (`INotifyDataErrorInfo`)** | Implement input form validation by inheriting from CommunityToolkit’s `ObservableValidator` and applying standard validation attributes (`[Required]`, `[MinLength]`). | MUST NOT hand-roll ad-hoc boolean error flags when Avalonia natively renders validation rings and tooltips for `INotifyDataErrorInfo`. |
 | **[VM-017]** | **UI State Service Consumption** | Consume shared presentation state via injected UI State Services ([`UiStateService.spec.md`](./UiStateService.spec.md)). ViewModels MUST marshal service notifications onto the UI thread (`.ObserveOnUI()`) before assigning to UI-bound properties, and MUST mutate state via semantic service methods. | MUST NOT reference other ViewModels directly to share state, mutate service collections directly, or omit UI thread marshaling when consuming free-threaded state service streams. |
+| **[VM-018]** | **Compiled Bindings & Source Generator Contracts** | Adhere strictly to CommunityToolkit source generator conventions (`_field` -> `Property`, `MethodAsync` -> `MethodCommand`). Specify explicit `x:DataType` scopes on Views and `DataTemplate` boundaries. | MUST NOT omit `x:DataType` in Views or templates, rely on reflection-based binding resolution, or declare manual wrapper properties/commands that collide with source-generated members. |
+| **[VM-019]** | **Collection View Synchronization & Event Dispatching** | Synchronize collections via `ISynchronizedView.ToNotifyCollectionChanged(...)`, conditionally passing `SynchronizationContextCollectionEventDispatcher.Current` only when `SynchronizationContext.Current != null`. Dispose views and collections via `Bag.Add(...)` and dispose projected item ViewModels via `view.ObserveRemove()`. | MUST NOT access `SynchronizationContextCollectionEventDispatcher.Current` unconditionally without checking `SynchronizationContext.Current != null` (throws `TypeInitializationException` in test runners), or fail to anchor `ISynchronizedView` and collection to `Bag`. |
 
 ---
 
@@ -216,6 +218,46 @@ public partial class ConversationViewModel : ViewModelBase
 
     public bool HasMessages => MessageCount > 0;
 }
+```
+
+### 3.6 Compiled Bindings & Source Generator Contracts ([VM-018])
+```csharp
+// ❌ BAD: Hand-rolled commands/properties and missing DataType causing reflection fallback
+<!-- In XAML: <UserControl> (missing x:DataType="vm:PendingRequestsPanelViewModel") -->
+public partial class PendingRequestsPanelViewModel : ViewModelBase
+{
+    // VIOLATION: Manual ICommand wrapper fights source generator contracts
+    public ICommand ClearAllCommand { get; } 
+}
+
+// ✅ GOOD: Source-generated RelayCommand and strict compiled binding contract
+<!-- In XAML: <UserControl x:DataType="vm:PendingRequestsPanelViewModel"> -->
+public partial class PendingRequestsPanelViewModel : ViewModelBase
+{
+    [RelayCommand]
+    private async Task ClearAllAsync()
+    {
+        // Source generator automatically produces 'public IAsyncRelayCommand ClearAllCommand { get; }'
+    }
+}
+```
+
+### 3.7 Collection View Synchronization with Dispatcher Fallback ([VM-019])
+```csharp
+// ❌ BAD: Unconditional dispatcher access throws in test environments where SynchronizationContext is null
+Peers = _view.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current);
+
+// ✅ GOOD: Safe fallback preserves UI thread marshaling in app while enabling in-memory test execution
+Peers = SynchronizationContext.Current != null
+    ? _view.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current)
+    : _view.ToNotifyCollectionChanged();
+
+_view.ObserveRemove()
+    .Subscribe(e => e.Value.View.Dispose())
+    .AddTo(ref Bag);
+
+Bag.Add(_view);
+Bag.Add(Peers);
 ```
 
 ---

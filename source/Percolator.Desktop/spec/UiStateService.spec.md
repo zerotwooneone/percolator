@@ -245,5 +245,4 @@ public void Dispose()
 
 * **R3 Reactive Extension Standards**: [`Percolator.Desktop/spec/R3.spec.md`](./R3.spec.md) ([R3-001]–[R3-014])
 * **ObservableCollections Framework**: [Cysharp/ObservableCollections](https://github.com/Cysharp/ObservableCollections)
-* **ViewModel Presentation Architecture**: [`Percolator.Desktop/spec/ViewModel.spec.md`](./ViewModel.spec.md) ([VM-001]–[VM-016])
 * **QMS Invariants**: `SYS-SESSION-LOCK-ZEROIZATION`, `SYS-CONTACT-CONSENT-GATE`, `SYS-PRE-ACTIVATION-STEALTH`
