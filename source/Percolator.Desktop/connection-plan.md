@@ -25,6 +25,7 @@ Implementation Gate: UNLOCKED
 | Layer | Type | Location | Lifetime |
 | :--- | :--- | :--- | :--- |
 | Domain | `PortRange` | `Percolator.Domain/Identities/ValueObjects/PortRange.cs` | Transient (Value Object) |
+| Domain | `RelayLinkStatus` | `Percolator.Domain/Delivery/ValueObjects/RelayLinkStatus.cs` | Transient (Enum) |
 | Application | `PeerInvitationPayload` | `Percolator.Application/Invitations/PeerInvitationPayload.cs` | Transient (Record) |
 | Application | `IPeerInvitationCodec` | `Percolator.Application/Invitations/IPeerInvitationCodec.cs` | Singleton |
 | Application | `PeerInvitationCodec` | `Percolator.Application/Invitations/PeerInvitationCodec.cs` | Singleton |
@@ -34,6 +35,9 @@ Implementation Gate: UNLOCKED
 | Application | `OutboundConnectionResult` | `Percolator.Application/Connections/OutboundConnectionResult.cs` | Transient (Record) |
 | Application | `IOutboundConnectionWorkflow` | `Percolator.Application/Connections/IOutboundConnectionWorkflow.cs` | Scoped |
 | Application | `OutboundConnectionWorkflow` | `Percolator.Application/Connections/OutboundConnectionWorkflow.cs` | Scoped |
+| Application | `PersonaRelayLinkReadModel` | `Percolator.Application/Delivery/Ports/IPersonaRelayQueryService.cs` | Transient (Record) |
+| Application | `IPersonaRelayQueryService` | `Percolator.Application/Delivery/Ports/IPersonaRelayQueryService.cs` | Scoped |
+| Infrastructure | `SqlPersonaRelayQueryService` | `Percolator.Infrastructure/Persistence/Queries/SqlPersonaRelayQueryService.cs` | Scoped |
 | Infrastructure | `PeerTransportServerOptions` | `Percolator.Infrastructure/Transport/PeerTransportServerOptions.cs` | Singleton |
 | Infrastructure | `TransportCertificateSanBuilder` | `Percolator.Infrastructure/Transport/TransportCertificateSanBuilder.cs` | Static (Internal Helper) |
 | Simulator | `ISimulatorChaosController` | `Percolator.Simulator/Features/Chaos/ISimulatorChaosController.cs` | Singleton |
@@ -51,6 +55,7 @@ Implementation Gate: UNLOCKED
 | Desktop | `AddConnectionDialogViewModel` | `Percolator.Desktop/Features/Transports/ViewModels/AddConnectionDialogViewModel.cs` | Transient |
 | Desktop | `OutboundPendingConnectionRetryWorker` | `Percolator.Desktop/Features/Transports/Services/OutboundPendingConnectionRetryWorker.cs` | Singleton (Hosted Service) |
 | Desktop | `ShareInvitationDialogViewModel` | `Percolator.Desktop/Features/Transports/ViewModels/ShareInvitationDialogViewModel.cs` | Transient |
+| Desktop | `PersonaRelayItemViewModel` | `Percolator.Desktop/Features/Startup/ViewModels/CreatePersonaDialogViewModel.cs` | Transient |
 
 ---
 
@@ -122,112 +127,265 @@ Unified Desktop and Simulator connection mechanics using `IOutboundConnectionWor
 ---
 
 ### CONN-12c ✅ Scheme Unification (`percolator://`), Canonical Ports (5100–5199), Honest Relay UI & Simulator Decoupling
+Enforced `percolator://` as canonical URI scheme across all network/UI surfaces with transparent mapping to `https://` in `PeerGrpcChannelFactory`. Unified canonical port range `5100–5199` across domain and transport infrastructure. Simplified simulator relay export to a direct 1-click clipboard button, and decoupled coordinators from direct recipient DB/RAM writes by routing handshakes strictly through wire ingress and outbox pipelines. Eradicated unused DB port leasing artifacts (`IOpsPortReservationService`) and segregated simulation reset lifecycle (`ISimulatedPortReservationService`).
+
+---
+
+### CONN-12d ⬜ Persona-Scoped Relay Management, CQRS Query Service & Honest Identity Gate Exchanges
 
 - **Specification Governance:**
-  1. **Canonical Scheme Invariant (`percolator://`)**: Enforces `percolator://` as the sole canonical URI scheme for all network and UI surfaces per [`DEC-CANONICAL-URI-SCHEME`](../DecisionRegister.md#3-integration-transport-and-platform-decisions). Rejects obsolete schemes (`relay://`, `https://`) in user and dialog inputs. Inward port and domain value object `RelayEndpoint` formats strings as `percolator://{host}:{port}`. Outward adapter `PeerGrpcChannelFactory` transparently translates `percolator://` URIs to `https://` exclusively when calling `SocketsHttpHandler` / `GrpcChannel.ForAddress`.
-  2. **Canonical Port Range Invariant (5100–5199)**: Sets canonical port boundary to `5100–5199` inclusive (100 discrete ports) across domain value object `PortRange.DefaultDynamicRange` and `PortReservationService` per [`DEC-CANONICAL-PORT-RANGE`](../DecisionRegister.md#3-integration-transport-and-platform-decisions).
-  3. **Relay Card Ergonomics & Honest UI**: Replaces the multi-field `RelayEndpointExportFlyoutViewModel` flyout on `RelayCardView.axaml` with a direct 1-click `📋 Copy Endpoint` button executing `CopyEndpointCommand`, copying `percolator://127.0.0.1:{BoundPort}` to the clipboard. Binds `SimulatedRelayHost` explicitly to `IPAddress.Loopback` (`127.0.0.1`).
-  4. **Coordinator Database & RAM Decoupling**: Eliminates cross-host recipient database pre-population and manual contact/channel insertions from `RelayProvisioningCoordinator.InitiateRelayedHandshakeAsync`. Delegates handshake initiation strictly to the initiator host's `IPeerConnectionService.ConnectToPeerAsync`, allowing the recipient to establish channels and contacts naturally through wire ingress during mailbox draining. Streamlines `DirectChatCoordinator` to resolve routes via sender's `IRoutingCoordinator`.
+  1. **Pre-Activation Seam & CQRS Query Port Discipline:**
+     Per [`DEP-DESKTOP-PRE-ACTIVATION-STEALTH`](../spec/deployable-requirements.md) and [`INV-DESKTOP-STEALTH-ACTIVATION-GATE`](Features/Startup/ViewModels/IdentityGateViewModel.cs), the Identity Gate runs post-unlock using the Stage 2 authenticated session container (`session.Services`), but before the main shell and before any network listeners or background workers activate (`session.StartAsync`). Per [`implementation-plan-spec`](../spec/implementation-plan.spec.md#4-strict-ddd-hexagonal-rules) §4.8 and QMS Principle 6 (CQRS Read-Path Guidance), UI read projections MUST NOT load write-heavy domain aggregates (`RelayRegistration`) into memory. A dedicated query service `IPersonaRelayQueryService` reads lightweight projection models (`PersonaRelayLinkReadModel`) directly from EF Core with zero domain entity tracking, zero cryptographic key loading, and zero network side effects.
+  2. **Honest Identity Gate Exchanges:**
+     The Identity Gate exists exclusively to acquire local port leases (`IPortLease`) and launch local listening servers. Remote relays do not listen on local sockets; presenting them as launchable tiles is misleading and results in a no-op placebo toggle. The Identity Gate's `_exchangeList` strictly filters for `IsSelfHosted == true`, eliminating remote relays from the pre-activation screen.
+  3. **Persona-Scoped Relay Association & Persisted Enable/Disable Toggle:**
+     Relays are mailbox hosts linked to personas (`RelayMailboxBinding`). In the persona customization/edit surface (`CreatePersonaDialogViewModel` in edit mode), the user can view all relays linked to that persona and selectively toggle `RelayLinkStatus` (`Enabled` / `Disabled`). The selection persists to `RelayMailboxBinding.Status` in SQLite via `IRelayDirectory.SetMailboxBindingStatusAsync`.
+  4. **Egress & Ingress Traffic Silence for Disabled Relays:**
+     `DrainScheduler`, `PreKeyMaintenanceService`, and `ProvisionLinkedMailboxesAsync` filter targets to `RelayLinkStatus.Enabled`, guaranteeing disabled relays generate zero network requests, zero polling, and zero prekey uploads.
 
 - **Files:**
-  - `Modify`: `Percolator.Domain/Identities/ValueObjects/PortRange.cs`
-  - `Modify`: `Percolator.Domain/Delivery/ValueObjects/RelayEndpoint.cs`
-  - `Modify`: `Percolator.Infrastructure/Transport/PeerGrpcChannelFactory.cs`
-  - `Modify`: `Percolator.Infrastructure/Transport/TransportDispatcher.cs`
-  - `Modify`: `Percolator.Infrastructure/Transport/GrpcRelayMailboxProvisioner.cs`
-  - `Modify`: `Percolator.Infrastructure/Transport/DiscoveryQueryClient.cs`
-  - `Modify`: `Percolator.Infrastructure/Transport/Endpoints/NearbyDiscoveryEndpoint.cs`
-  - `Modify`: `Percolator.Desktop/Common/Services/PortReservationService.cs`
-  - `Modify`: `Percolator.Desktop/Features/Transports/ViewModels/AddConnectionDialogViewModel.cs`
-  - `Modify`: `Percolator.Desktop/Features/Transports/Views/AddConnectionDialog.axaml`
-  - `Modify`: `Percolator.Desktop/Features/Transports/Views/ShareInvitationDialog.axaml`
-  - `Modify`: `Percolator.Simulator/Features/RelayedChat/SimulatedRelayHost.cs`
-  - `Modify`: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs`
-  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayCardView.axaml`
-  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayCardViewModel.cs`
-  - `Delete`: `Percolator.Simulator/Features/RelayedChat/RelayEndpointExportFlyoutViewModel.cs`
-  - `Delete`: `Percolator.Simulator.Tests/RelayedChat/RelayEndpointExportFlyoutViewModelTests.cs`
-  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayProvisioningCoordinator.cs`
-  - `Modify`: `Percolator.Simulator/Features/DirectChat/DirectChatCoordinator.cs`
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardView.axaml`
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs`
-  - `Modify`: `Percolator.Simulator/Features/Topology/RelayRegistrationFlyoutViewModel.cs`
-  - `Create`: `Percolator.Domain.Tests/Delivery/RelayEndpointTests.cs`
-  - `Modify`: `Percolator.Domain.Tests/Identities/PortRangeTests.cs`
-  - `Modify`: `Percolator.Infrastructure.Tests/Transport/Primitives/PeerGrpcChannelFactoryTests.cs`
-  - `Modify`: `Percolator.Desktop.Tests/Features/Transports/AddConnectionDialogViewModelTests.cs`
-  - `Modify`: `Percolator.Simulator.Tests/Topology/RelayRegistrationFlyoutViewModelTests.cs`
+  - `Create`: `Percolator.Domain/Delivery/ValueObjects/RelayLinkStatus.cs`
+  - `Modify`: `Percolator.Domain/Delivery/Model/RelayMailboxBinding.cs`
+  - `Modify`: `Percolator.Domain/Delivery/Model/RelayRegistration.cs`
+  - `Create`: `Percolator.Application/Delivery/Ports/IPersonaRelayQueryService.cs`
+  - `Modify`: `Percolator.Application/Delivery/Ports/IRelayDirectory.cs`
+  - `Modify`: `Percolator.Application/Delivery/RelayDirectoryService.cs`
+  - `Modify`: `Percolator.Application/Delivery/DrainScheduler.cs`
+  - `Modify`: `Percolator.Infrastructure/Persistence/Entities/RelayEntities.cs`
+  - `Modify`: `Percolator.Infrastructure/Persistence/Repositories/SqliteRelayRegistrationRepository.cs`
+  - `Create`: `Percolator.Infrastructure/Persistence/Queries/SqlPersonaRelayQueryService.cs`
+  - `Modify`: `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`
+  - `Modify`: `Percolator.Desktop/Common/Session/DesktopSessionServiceCollectionExtensions.cs`
+  - `Modify`: `Percolator.Desktop/Features/Startup/ViewModels/IdentityGateViewModel.cs`
+  - `Modify`: `Percolator.Desktop/Features/Startup/ViewModels/CreatePersonaDialogViewModel.cs`
+  - `Modify`: `Percolator.Desktop/Features/Startup/Views/CreatePersonaDialogWindow.axaml`
+  - `Create`: `Percolator.Domain.Tests/Delivery/RelayRegistrationBindingToggleTests.cs`
+  - `Create`: `Percolator.Infrastructure.Tests/Persistence/Queries/SqlPersonaRelayQueryServiceTests.cs`
+  - `Modify`: `Percolator.Desktop.Tests/Startup/IdentityGateViewModelTests.cs`
+  - `Modify`: `Percolator.Desktop.Tests/Startup/CreatePersonaDialogViewModelTests.cs`
 
 - **Technical Implementation Steps:**
-  1. **Domain Port & Endpoint Refactor**:
-     - In `PortRange.cs`: `DefaultDynamicRange => new(5100, 5199);`.
-     - In `RelayEndpoint.cs`:
-       - `FromHostAndPort(host, port)` formats `Value = $"percolator://{trimmedHost}:{port}"`.
-       - `Create(endpoint)`: Validates that if `endpoint` contains `://`, the scheme must equal `"percolator"`. Rejects `relay://`, `https://`, and `http://` with `INVALID_RELAY_SCHEME`. If raw `host:port` is passed, normalizes to `percolator://{host}:{port}`.
-       - Expose `public Uri ToUri() => new(Value);`.
-  2. **Infrastructure Transport Adapter Translation**:
-     - In `PeerGrpcChannelFactory.GetOrCreateChannel(Uri address)`:
+  1. **Domain Model & Value Object:**
+     - In `Percolator.Domain/Delivery/ValueObjects/RelayLinkStatus.cs`:
        ```csharp
-       var targetAddress = address.Scheme.Equals("percolator", StringComparison.OrdinalIgnoreCase)
-           ? new UriBuilder(address) { Scheme = Uri.UriSchemeHttps }.Uri
-           : address;
+       namespace Percolator.Domain.Delivery.ValueObjects;
+
+       public enum RelayLinkStatus
+       {
+           Enabled = 1,
+           Disabled = 2
+       }
        ```
-     - In `TransportDispatcher.ParseEndpointUri(string endpointStr)`: If starts with `percolator://`, returns `new Uri(endpointStr)`. If lacks scheme, returns `new Uri($"percolator://{endpointStr}")`.
-     - In `GrpcRelayMailboxProvisioner.CreateClient`: Call `_channelFactory.GetOrCreateChannel(endpoint.ToUri())`.
-     - In `DiscoveryQueryClient.ToUri`: Return `endpoint.ToUri()`.
-     - In `NearbyDiscoveryEndpoint.cs`: Set `RelayEndpoint = $"percolator://127.0.0.1:{_boundPort}"`.
-  3. **Desktop Realignment**:
-     - In `PortReservationService.cs`: `DefaultRangeStart = 5100; DefaultRangeEnd = 5199;`.
-     - In `AddConnectionDialogViewModel.cs`: Strip prefix `percolator://` on relay input; reject `relay://` with clear error message.
-     - In `AddConnectionDialog.axaml`: Change label and watermark from `relay://` to `percolator://`.
-     - In `ShareInvitationDialog.axaml`: Update default dynamic range text to `5100-5199`.
-  4. **Simulator Host & UI Realignment**:
-     - In `SimulatedRelayHost.cs`: Bind Kestrel to `IPAddress.Loopback` and initialize `BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");`.
-     - In `SimulatedPersonaHost.cs`: Initialize `BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");`.
-     - In `RelayCardView.axaml`: Replace `DropDownButton` with `<Button Content="📋 Copy Endpoint" Command="{Binding CopyEndpointCommand}" />`.
-     - In `RelayCardViewModel.cs`: Implement `[RelayCommand] private async Task CopyEndpointAsync()` copying `percolator://127.0.0.1:{_host.BoundPort}`. Remove `EndpointExport`.
-     - Delete `RelayEndpointExportFlyoutViewModel.cs` and `RelayEndpointExportFlyoutViewModelTests.cs`.
-     - In `PersonaInvitationExportFlyoutViewModel.cs`: Lock host to `127.0.0.1` and default port range to `5100-5199`.
-  5. **Coordinator Decoupling & Bypass Elimination**:
-     - In `RelayProvisioningCoordinator.InitiateRelayedHandshakeAsync`:
-       - Remove recipient DB writes (lines 335–346).
-       - Remove manual `DirectChannel` and `PeerContact` creation (lines 365–390).
-       - Replace with:
+     - In `RelayMailboxBinding.cs`:
+       ```csharp
+       public sealed record RelayMailboxBinding(
+           PublicIdentityId OwnerIdentityId,
+           BlindedRoutingToken RoutingToken,
+           DeliveryToken DrainToken,
+           DateTimeOffset LinkedAtUtc,
+           DeliveryToken? PreviousDrainToken = null,
+           DateTimeOffset? MailboxProvisionedUtc = null,
+           RelayLinkStatus Status = RelayLinkStatus.Enabled);
+       ```
+     - In `RelayRegistration.cs`:
+       ```csharp
+       public DomainResult SetBindingStatus(PublicIdentityId ownerIdentityId, RelayLinkStatus status)
+       {
+           var index = _bindings.FindIndex(b => b.OwnerIdentityId == ownerIdentityId);
+           if (index < 0)
+           {
+               return DomainResult.Failure(new DomainError("MAILBOX_BINDING_NOT_FOUND", "Identity is not linked to this relay."));
+           }
+           _bindings[index] = _bindings[index] with { Status = status };
+           return DomainResult.Success();
+       }
+       ```
+
+  2. **Application CQRS Query Port & Relay Directory Port:**
+     - In `Percolator.Application/Delivery/Ports/IPersonaRelayQueryService.cs`:
+       ```csharp
+       namespace Percolator.Application.Delivery.Ports;
+
+       using System.Collections.Generic;
+       using System.Threading;
+       using System.Threading.Tasks;
+       using Percolator.Domain.Delivery.ValueObjects;
+       using Percolator.Domain.Identities;
+
+       public sealed record PersonaRelayLinkReadModel(
+           PublicIdentityId RelayIdentityId,
+           string DisplayName,
+           RelayEndpoint Endpoint,
+           bool IsLocalRelayHost,
+           RelayLinkStatus Status);
+
+       public interface IPersonaRelayQueryService
+       {
+           Task<IReadOnlyList<PersonaRelayLinkReadModel>> GetRelayLinksForPersonaAsync(
+               PublicIdentityId personaId,
+               CancellationToken ct = default);
+       }
+       ```
+     - In `IRelayDirectory.cs`:
+       Add:
+       ```csharp
+       Task<DomainResult> SetMailboxBindingStatusAsync(
+           PublicIdentityId relayIdentityId,
+           PublicIdentityId ownerIdentityId,
+           RelayLinkStatus status,
+           CancellationToken ct = default);
+       ```
+     - In `RelayDirectoryService.cs`:
+       Implement `SetMailboxBindingStatusAsync`:
+       ```csharp
+       public async Task<DomainResult> SetMailboxBindingStatusAsync(
+           PublicIdentityId relayIdentityId,
+           PublicIdentityId ownerIdentityId,
+           RelayLinkStatus status,
+           CancellationToken ct = default)
+       {
+           var registration = await _relayRepository.GetByIdAsync(relayIdentityId, ct).ConfigureAwait(false);
+           if (registration is null)
+           {
+               return DomainResult.Failure(new DomainError("RELAY_NOT_FOUND", "Relay registration not found."));
+           }
+           var result = registration.SetBindingStatus(ownerIdentityId, status);
+           if (result.IsFailure) return result;
+           await _relayRepository.SaveAsync(registration, ct).ConfigureAwait(false);
+           return DomainResult.Success();
+       }
+       ```
+       In `RelayDirectoryEntry`: add `IReadOnlyList<PublicIdentityId> EnabledOwnerIdentityIds` populated from bindings where `Status == RelayLinkStatus.Enabled`.
+       In `ProvisionLinkedMailboxesAsync`: iterate only `registration.Bindings.Where(b => b.Status == RelayLinkStatus.Enabled)`.
+     - In `DrainScheduler.cs` (~L165):
+       Filter target generation:
+       ```csharp
+       var desired = entries
+           .SelectMany(e => e.EnabledOwnerIdentityIds
+               .Where(active.Contains)
+               .Select(o => new MailboxDrainTarget(o, e.RelayIdentityId, e.Endpoint)))
+           .ToHashSet();
+       ```
+
+  3. **Infrastructure Persistence & EF Core Mapping:**
+     - In `RelayEntities.cs` (`RelayMailboxBindingEntity`):
+       ```csharp
+       public int Status { get; set; } = 1; // 1 = Enabled, 2 = Disabled
+       ```
+     - In `SqliteRelayRegistrationRepository.cs`:
+       Map `Status = (int)binding.Status` on save, and `(RelayLinkStatus)entity.Status` on rehydrate.
+     - In `Percolator.Infrastructure/Persistence/Queries/SqlPersonaRelayQueryService.cs`:
+       ```csharp
+       namespace Percolator.Infrastructure.Persistence.Queries;
+
+       using System;
+       using System.Collections.Generic;
+       using System.Linq;
+       using System.Threading;
+       using System.Threading.Tasks;
+       using Microsoft.EntityFrameworkCore;
+       using Percolator.Application.Delivery.Ports;
+       using Percolator.Domain.Delivery.ValueObjects;
+       using Percolator.Domain.Identities;
+       using Percolator.Infrastructure.Persistence;
+
+       public sealed class SqlPersonaRelayQueryService : IPersonaRelayQueryService
+       {
+           private readonly PercolatorDbContext _db;
+
+           public SqlPersonaRelayQueryService(PercolatorDbContext db)
+           {
+               _db = db ?? throw new ArgumentNullException(nameof(db));
+           }
+
+           public async Task<IReadOnlyList<PersonaRelayLinkReadModel>> GetRelayLinksForPersonaAsync(
+               PublicIdentityId personaId,
+               CancellationToken ct = default)
+           {
+               var ownerGuid = personaId.Value;
+               var query = from b in _db.RelayMailboxBindings.AsNoTracking()
+                           join r in _db.RelayRegistrations.AsNoTracking() on b.RelayIdentityId equals r.RelayIdentityId
+                           join p in _db.Profiles.AsNoTracking() on r.RelayIdentityId equals p.IdentityId into profiles
+                           from prof in profiles.DefaultIfEmpty()
+                           where b.OwnerIdentityId == ownerGuid
+                           select new PersonaRelayLinkReadModel(
+                               new PublicIdentityId(r.RelayIdentityId),
+                               prof != null ? prof.DisplayName : r.Endpoint,
+                               RelayEndpoint.Create(r.Endpoint).Value!,
+                               prof != null && prof.Role == 2,
+                               (RelayLinkStatus)b.Status);
+
+               return await query.ToListAsync(ct).ConfigureAwait(false);
+           }
+       }
+       ```
+     - In `InfrastructureServiceCollectionExtensions.cs` and `DesktopSessionServiceCollectionExtensions.cs`:
+       Register `services.AddScoped<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();`.
+
+  4. **Desktop UI Realignment (Honest Gate & Persona Editor):**
+     - In `IdentityGateViewModel.cs` (`LoadAsync` ~L188):
+       Filter exchange entries to self-hosted only:
+       ```csharp
+       foreach (var exchangeEntry in exchangeEntries.Where(e => e.IsSelfHosted))
+       {
+           var tile = BuildExchangeTile(exchangeEntry);
+           _exchangeList.Add(tile);
+           await ProbeExchangeAsync(tile, ct).ConfigureAwait(true);
+       }
+       ```
+     - In `CreatePersonaDialogViewModel.cs`:
+       - Inject `IPersonaRelayQueryService` and `IRelayDirectory`.
+       - Add presentation model:
          ```csharp
-         using var scope = initiator.Services.CreateScope();
-         var connectionService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
-         var result = await connectionService.ConnectToPeerAsync(target.PublicIdentityId, DeviceId.Primary, relayEndpoint, ct);
-         if (result.IsFailure) { /* Toast and return false */ }
-         await initiator.FlushOutboxAsync(ct);
+         public sealed partial class PersonaRelayItemViewModel : ObservableObject
+         {
+             public PublicIdentityId RelayId { get; }
+             public string DisplayName { get; }
+             public string Endpoint { get; }
+             public bool IsLocalHost { get; }
+
+             [ObservableProperty]
+             private bool _isEnabled;
+
+             public PersonaRelayItemViewModel(PersonaRelayLinkReadModel model)
+             {
+                 RelayId = model.RelayIdentityId;
+                 DisplayName = model.DisplayName;
+                 Endpoint = model.Endpoint.Value;
+                 IsLocalHost = model.IsLocalRelayHost;
+                 _isEnabled = model.Status == RelayLinkStatus.Enabled;
+             }
+         }
          ```
-     - In `DirectChatCoordinator.SendDirectMessageAsync`: Replace cross-host `recipient.HomeRelay` check with `sender.Services.GetRequiredService<IRoutingCoordinator>().ResolveRouteAsync(...)`.
+       - In `InitializeForEdit`: populate `ObservableCollection<PersonaRelayItemViewModel> ConnectedRelays` via `_queryService.GetRelayLinksForPersonaAsync(identityId)`.
+       - In `Save()`: for any modified item, invoke `_relayDirectory.SetMailboxBindingStatusAsync(item.RelayId, _candidateId, item.IsEnabled ? RelayLinkStatus.Enabled : RelayLinkStatus.Disabled)`.
+     - In `CreatePersonaDialogWindow.axaml`:
+       Under edit mode, render `ConnectedRelays` with a header `"Connected Relays"`, display name, endpoint text, and a toggle control bound to `IsEnabled`.
 
 - **Semantic Unit Tests:**
-  - `RelayEndpointTests`:
-    - `Create_WithPercolatorScheme_ReturnsNormalizedEndpoint`
-    - `Create_WithDisallowedScheme_ReturnsInvalidSchemeError`
-    - `Create_WithRawHostAndPort_NormalizesToPercolatorScheme`
-  - `PortRangeTests`:
-    - `DefaultDynamicRange_Is5100To5199`
-  - `PeerGrpcChannelFactoryTests`:
-    - `GetOrCreateChannel_WithPercolatorScheme_MapsToHttpsForUnderlyingSocket`
-  - `AddConnectionDialogViewModelTests`:
-    - `ConnectRelay_WithPercolatorScheme_NormalizesAndInitiates`
-    - `ConnectRelay_WithDisallowedRelayScheme_SetsErrorMessage`
-  - `RelayCardViewModelTests`:
-    - `CopyEndpointCommand_CopiesPercolatorUriToClipboard`
+  - `RelayRegistrationBindingToggleTests`:
+    - `SetBindingStatus_UpdatesStatus_WhenBindingExists`
+    - `SetBindingStatus_ReturnsNotFoundError_WhenBindingDoesNotExist`
+    - `DefaultBindingStatus_IsEnabled`
+  - `SqlPersonaRelayQueryServiceTests`:
+    - `GetRelayLinksForPersonaAsync_ReturnsOnlyBindingsForTargetPersona`
+    - `GetRelayLinksForPersonaAsync_ProjectsCorrectRelayLinkStatus`
+    - `GetRelayLinksForPersonaAsync_ReturnsEmptyWhenNoBindingsExist`
+  - `IdentityGateViewModelTests`:
+    - `LoadAsync_OnlyAddsSelfHostedExchangesToExchangesList`
+  - `CreatePersonaDialogViewModelTests`:
+    - `InitializeForEdit_LoadsConnectedRelaysFromQueryService`
+    - `Save_PersistsUpdatedRelayLinkStatus`
 
 - **Verify:**
   - `dotnet test Percolator.Domain.Tests`
-  - `dotnet test Percolator.Infrastructure.Tests`
   - `dotnet test Percolator.Application.Tests`
+  - `dotnet test Percolator.Infrastructure.Tests`
   - `dotnet test Percolator.Desktop.Tests`
-  - `dotnet test Percolator.Simulator.Tests`
-  - `dotnet test Percolator.sln`
   - `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
-  - `pwsh scripts/verify-code-integrity.ps1`
+  - `pwsh -File .agents/skills/architectural-plan-refinement/scripts/validate-plan.ps1 -Path Percolator.Desktop/connection-plan.md`
 
-- **QMS:** [`DEC-CANONICAL-PORT-RANGE`], [`DEC-CANONICAL-URI-SCHEME`], [`SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`], [`HAZ-TRANSPORT-SPOOFING`], [`HAZ-INGRESS-RESOURCE-EXHAUSTION`]
+- **QMS:** [`SYS-PRE-ACTIVATION-STEALTH`], [`DEP-DESKTOP-PRE-ACTIVATION-STEALTH`], [`INV-DESKTOP-STEALTH-ACTIVATION-GATE`], [`INV-DESKTOP-PRESENTATION-MODELS`], [`HAZ-TRANSPORT-SPOOFING`]
 
 ---
 
