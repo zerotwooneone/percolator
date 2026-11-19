@@ -33,6 +33,9 @@ Every specification file and every source file governed by a specification MUST 
 <!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/<SpecName>.spec.md before modifying this file. -->
 ```
 
+### 2.4 Single Direct Header & Transitive DAG Inheritance
+Every governed source file MUST declare **exactly one** line 1 governance header referencing its immediate governing specification in the DAG (per the registry in [`spec/README.md`](./README.md)). Higher-tier specifications transitively inherit upstream specifications in their branch; declaring multiple or secondary governance headers on a source file is strictly prohibited.
+
 Modifying any governed file without first loading and verifying compliance with its declared specification is strictly prohibited.
 
 ---

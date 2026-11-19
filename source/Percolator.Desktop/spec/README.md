@@ -40,18 +40,23 @@ flowchart TD
 
         subgraph BranchB["Reactive Logic & Testing Branch"]
             R3["R3.spec.md<br/>(Level 1: Reactive Streams & State)"]
-            VM["ViewModel.spec.md<br/>(Level 2: Presentation Logic & Tests)"]
+            UISS["UiStateService.spec.md<br/>(Level 2: Shared UI State & Intersession Caching)"]
+            VM["ViewModel.spec.md<br/>(Level 3: Presentation Logic & Tests)"]
+            R3 --> UISS
+            UISS --> VM
             R3 --> VM
         end
 
         Meta --> Style
         Meta --> R3
         Meta --> View
+        Meta --> UISS
         Meta --> VM
         Meta --> CB
     end
 
     DSN -.->|governs logic of| VM
+    DSN -.->|governs state of| UISS
     DSN -.->|governs mechanics of| CB
 
     classDef repo fill:#44337a,stroke:#805ad5,stroke-width:2px,color:#fff;
@@ -66,7 +71,7 @@ flowchart TD
     class DEP,DSN qms;
     class Meta meta;
     class Style,R3 foundation;
-    class VM logic;
+    class UISS,VM logic;
     class View ui;
     class CB hook;
 ```
@@ -90,8 +95,9 @@ Every specification is assigned a permanent, collision-free prefix. All normativ
 | `STYLE-` | [`Style.spec.md`](./Style.spec.md) | ControlThemes, cascading Styles, Fluent v2 tokens, geometry metrics, theme engines. | `Common/Styles/*.axaml`, `App.axaml` | `spec.spec.md` |
 | `VIEW-` | [`View.spec.md`](./View.spec.md) | XAML Views, Windows, UserControls, DataTemplates, layout containers, SplitView drawers. | `Features/**/*.axaml`, `Views/**/*.axaml` | `spec.spec.md`, `Style.spec.md` |
 | `CB-` | [`CodeBehind.spec.md`](./CodeBehind.spec.md) | View mechanics, focus handling, constructor DI, `Loaded`/`Unloaded` lifecycle, responsive size adaptations. | `Features/**/*.axaml.cs`, `Views/**/*.axaml.cs` | `spec.spec.md`, `View.spec.md` |
-| `R3-` | [`R3.spec.md`](./R3.spec.md) | Reactive streams, `BindableReactiveProperty`, `SelectAwait`, collection synchronization, disposal lifetimes. | Any file using `R3` or `ObservableCollections.R3` | `spec.spec.md` |
-| `VM-` | [`ViewModel.spec.md`](./ViewModel.spec.md) | MVVM presentation logic, CommunityToolkit commands, UI isolation, high-value low-brittle tests. | `Features/**/*ViewModel.cs`, `ViewModels/**/*.cs`, `tests/**/*.cs` | `spec.spec.md`, `R3.spec.md` |
+| `R3-` | [`R3.spec.md`](./R3.spec.md) | Reactive streams, reactive properties, `SelectAwait`, collection synchronization, disposal lifetimes. | Foundational reactive files (`Common/Reactive/**/*.cs`) not governed by higher tiers | `spec.spec.md` |
+| `UISS-` | [`UiStateService.spec.md`](./UiStateService.spec.md) | Shared UI presentation state, multi-ViewModel coordination, volatile draft caching, free-threaded observables. | `Features/**/*StateService.cs`, `Common/Services/*StateService.cs`, `Common/Services/CurrentPersonaService.cs` | `spec.spec.md`, `R3.spec.md` |
+| `VM-` | [`ViewModel.spec.md`](./ViewModel.spec.md) | MVVM presentation logic, CommunityToolkit commands, UI isolation, high-value low-brittle tests. | `Features/**/*ViewModel.cs`, `ViewModels/**/*.cs`, `tests/**/*.cs` | `spec.spec.md`, `R3.spec.md`, `UiStateService.spec.md` |
 
 ---
 
