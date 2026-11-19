@@ -39,11 +39,3 @@ public sealed class OpsPendingIngressEnvelopeEntity
     public string? LastErrorCode { get; set; }
     public string? LastErrorDescription { get; set; }
 }
-
-public sealed class OpsReservedPortEntity
-{
-    public int PortNumber { get; set; }
-    public Guid LeaseToken { get; set; }
-    public DateTimeOffset AllocatedAtUtc { get; set; }
-    public DateTimeOffset LeaseExpiryUtc { get; set; }
-}

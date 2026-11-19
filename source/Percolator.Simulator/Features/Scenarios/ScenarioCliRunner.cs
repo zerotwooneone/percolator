@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Ports;
+using Percolator.Infrastructure.Transport;
 using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
@@ -75,6 +77,9 @@ internal static class ScenarioCliRunner
 
         services.AddSingleton<ISimulatorStateBus, SimulatorStateBus>();
         services.AddSingleton<ISimulatorChaosController, SimulatorChaosController>();
+        services.AddSingleton<PortReservationService>();
+        services.AddSingleton<IPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
+        services.AddSingleton<ISimulatedPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
         services.AddSingleton<ISimulatedWorldStateService, SimulatedWorldStateService>();
         services.AddSingleton<IStatusToastService, StatusToastService>();
         services.AddSingleton<IVirtualClockStateService, VirtualClockStateService>();

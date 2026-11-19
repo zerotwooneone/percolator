@@ -12,6 +12,8 @@ using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities.ValueObjects;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
+using System.Collections.Generic;
+
 namespace Percolator.Desktop.Features.Startup.ViewModels;
 
 /// <summary>
@@ -42,7 +44,7 @@ public partial class CreatePersonaDialogViewModel : ViewModelBase
         }
         else
         {
-            InitializeForCreate();
+            InitializeForCreate(input?.PreferredPort);
         }
     }
 
@@ -74,7 +76,7 @@ public partial class CreatePersonaDialogViewModel : ViewModelBase
     private int _preferredPort = PersonaDirectoryService.DefaultPreferredPort;
 
     /// <summary>Create mode: a fresh candidate identity seeds the preview identicon.</summary>
-    public void InitializeForCreate()
+    public void InitializeForCreate(int? preferredPort = null)
     {
         _isEdit = false;
         _candidateId = PublicIdentityId.New();
@@ -82,6 +84,7 @@ public partial class CreatePersonaDialogViewModel : ViewModelBase
         PrimaryText = "Create Persona";
         CanRerollAvatar = true;
         Avatar = AvatarPresentation.FromIdenticon(_identicons.Generate(_candidateId.Value));
+        PreferredPort = preferredPort ?? PersonaDirectoryService.DefaultPreferredPort;
     }
 
     /// <summary>Edit mode: the existing identity pins the identicon; only name and port are editable.</summary>

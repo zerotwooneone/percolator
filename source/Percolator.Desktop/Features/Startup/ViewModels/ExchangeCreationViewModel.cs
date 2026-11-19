@@ -26,17 +26,18 @@ namespace Percolator.Desktop.Features.Startup.ViewModels;
 /// </summary>
 public partial class ExchangeCreationViewModel : ViewModelBase
 {
-    private readonly IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?> _dialogContext;
+    private readonly IDialogContext<ExchangeCreationInput, ExchangeCreationResult?> _dialogContext;
     private readonly IIdenticonGenerator _identicons;
     private PublicIdentityId _candidateId;
 
     public ExchangeCreationViewModel(
-        IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?> dialogContext,
+        IDialogContext<ExchangeCreationInput, ExchangeCreationResult?> dialogContext,
         IIdenticonGenerator identicons)
     {
         _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
         _identicons = identicons ?? throw new ArgumentNullException(nameof(identicons));
-        Initialize(dialogContext.Data ?? Array.Empty<PersonaDirectoryEntry>());
+        var input = dialogContext.Data;
+        Initialize(input?.Personas ?? Array.Empty<PersonaDirectoryEntry>(), input?.InitialPreferredPort);
     }
 
 
@@ -94,14 +95,14 @@ public partial class ExchangeCreationViewModel : ViewModelBase
         Array.Empty<LinkablePersonaModel>();
 
     /// <summary>Resets the wizard and seeds the persona checkbox list (all unchecked).</summary>
-    public void Initialize(IReadOnlyList<PersonaDirectoryEntry> personas)
+    public void Initialize(IReadOnlyList<PersonaDirectoryEntry> personas, int? initialPreferredPort = null)
     {
         ArgumentNullException.ThrowIfNull(personas);
 
         _candidateId = PublicIdentityId.New();
         Avatar = AvatarPresentation.FromIdenticon(_identicons.Generate(_candidateId.Value));
         DisplayName = string.Empty;
-        PreferredPort = ExchangeDirectoryService.DefaultPreferredPort;
+        PreferredPort = initialPreferredPort ?? ExchangeDirectoryService.DefaultPreferredPort;
         // Eager validation: an untouched empty name must block Next/Finish on the profile step.
         ValidateAllProperties();
         LinkablePersonas = personas

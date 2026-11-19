@@ -11,7 +11,8 @@ public sealed record PersonaEditorInput(
     int? PreferredPort = null,
     PublicIdentityId? IdentityId = null)
 {
-    public static PersonaEditorInput ForCreate() => new(false);
+    public static PersonaEditorInput ForCreate(int? preferredPort = null) =>
+        new(false, PreferredPort: preferredPort);
 
     public static PersonaEditorInput ForEdit(string displayName, int preferredPort, PublicIdentityId identityId) =>
         new(true, displayName, preferredPort, identityId);

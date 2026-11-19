@@ -43,7 +43,7 @@ public sealed class DesktopStage2SessionFactoryTests
         var stage1Services = new ServiceCollection();
         stage1Services.AddSingleton(Mock.Of<IWindowHandoffCoordinator>());
         stage1Services.AddSingleton(Mock.Of<IIdenticonGenerator>());
-        stage1Services.AddSingleton(Mock.Of<Percolator.Desktop.Common.Services.IPortReservationService>());
+        stage1Services.AddSingleton(Mock.Of<Percolator.Application.Ports.IPortReservationService>());
         stage1Services.AddSingleton(Mock.Of<IClipboardService>());
         stage1Services.AddSingleton(TimeProvider.System);
 

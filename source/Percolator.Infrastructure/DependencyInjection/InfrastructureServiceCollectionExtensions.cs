@@ -20,6 +20,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Percolator.Application.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
@@ -59,6 +60,9 @@ public static class InfrastructureServiceCollectionExtensions
     {
         SQLitePCL.Batteries_V2.Init();
 
+        services.TryAddSingleton<PortReservationService>();
+        services.TryAddSingleton<IPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
+        services.TryAddSingleton<ISimulatedPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
         services.AddSingleton<VaultStorageOptions>();
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         services.AddSingleton<IHeaderStorage, ProtobufHeaderStorage>();
@@ -230,6 +234,9 @@ public static class InfrastructureServiceCollectionExtensions
     public static IServiceCollection AddTransportInfrastructure(this IServiceCollection services)
     {
         // Transport Singletons
+        services.TryAddSingleton<PortReservationService>();
+        services.TryAddSingleton<IPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
+        services.TryAddSingleton<ISimulatedPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
         services.AddSingleton<ITransportCertificateProvider, InMemoryTransportCertificateProvider>();
         services.AddSingleton<PeerGrpcChannelFactoryOptions>();
         services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
@@ -285,7 +292,6 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IInboundIngressPipeline, InboundIngressPipeline>();
         services.AddScoped<MailboxDrainService>();
 
-        services.AddScoped<IPortReservationService, SqlitePortReservationService>();
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
         services.AddScoped<AuthenticatedRelayEndpoint>();
         services.AddScoped<PrivateRendezvousRelayEndpoint>();

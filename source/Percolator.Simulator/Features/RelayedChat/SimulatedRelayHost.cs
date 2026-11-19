@@ -4,6 +4,7 @@ using System.Net;
 using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
+using Percolator.Application.Ports;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -63,6 +64,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private readonly ISimulatorStateBus _stateBus;
     private readonly IVirtualClockStateService _virtualClock;
     private readonly ISimulatorChaosController _chaosController;
+    private readonly IPortReservationService _portReservationService;
     private readonly string _relayTempDirectory;
     private SimulatorNotifyingRelayCapabilityStoreDecorator? _capabilityStore;
     private IRelayMailboxCapabilityStore? _chaosCapabilityStore;
@@ -98,16 +100,18 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         ISimulatorLogSink logSink,
         ISimulatorStateBus stateBus,
         IVirtualClockStateService virtualClock,
-        ISimulatorChaosController chaosController)
+        ISimulatorChaosController chaosController,
+        IPortReservationService portReservationService)
     {
         Id = id;
         DisplayName = displayName;
         BoundPort = port;
-        BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
+        BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         _chaosController = chaosController ?? throw new ArgumentNullException(nameof(chaosController));
+        _portReservationService = portReservationService ?? throw new ArgumentNullException(nameof(portReservationService));
 
         _relayTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"relay_{Id.Value:N}");
         Directory.CreateDirectory(_relayTempDirectory);
@@ -296,7 +300,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         }
 
         _masterKeyHandle.Dispose();
-        LoopbackPortAllocator.ReleasePort(BoundPort);
+        _portReservationService.ReleasePort(BoundPort);
 
         try
         {

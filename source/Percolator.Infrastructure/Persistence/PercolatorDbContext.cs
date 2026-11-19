@@ -30,7 +30,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<VaultPendingHandshakeEntity> VaultPendingHandshakes => Set<VaultPendingHandshakeEntity>();
     public DbSet<OpsOutboxJobEntity> OpsOutboxJobs => Set<OpsOutboxJobEntity>();
     public DbSet<OpsPendingIngressEnvelopeEntity> OpsPendingIngressEnvelopes => Set<OpsPendingIngressEnvelopeEntity>();
-    public DbSet<OpsReservedPortEntity> OpsReservedPorts => Set<OpsReservedPortEntity>();
     public DbSet<PeerContactEntity> PeerContacts => Set<PeerContactEntity>();
     public DbSet<PeerContactDeviceEntity> PeerContactDevices => Set<PeerContactDeviceEntity>();
     public DbSet<ChatChannelEntity> ChatChannels => Set<ChatChannelEntity>();
@@ -207,15 +206,7 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => new { e.OwnerIdentityId, e.SequenceNumber })
                 .HasDatabaseName("ix_ops_pending_ingress_owner_order");
         });
-        // 13. Ops Reserved Ports
-        modelBuilder.Entity<OpsReservedPortEntity>(entity =>
-        {
-            entity.ToTable("ops_reserved_ports");
-            entity.HasKey(e => e.PortNumber);
-            entity.HasIndex(e => e.LeaseExpiryUtc)
-                .HasDatabaseName("ix_ops_port_lease");
-        });
-        // 14. Peer Contacts
+        // 13. Peer Contacts
         modelBuilder.Entity<PeerContactEntity>(entity =>
         {
             entity.ToTable("peer_contacts");

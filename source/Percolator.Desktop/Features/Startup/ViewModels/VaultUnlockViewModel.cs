@@ -13,7 +13,6 @@ using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Security.ValueObjects;
-using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
 
 namespace Percolator.Desktop.Features.Startup.ViewModels;
 

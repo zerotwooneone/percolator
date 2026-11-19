@@ -17,7 +17,6 @@ using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
-using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Tests.Startup;
@@ -83,10 +82,12 @@ public sealed class ExchangeViewModelTests
 
     // ---- Creation wizard ----
 
-    private (ExchangeCreationViewModel Vm, Mock<IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?>> ContextMock) CreateWizard(IReadOnlyList<PersonaDirectoryEntry>? personas = null)
+    private (ExchangeCreationViewModel Vm, Mock<IDialogContext<ExchangeCreationInput, ExchangeCreationResult?>> ContextMock) CreateWizard(
+        IReadOnlyList<PersonaDirectoryEntry>? personas = null,
+        int? initialPort = null)
     {
-        var contextMock = new Mock<IDialogContext<IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?>>();
-        contextMock.SetupGet(c => c.Data).Returns(personas ?? Array.Empty<PersonaDirectoryEntry>());
+        var contextMock = new Mock<IDialogContext<ExchangeCreationInput, ExchangeCreationResult?>>();
+        contextMock.SetupGet(c => c.Data).Returns(new ExchangeCreationInput(personas ?? Array.Empty<PersonaDirectoryEntry>(), initialPort));
         var vm = new ExchangeCreationViewModel(contextMock.Object, _identicons);
         return (vm, contextMock);
     }
@@ -102,6 +103,22 @@ public sealed class ExchangeViewModelTests
         wizard.LinkablePersonas.Count.Should().Be(3);
         wizard.LinkablePersonas.Should().OnlyContain(p => !p.IsLinked,
             "linking is explicit opt-in — every checkbox ships unchecked");
+    }
+
+    [Test]
+    public void Wizard_PreferredPort_WithoutExplicitInitialPort_DefaultsToCanonicalStart5100()
+    {
+        var (wizard, _) = CreateWizard(Array.Empty<PersonaDirectoryEntry>());
+
+        wizard.PreferredPort.Should().Be(5100, "when no initial port is provided, the wizard defaults to the canonical range start (5100)");
+    }
+
+    [Test]
+    public void Wizard_PreferredPort_WithInitialPort_BindsProvidedPort()
+    {
+        var (wizard, _) = CreateWizard(Array.Empty<PersonaDirectoryEntry>(), initialPort: 5105);
+
+        wizard.PreferredPort.Should().Be(5105, "wizard must initialize to the dynamically resolved available port");
     }
 
     [Test]

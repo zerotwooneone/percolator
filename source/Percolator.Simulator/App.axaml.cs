@@ -5,6 +5,8 @@ using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Invitations;
+using Percolator.Application.Ports;
+using Percolator.Infrastructure.Transport;
 using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
@@ -45,6 +47,9 @@ public partial class App : Avalonia.Application
         services.AddSingleton<ISimulatorStateBus, SimulatorStateBus>();
         services.AddSingleton<ISimulatorChaosController, SimulatorChaosController>();
         services.AddSingleton<ISelectionStateService, SelectionStateService>();
+        services.AddSingleton<PortReservationService>();
+        services.AddSingleton<IPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
+        services.AddSingleton<ISimulatedPortReservationService>(sp => sp.GetRequiredService<PortReservationService>());
         services.AddSingleton<ISimulatedWorldStateService, SimulatedWorldStateService>();
         services.AddSingleton<IStatusToastService, StatusToastService>();
         services.AddSingleton<IFlightRecorderStateService, FlightRecorderStateService>();

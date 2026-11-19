@@ -17,7 +17,6 @@ using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
-using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Tests.Startup;
@@ -524,6 +523,12 @@ public sealed class IdentityGateViewModelTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(created);
         _ports
+            .Setup(p => p.ProbeNextAvailableAsync(
+                PersonaDirectoryService.DefaultPreferredPort,
+                It.IsAny<IReadOnlyCollection<int>?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
+        _ports
             .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
 
@@ -540,5 +545,36 @@ public sealed class IdentityGateViewModelTests
         Personas[0].IsSelected.Should().BeTrue("a newly created persona is pre-selected for launch");
         Personas[0].PortStatus.Should().Be(PortStatus.Ready);
         _vm.HasEmptyState.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task CreateExchange_ProbesNextAvailablePort_PassesToDialog()
+    {
+        var alice = Entry("Alice", 5100);
+        ArrangeDirectory(alice);
+        _ports
+            .Setup(p => p.ProbeAsync(5100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PortProbeResult(PortProbeStatus.Ready, 5100));
+        await _vm.LoadAsync(_session);
+
+        ExchangeCreationInput? capturedInput = null;
+        _ports
+            .Setup(p => p.ProbeNextAvailableAsync(
+                ExchangeDirectoryService.DefaultPreferredPort,
+                It.Is<IReadOnlyCollection<int>?>(c => c != null && c.Contains(5100)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PortProbeResult(PortProbeStatus.AutoSelected, 5101));
+
+        _windows
+            .Setup(w => w.ShowDialogAsync<ExchangeCreationViewModel, ExchangeCreationInput, ExchangeCreationResult?>(
+                It.IsAny<ExchangeCreationInput>(),
+                It.IsAny<Avalonia.Controls.Window?>()))
+            .Callback<ExchangeCreationInput, Avalonia.Controls.Window?>((input, _) => capturedInput = input)
+            .ReturnsAsync((ExchangeCreationResult?)null);
+
+        await _vm.CreateExchangeCommand.ExecuteAsync(null);
+
+        capturedInput.Should().NotBeNull();
+        capturedInput!.InitialPreferredPort.Should().Be(5101, "probed available port must be forwarded to the exchange creation dialog");
     }
 }

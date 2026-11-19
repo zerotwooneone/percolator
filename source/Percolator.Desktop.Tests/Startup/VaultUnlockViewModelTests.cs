@@ -13,7 +13,6 @@ using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Security.ValueObjects;
-using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
 
 namespace Percolator.Desktop.Tests.Startup;
 

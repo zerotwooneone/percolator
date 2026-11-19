@@ -2,27 +2,35 @@ using System;
 using System.Collections.Generic;
 using FluentAssertions;
 using NUnit.Framework;
-using Percolator.Simulator.Features.Topology;
+using Percolator.Application.Ports;
+using Percolator.Infrastructure.Transport;
 
 namespace Percolator.Simulator.Tests.Topology;
 
 [TestFixture]
 public sealed class LoopbackPortAllocatorTests
 {
+    private ISimulatedPortReservationService _portReservationService = null!;
+
     [SetUp]
+    public void SetUp()
+    {
+        _portReservationService = new PortReservationService();
+    }
+
     [TearDown]
     public void CleanUp()
     {
-        LoopbackPortAllocator.Reset();
+        _portReservationService.Reset();
     }
 
     [Test]
     public void AllocateAvailablePort_ReturnsPortWithinCanonicalRange()
     {
-        var port = LoopbackPortAllocator.AllocateAvailablePort();
+        var port = _portReservationService.AllocateAvailablePort();
 
-        port.Should().BeInRange(LoopbackPortAllocator.RangeStart, LoopbackPortAllocator.RangeEnd);
-        LoopbackPortAllocator.IsPortAllocated(port).Should().BeTrue();
+        port.Should().BeInRange(_portReservationService.RangeStart, _portReservationService.RangeEnd);
+        _portReservationService.IsPortAllocated(port).Should().BeTrue();
     }
 
     [Test]
@@ -32,8 +40,8 @@ public sealed class LoopbackPortAllocatorTests
 
         for (int i = 0; i < 5; i++)
         {
-            var port = LoopbackPortAllocator.AllocateAvailablePort();
-            port.Should().BeInRange(LoopbackPortAllocator.RangeStart, LoopbackPortAllocator.RangeEnd);
+            var port = _portReservationService.AllocateAvailablePort();
+            port.Should().BeInRange(_portReservationService.RangeStart, _portReservationService.RangeEnd);
             allocated.Add(port).Should().BeTrue($"Port {port} was already allocated");
         }
 
@@ -44,37 +52,37 @@ public sealed class LoopbackPortAllocatorTests
     public void AllocateAvailablePort_WithPreferredPort_ReturnsPreferredPortWhenAvailable()
     {
         var preferred = 5150;
-        var port = LoopbackPortAllocator.AllocateAvailablePort(preferred);
+        var port = _portReservationService.AllocateAvailablePort(preferred);
 
         port.Should().Be(preferred);
-        LoopbackPortAllocator.IsPortAllocated(preferred).Should().BeTrue();
+        _portReservationService.IsPortAllocated(preferred).Should().BeTrue();
     }
 
     [Test]
     public void ReleasePort_AllowsPortToBeReallocated()
     {
-        var port = LoopbackPortAllocator.AllocateAvailablePort();
-        LoopbackPortAllocator.IsPortAllocated(port).Should().BeTrue();
+        var port = _portReservationService.AllocateAvailablePort();
+        _portReservationService.IsPortAllocated(port).Should().BeTrue();
 
-        LoopbackPortAllocator.ReleasePort(port);
-        LoopbackPortAllocator.IsPortAllocated(port).Should().BeFalse();
+        _portReservationService.ReleasePort(port);
+        _portReservationService.IsPortAllocated(port).Should().BeFalse();
 
-        var reallocated = LoopbackPortAllocator.AllocateAvailablePort(port);
+        var reallocated = _portReservationService.AllocateAvailablePort(port);
         reallocated.Should().Be(port);
     }
 
     [Test]
     public void Reset_ClearsAllAllocations()
     {
-        var port1 = LoopbackPortAllocator.AllocateAvailablePort();
-        var port2 = LoopbackPortAllocator.AllocateAvailablePort();
+        var port1 = _portReservationService.AllocateAvailablePort();
+        var port2 = _portReservationService.AllocateAvailablePort();
 
-        LoopbackPortAllocator.IsPortAllocated(port1).Should().BeTrue();
-        LoopbackPortAllocator.IsPortAllocated(port2).Should().BeTrue();
+        _portReservationService.IsPortAllocated(port1).Should().BeTrue();
+        _portReservationService.IsPortAllocated(port2).Should().BeTrue();
 
-        LoopbackPortAllocator.Reset();
+        _portReservationService.Reset();
 
-        LoopbackPortAllocator.IsPortAllocated(port1).Should().BeFalse();
-        LoopbackPortAllocator.IsPortAllocated(port2).Should().BeFalse();
+        _portReservationService.IsPortAllocated(port1).Should().BeFalse();
+        _portReservationService.IsPortAllocated(port2).Should().BeFalse();
     }
 }

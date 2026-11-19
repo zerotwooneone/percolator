@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ObservableCollections;
+using Percolator.Application.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
@@ -43,6 +44,7 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     private const int MaxPinnedCards = 4;
 
     private readonly ISelectionStateService? _selectionState;
+    private readonly ISimulatedPortReservationService _portReservationService;
     private readonly ObservableList<SimulatedNodeSummary> _personas = new();
     private readonly ObservableList<SimulatedNodeSummary> _relays = new();
     private readonly ObservableList<SimulatedNodeSummary> _groups = new();
@@ -57,8 +59,11 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
     public IReadOnlyObservableList<SimulatedNodeSummary> ActiveSwarms => _swarms;
     public IReadOnlyObservableList<SimulatedNodeSummary> PinnedCards => _pinnedCards;
 
-    public SimulatedWorldStateService(ISelectionStateService? selectionState = null)
+    public SimulatedWorldStateService(
+        ISimulatedPortReservationService portReservationService,
+        ISelectionStateService? selectionState = null)
     {
+        _portReservationService = portReservationService ?? throw new ArgumentNullException(nameof(portReservationService));
         _selectionState = selectionState;
     }
 
@@ -194,7 +199,7 @@ internal sealed class SimulatedWorldStateService : ISimulatedWorldStateService
                 catch { }
             }
 
-            LoopbackPortAllocator.Reset();
+            _portReservationService.Reset();
         });
     }
 

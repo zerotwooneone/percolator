@@ -18,7 +18,7 @@ using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities.ValueObjects;
 using R3;
-using IPortReservationService = Percolator.Desktop.Common.Services.IPortReservationService;
+using IPortReservationService = Percolator.Application.Ports.IPortReservationService;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Desktop.Features.Startup.ViewModels;
@@ -334,9 +334,14 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand]
     private async Task CreatePersonaAsync(CancellationToken ct)
     {
+        var probe = await _ports
+            .ProbeNextAvailableAsync(PersonaDirectoryService.DefaultPreferredPort, GetClaimedPorts(), ct)
+            .ConfigureAwait(true);
+        var initialPort = probe.Port ?? PersonaDirectoryService.DefaultPreferredPort;
+
         var result = await _windows
             .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorInput, PersonaEditorResult?>(
-                PersonaEditorInput.ForCreate())
+                PersonaEditorInput.ForCreate(initialPort))
             .ConfigureAwait(true);
         if (result?.IdentityId is null)
         {
@@ -434,10 +439,16 @@ public partial class IdentityGateViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(IsExchangeCreateEnabled))]
     private async Task CreateExchangeAsync(CancellationToken ct)
     {
+        var probe = await _ports
+            .ProbeNextAvailableAsync(ExchangeDirectoryService.DefaultPreferredPort, GetClaimedPorts(), ct)
+            .ConfigureAwait(true);
+        var initialPort = probe.Port ?? ExchangeDirectoryService.DefaultPreferredPort;
+
         var personas = _personaList.Select(ToPersonaEntry).ToList();
+        var input = new ExchangeCreationInput(personas, initialPort);
         var result = await _windows
-            .ShowDialogAsync<ExchangeCreationViewModel, IReadOnlyList<PersonaDirectoryEntry>, ExchangeCreationResult?>(
-                personas)
+            .ShowDialogAsync<ExchangeCreationViewModel, ExchangeCreationInput, ExchangeCreationResult?>(
+                input)
             .ConfigureAwait(true);
         if (result is null)
         {
@@ -698,6 +709,20 @@ public partial class IdentityGateViewModel : ViewModelBase
         {
             _suppressAutoStartPersist = false;
         }
+    }
+
+    private HashSet<int> GetClaimedPorts()
+    {
+        var claimed = new HashSet<int>();
+        foreach (var p in _personaList)
+        {
+            claimed.Add(p.PreferredPort);
+        }
+        foreach (var e in _exchangeList)
+        {
+            claimed.Add(e.PreferredPort);
+        }
+        return claimed;
     }
 
     private static void DisposeLeases(

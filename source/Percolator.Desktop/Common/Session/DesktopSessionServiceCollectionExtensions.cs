@@ -87,8 +87,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         // consumers are Stage-1 VMs).
         services.AddSingleton(_ => stage1.GetRequiredService<IWindowHandoffCoordinator>());
         services.AddSingleton(_ => stage1.GetRequiredService<IIdenticonGenerator>());
-        // Desktop socket-probe port — not the Application-layer port reservation service.
-        services.AddSingleton(_ => stage1.GetRequiredService<Percolator.Desktop.Common.Services.IPortReservationService>());
+        services.AddSingleton(_ => stage1.GetRequiredService<Percolator.Application.Ports.IPortReservationService>());
         services.AddSingleton(_ => stage1.GetRequiredService<IClipboardService>());
         services.AddSingleton(_ => stage1.GetRequiredService<TimeProvider>());
 

@@ -18,8 +18,8 @@ using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Egress;
 using Percolator.Application.Handshake;
-using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
+using Percolator.Application.Ingress;
 using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
 using Percolator.Application.Services;
@@ -125,6 +125,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public bool AutoAcceptFileTransfers { get; set; } = false;
     public string NodeTempDirectory => _nodeTempDirectory;
     public string NodeDownloadsDirectory { get; }
+    private readonly IPortReservationService _portReservationService;
     public SimulatedPersonaHost(
         SimulatedNodeId id,
         string displayName,
@@ -134,18 +135,20 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         ISimulatorStateBus stateBus,
         ISimulatedWorldStateService worldState,
         IVirtualClockStateService virtualClock,
-        ISimulatorChaosController chaosController)
+        ISimulatorChaosController chaosController,
+        IPortReservationService portReservationService)
     {
         Id = id;
         DisplayName = displayName;
         IdenticonPng = identiconPng;
         BoundPort = port;
-        BoundEndpoint = new Uri($"https://127.0.0.1:{BoundPort}");
+        BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         _chaosController = chaosController ?? throw new ArgumentNullException(nameof(chaosController));
+        _portReservationService = portReservationService ?? throw new ArgumentNullException(nameof(portReservationService));
         _masterKeyHandle = MasterKeyHandle.GenerateRandom();
         _nodeTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"node_{Id.Value:N}");
         Directory.CreateDirectory(_nodeTempDirectory);
@@ -867,7 +870,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         if (_disposed) return;
         _disposed = true;
         await StopAsync();
-        LoopbackPortAllocator.ReleasePort(BoundPort);
+        _portReservationService.ReleasePort(BoundPort);
         _host?.Dispose();
         _listeningGate.Dispose();
         _drainGate.Dispose();

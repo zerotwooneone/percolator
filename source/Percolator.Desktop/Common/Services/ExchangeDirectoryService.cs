@@ -29,8 +29,8 @@ namespace Percolator.Desktop.Common.Services;
 /// </summary>
 public sealed class ExchangeDirectoryService : IExchangeDirectory
 {
-    /// <summary>Default preferred port for self-hosted exchanges (above the persona range start).</summary>
-    public const int DefaultPreferredPort = 5200;
+    /// <summary>Default preferred port for self-hosted exchanges (in the canonical Percolator port range 5100–5199 per DEC-CANONICAL-PORT-RANGE).</summary>
+    public const int DefaultPreferredPort = 5100;
 
     private const string SelfHostedBindHost = "127.0.0.1";
 

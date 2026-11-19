@@ -12,10 +12,12 @@ using Percolator.Desktop.Common.Session;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.ViewModels;
 using Percolator.Desktop.Features.Startup.Views;
+using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Security.Ports;
 using Percolator.Infrastructure.DependencyInjection;
 using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Transport;
 using R3;
 
 namespace Percolator.Desktop;

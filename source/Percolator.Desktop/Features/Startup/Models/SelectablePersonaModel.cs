@@ -2,6 +2,7 @@
 
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Percolator.Application.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Domain.Identities;
 
