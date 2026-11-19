@@ -45,7 +45,6 @@ Implementation Gate: UNLOCKED
 | Simulator | `PersonaConnectPeerFlyoutViewModel` | `Percolator.Simulator/Features/Topology/PersonaConnectPeerFlyoutViewModel.cs` | Transient |
 | Simulator | `PersonaInvitationExportFlyoutViewModel` | `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs` | Transient |
 | Simulator | `RelayRegistrationFlyoutViewModel` | `Percolator.Simulator/Features/Topology/RelayRegistrationFlyoutViewModel.cs` | Transient |
-| Simulator | `RelayEndpointExportFlyoutViewModel` | `Percolator.Simulator/Features/RelayedChat/RelayEndpointExportFlyoutViewModel.cs` | Transient |
 | Desktop | `MainWindowViewModel` | `Percolator.Desktop/Features/Shell/ViewModels/MainWindowViewModel.cs` | Transient |
 | Desktop | `PendingRequestsPanelWindow` | `Percolator.Desktop/Features/Transports/Views/PendingRequestsPanelWindow.axaml` | Transient (Window) |
 | Desktop | `PendingRequestsPanelViewModel` | `Percolator.Desktop/Features/Transports/ViewModels/PendingRequestsPanelViewModel.cs` | Transient |
@@ -118,211 +117,120 @@ Implemented dual-mode candidate host resolution (Auto LAN IP, Loopback, and Cust
 ---
 
 ### CONN-12b ✅ Simulator Architecture Realignment: Ingress/Egress Wire Pipelines, Application Outbound Workflow & High-Density Card UI
-
-- **Specification Governance:** Aligns the Simulator's connection mechanics with Desktop by promoting outbound connection orchestration to a shared Application-layer workflow (`IOutboundConnectionWorkflow`). Intercepts Ingress and Egress at canonical transport seams (`ITransportDispatcher` and `IInboundIngressPipeline`), enabling fault injection (chaos envelope drops, latency, corruption), autopilot outbox auto-flushing, and wire telemetry without touching production code or hacking SQLite repositories (`ChaosPendingIngressStoreDecorator`). Eliminates coordinator database backdoors: removes manual `PeerContact` insertions from `DirectHandshakeOrchestrator` and `DirectChannel` insertions from `DirectChatCoordinator.EnsureChannelAsync`. Preserves multi-node developer utility ergonomics: eliminates modal dialog lockout by retaining non-blocking, high-density Avalonia Flyouts (`🔗 Connect Peer ▼`, `📋 Share Invite ▼`, `📬 Relay ▼`) on the card toolbar, while tucking away 14 checkboxes/actions (Capabilities, Autopilot, PreKey publish, Reroll) into a unified `⚙️ Persona Settings ▼` header menu.
-
-- **Files:**
-  - `Create`: `Percolator.Application/Connections/OutboundConnectionStatus.cs`
-  - `Create`: `Percolator.Application/Connections/OutboundConnectionResult.cs`
-  - `Create`: `Percolator.Application/Connections/IOutboundConnectionWorkflow.cs`
-  - `Create`: `Percolator.Application/Connections/OutboundConnectionWorkflow.cs`
-  - `Create`: `Percolator.Simulator/Features/Chaos/SimulatorChaosTransportDispatcherDecorator.cs`
-  - `Create`: `Percolator.Simulator/Features/Topology/RelayRegistrationFlyoutViewModel.cs`
-  - `Modify`: `Percolator.Application/DependencyInjection/ApplicationServiceCollectionExtensions.cs` (register `IOutboundConnectionWorkflow` as Scoped)
-  - `Modify`: `Percolator.Desktop/Features/Transports/ViewModels/AddConnectionDialogViewModel.cs` (delegate direct peer connection to `IOutboundConnectionWorkflow`)
-  - `Modify`: `Percolator.Desktop/Features/Transports/Models/AddConnectionDialogModels.cs` (reference `Percolator.Application.Connections.OutboundConnectionStatus`)
-  - `Modify`: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` (decorate `ITransportDispatcher` with `SimulatorChaosTransportDispatcherDecorator`, decorate `IInboundIngressPipeline` with `SimulatorOutboxFlushingIngressPipelineDecorator`, remove `ChaosPendingIngressStoreDecorator`)
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardView.axaml` (realign header with `⚙️ Persona Settings ▼` menu; consolidate Row 1 into 3 compact flyout buttons: `🔗 Connect Peer ▼`, `📋 Share Invite ▼`, `📬 Relay ▼`)
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs` (bind settings dropdown, wire flyout view models)
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaConnectPeerFlyoutViewModel.cs` (dispatch through `IOutboundConnectionWorkflow`, auto-fill payload from selected in-world peer)
-  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs` (add 1-click clipboard copy with port/host presets)
-  - `Modify`: `Percolator.Simulator/Features/DirectChat/DirectHandshakeOrchestrator.cs` (dispatch outbound handshakes through `IOutboundConnectionWorkflow`, eliminate manual `PeerContact` DB insertion)
-  - `Modify`: `Percolator.Simulator/Features/DirectChat/DirectChatCoordinator.cs` (eliminate `EnsureChannelAsync` manual DB insertion)
-  - `Modify`: `Percolator.Simulator/Features/Scenarios/ScenarioRunnerService.cs` (invoke `IOutboundConnectionWorkflow` for scenario handshakes)
-  - `Delete`: `Percolator.Simulator/Features/Topology/PeerConnectionTargetKind.cs`
-  - `Delete`: `Percolator.Simulator/Features/Topology/SimulatedPeerConnectionService.cs`
-  - `Delete`: `Percolator.Simulator/Features/Chaos/ChaosPendingIngressStoreDecorator.cs`
-  - `Create`: `Percolator.Application.Tests/Connections/OutboundConnectionWorkflowTests.cs`
-  - `Create`: `Percolator.Simulator.Tests/Chaos/SimulatorChaosTransportDispatcherDecoratorTests.cs`
-  - `Modify`: `Percolator.Simulator.Tests/Topology/PersonaConnectPeerFlyoutViewModelTests.cs`
-  - `Modify`: `Percolator.Simulator.Tests/Topology/PersonaInvitationExportFlyoutViewModelTests.cs`
-
-- **Contracts & ViewModels:**
-  ```csharp
-  namespace Percolator.Application.Connections;
-
-  public enum OutboundConnectionStatus
-  {
-      Connected = 0,
-      PendingOffline = 1
-  }
-
-  public sealed record OutboundConnectionResult(
-      OutboundConnectionStatus Status,
-      PublicIdentityId PeerId,
-      PeerInvitationPayload Invitation,
-      Uri ResolvedEndpoint);
-
-  public interface IOutboundConnectionWorkflow
-  {
-      Task<DomainResult<OutboundConnectionResult>> ConnectAsync(
-          PeerInvitationPayload payload,
-          TimeSpan probeTimeout,
-          CancellationToken ct = default);
-  }
-
-  public sealed class OutboundConnectionWorkflow : IOutboundConnectionWorkflow
-  {
-      private readonly IPeerConnectionService _connectionService;
-      private readonly ILogger<OutboundConnectionWorkflow> _logger;
-
-      public OutboundConnectionWorkflow(
-          IPeerConnectionService connectionService,
-          ILogger<OutboundConnectionWorkflow> logger)
-      {
-          _connectionService = connectionService ?? throw new ArgumentNullException(nameof(connectionService));
-          _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-      }
-
-      public async Task<DomainResult<OutboundConnectionResult>> ConnectAsync(
-          PeerInvitationPayload payload,
-          TimeSpan probeTimeout,
-          CancellationToken ct = default)
-      {
-          // 1. Resolve direct URI from payload.EndpointHosts and PortRange
-          // 2. Execute _connectionService.ConnectToDirectPeerAsync with timeout cts
-          // 3. If success: return OutboundConnectionResult(Connected, ...)
-          // 4. If probe failure / timeout: return OutboundConnectionResult(PendingOffline, ...)
-      }
-  }
-
-  namespace Percolator.Simulator.Features.Chaos;
-
-  public sealed class SimulatorChaosTransportDispatcherDecorator : ITransportDispatcher
-  {
-      private readonly ITransportDispatcher _inner;
-      private readonly ISimulatorChaosController _chaos;
-      private readonly SimulatedNodeId _nodeId;
-      private readonly ISimulatorLogSink _logSink;
-
-      public SimulatorChaosTransportDispatcherDecorator(
-          ITransportDispatcher inner,
-          ISimulatorChaosController chaos,
-          SimulatedNodeId nodeId,
-          ISimulatorLogSink logSink)
-      {
-          _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-          _chaos = chaos ?? throw new ArgumentNullException(nameof(chaos));
-          _nodeId = nodeId;
-          _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
-      }
-
-      public async ValueTask<DomainResult> SendAsync(OutboxJob job, CancellationToken ct = default)
-      {
-          var fault = _chaos.EvaluateDeliveryFault(_nodeId);
-          if (fault == ChaosFaultAction.DropEnvelope)
-          {
-              _logSink.Log(new SimulatorLogEntry(DateTimeOffset.UtcNow, LogLevel.Warning, _nodeId.ToString(), _nodeId, "Chaos", "Outbound envelope dropped by chaos fault injection."));
-              return DomainResult.Failure(new DomainError("CHAOS_DROPPED", "Envelope dropped by simulator chaos controller."));
-          }
-          if (fault == ChaosFaultAction.InjectArtificialDelay)
-          {
-              await Task.Delay(500, ct).ConfigureAwait(false);
-          }
-          return await _inner.SendAsync(job, ct).ConfigureAwait(false);
-      }
-  }
-
-  namespace Percolator.Simulator.Features.Topology;
-
-  public sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
-  {
-      private readonly ISimulatedPersonaHost _host;
-      private readonly ISimulatedWorldStateService _worldState;
-      private readonly IPeerInvitationCodec _codec;
-      private readonly IOutboundConnectionWorkflow _connectionWorkflow;
-
-      [ObservableProperty] private int _selectedTabIndex;
-      [ObservableProperty] private IReadOnlyList<SimulatedNodeSummary> _availableInWorldPersonas = [];
-      [ObservableProperty] private SimulatedNodeSummary? _selectedInWorldPersona;
-      [ObservableProperty] private string _externalInvitationInput = string.Empty;
-      [ObservableProperty] private bool _isConnecting;
-      [ObservableProperty] private string? _errorMessage;
-
-      [RelayCommand] private Task ConnectAsync();
-  }
-
-  public sealed partial class RelayRegistrationFlyoutViewModel : ViewModelBase
-  {
-      private readonly ISimulatedPersonaHost _host;
-      private readonly ISimulatedWorldStateService _worldState;
-      private readonly IRelayMailboxProvisioner _relayProvisioner;
-
-      [ObservableProperty] private int _selectedTabIndex;
-      [ObservableProperty] private IReadOnlyList<SimulatedNodeSummary> _availableInWorldRelays = [];
-      [ObservableProperty] private SimulatedNodeSummary? _selectedInWorldRelay;
-      [ObservableProperty] private string _externalRelayInput = string.Empty;
-      [ObservableProperty] private bool _seedPreKeysToRelay;
-      [ObservableProperty] private bool _isRegistering;
-      [ObservableProperty] private string? _errorMessage;
-
-      [RelayCommand] private Task RegisterRelayAsync();
-  }
-
-  public sealed partial class PersonaInvitationExportFlyoutViewModel : ViewModelBase
-  {
-      private readonly ISimulatedPersonaHost _host;
-      private readonly IPeerInvitationCodec _codec;
-      private readonly IClipboardService _clipboard;
-
-      [ObservableProperty] private SimulatorAdvertisedHostKind _selectedHostKind;
-      [ObservableProperty] private string _detectedLanIp = string.Empty;
-      [ObservableProperty] private string _customHostInput = string.Empty;
-      [ObservableProperty] private PortRangePrivacyPreset _selectedPortPreset;
-      [ObservableProperty] private int _customPortMin = 5100;
-      [ObservableProperty] private int _customPortMax = 5120;
-      [ObservableProperty] private string _generatedInvitationUrl = string.Empty;
-
-      [RelayCommand] private Task CopyInvitationUrlAsync();
-      [RelayCommand] private void UpdateGeneratedInvitation();
-  }
-  ```
-
-- **Algorithm:**
-  1. **Promote Application Outbound Connection Workflow:** Create `IOutboundConnectionWorkflow` and `OutboundConnectionWorkflow` in `Percolator.Application/Connections/`. Consolidates host candidate resolution, defensive `UriBuilder` parsing, 3-second probing timeout, and fallback staging as `OutboundConnectionStatus.PendingOffline`. Registers in DI as `services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>()`.
-  2. **Refactor Desktop Add Connection Dialog:** Update `AddConnectionDialogViewModel` to delegate direct peer probing to `IOutboundConnectionWorkflow`, eliminating duplicate probing and URI resolution logic.
-  3. **Egress Pipeline Decoration (Non-Invasive Network Chaos):** Create `SimulatorChaosTransportDispatcherDecorator` implementing `ITransportDispatcher`. Intercepts `SendAsync(job)` in `SimulatedPersonaHost`: drops frames on `DropEnvelope`, delays on `InjectArtificialDelay`, and logs wire activity to `ISimulatorLogSink`. Deletes `ChaosPendingIngressStoreDecorator`, removing persistence-layer SQLite store hacking.
-  4. **Ingress Pipeline Decoration (Non-Invasive Ingress Control):** Register `SimulatorOutboxFlushingIngressPipelineDecorator` on `IInboundIngressPipeline` in `SimulatedPersonaHost`. Ingress envelopes auto-flush outbox responses and log wire traffic naturally.
-  5. **Eliminate Coordinator Database Backdoors:**
-     - Remove manual `PeerContact` construction and DB saving from `DirectHandshakeOrchestrator.InitiateDirectHandshakeAsync`. Dispatches handshake through `IOutboundConnectionWorkflow` and flushes outbox; contact creation occurs naturally via the wire handshake pipeline.
-     - Remove `EnsureChannelAsync` from `DirectChatCoordinator`. Messaging operations rely on standard wire channels and ingress discovery.
-     - Remove `PeerConnectionTargetKind.cs` and `SimulatedPeerConnectionService.cs`. Selecting an in-world persona simply reads its public tokens to auto-fill `PeerInvitationPayload`.
-  6. **High-Density Utility UI Consolidation in `PersonaCardView`:**
-     - Consolidate Capabilities (4 checkboxes), Autopilot (7 checkboxes), `Publish PreKeys`, and `Reroll Profile` into a single `⚙️ Persona Settings ▼` dropdown menu in the card header beside `🟢`.
-     - Consolidate the Row 1 action toolbar into exactly 3 compact buttons with non-blocking inline flyouts: `🔗 Connect Peer ▼`, `📋 Share Invite ▼`, and `📬 Relay ▼`. Zero modal dialogs blocking the workbench.
-
-- **Verify:**
-  - `Percolator.Application.Tests/Connections/OutboundConnectionWorkflowTests.cs`:
-    - `ConnectAsync_WithReachablePeer_ReturnsConnectedStatus`
-    - `ConnectAsync_WhenProbeTimesOut_ReturnsPendingOfflineStatus`
-    - `ConnectAsync_WithInvalidHostOrPort_ReturnsDomainError`
-  - `Percolator.Simulator.Tests/Chaos/SimulatorChaosTransportDispatcherDecoratorTests.cs`:
-    - `SendAsync_WhenFaultActionPass_DelegatesToInnerDispatcher`
-    - `SendAsync_WhenFaultActionDropEnvelope_ReturnsFailureWithoutCallingInner`
-    - `SendAsync_WhenFaultActionDelay_DelaysExecution`
-  - `Percolator.Simulator.Tests/Topology/PersonaConnectPeerFlyoutViewModelTests.cs`:
-    - `ConnectAsync_InWorldSelection_SynthesizesPayloadAndDispatchesWorkflow`
-    - `ConnectAsync_ExternalCode_DecodesUrlAndDispatchesWorkflow`
-  - `Percolator.Simulator.Tests/Topology/PersonaInvitationExportFlyoutViewModelTests.cs`:
-    - `UpdateGeneratedInvitation_WithAutoLan_GeneratesValidUrl`
-  - Command: `dotnet test Percolator.Application.Tests --filter "FullyQualifiedName~OutboundConnectionWorkflow"`
-  - Command: `dotnet test Percolator.Simulator.Tests --filter "FullyQualifiedName~Simulator"`
-  - Command: `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
-  - Command: `dotnet test Percolator.sln`
-
-- **QMS:** [`SYS-CONTACT-CONSENT-GATE`], [`SYS-PRE-ACTIVATION-STEALTH`], [`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`], [`SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`], [`DEP-DESKTOP-OUT-OF-BAND-VERIFICATION`], [`HAZ-TRANSPORT-SPOOFING`], [`HAZ-PREKEY-STARVATION`]
+Unified Desktop and Simulator connection mechanics using `IOutboundConnectionWorkflow` in `Percolator.Application`. Replaced simulator SQLite store tampering with clean `SimulatorChaosTransportDispatcherDecorator` decorating `ITransportDispatcher` on egress. Eliminated coordinator database backdoors in `DirectHandshakeOrchestrator` and `DirectChatCoordinator` by ensuring `PeerContact` creation on outbound connection establishment in `PeerConnectionService`. Consolidated `PersonaCardView` toolbar into 3 non-blocking flyouts (`🔗 Connect Peer ▼`, `📋 Share Invite ▼`, `📬 Relay ▼`) and tucked 14 options into `⚙️ Persona Settings ▼`.
 
 ---
+
+### CONN-12c ✅ Scheme Unification (`percolator://`), Canonical Ports (5100–5199), Honest Relay UI & Simulator Decoupling
+
+- **Specification Governance:**
+  1. **Canonical Scheme Invariant (`percolator://`)**: Enforces `percolator://` as the sole canonical URI scheme for all network and UI surfaces per [`DEC-CANONICAL-URI-SCHEME`](../DecisionRegister.md#3-integration-transport-and-platform-decisions). Rejects obsolete schemes (`relay://`, `https://`) in user and dialog inputs. Inward port and domain value object `RelayEndpoint` formats strings as `percolator://{host}:{port}`. Outward adapter `PeerGrpcChannelFactory` transparently translates `percolator://` URIs to `https://` exclusively when calling `SocketsHttpHandler` / `GrpcChannel.ForAddress`.
+  2. **Canonical Port Range Invariant (5100–5199)**: Sets canonical port boundary to `5100–5199` inclusive (100 discrete ports) across domain value object `PortRange.DefaultDynamicRange` and `PortReservationService` per [`DEC-CANONICAL-PORT-RANGE`](../DecisionRegister.md#3-integration-transport-and-platform-decisions).
+  3. **Relay Card Ergonomics & Honest UI**: Replaces the multi-field `RelayEndpointExportFlyoutViewModel` flyout on `RelayCardView.axaml` with a direct 1-click `📋 Copy Endpoint` button executing `CopyEndpointCommand`, copying `percolator://127.0.0.1:{BoundPort}` to the clipboard. Binds `SimulatedRelayHost` explicitly to `IPAddress.Loopback` (`127.0.0.1`).
+  4. **Coordinator Database & RAM Decoupling**: Eliminates cross-host recipient database pre-population and manual contact/channel insertions from `RelayProvisioningCoordinator.InitiateRelayedHandshakeAsync`. Delegates handshake initiation strictly to the initiator host's `IPeerConnectionService.ConnectToPeerAsync`, allowing the recipient to establish channels and contacts naturally through wire ingress during mailbox draining. Streamlines `DirectChatCoordinator` to resolve routes via sender's `IRoutingCoordinator`.
+
+- **Files:**
+  - `Modify`: `Percolator.Domain/Identities/ValueObjects/PortRange.cs`
+  - `Modify`: `Percolator.Domain/Delivery/ValueObjects/RelayEndpoint.cs`
+  - `Modify`: `Percolator.Infrastructure/Transport/PeerGrpcChannelFactory.cs`
+  - `Modify`: `Percolator.Infrastructure/Transport/TransportDispatcher.cs`
+  - `Modify`: `Percolator.Infrastructure/Transport/GrpcRelayMailboxProvisioner.cs`
+  - `Modify`: `Percolator.Infrastructure/Transport/DiscoveryQueryClient.cs`
+  - `Modify`: `Percolator.Infrastructure/Transport/Endpoints/NearbyDiscoveryEndpoint.cs`
+  - `Modify`: `Percolator.Desktop/Common/Services/PortReservationService.cs`
+  - `Modify`: `Percolator.Desktop/Features/Transports/ViewModels/AddConnectionDialogViewModel.cs`
+  - `Modify`: `Percolator.Desktop/Features/Transports/Views/AddConnectionDialog.axaml`
+  - `Modify`: `Percolator.Desktop/Features/Transports/Views/ShareInvitationDialog.axaml`
+  - `Modify`: `Percolator.Simulator/Features/RelayedChat/SimulatedRelayHost.cs`
+  - `Modify`: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs`
+  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayCardView.axaml`
+  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayCardViewModel.cs`
+  - `Delete`: `Percolator.Simulator/Features/RelayedChat/RelayEndpointExportFlyoutViewModel.cs`
+  - `Delete`: `Percolator.Simulator.Tests/RelayedChat/RelayEndpointExportFlyoutViewModelTests.cs`
+  - `Modify`: `Percolator.Simulator/Features/RelayedChat/RelayProvisioningCoordinator.cs`
+  - `Modify`: `Percolator.Simulator/Features/DirectChat/DirectChatCoordinator.cs`
+  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaCardView.axaml`
+  - `Modify`: `Percolator.Simulator/Features/Topology/PersonaInvitationExportFlyoutViewModel.cs`
+  - `Modify`: `Percolator.Simulator/Features/Topology/RelayRegistrationFlyoutViewModel.cs`
+  - `Create`: `Percolator.Domain.Tests/Delivery/RelayEndpointTests.cs`
+  - `Modify`: `Percolator.Domain.Tests/Identities/PortRangeTests.cs`
+  - `Modify`: `Percolator.Infrastructure.Tests/Transport/Primitives/PeerGrpcChannelFactoryTests.cs`
+  - `Modify`: `Percolator.Desktop.Tests/Features/Transports/AddConnectionDialogViewModelTests.cs`
+  - `Modify`: `Percolator.Simulator.Tests/Topology/RelayRegistrationFlyoutViewModelTests.cs`
+
+- **Technical Implementation Steps:**
+  1. **Domain Port & Endpoint Refactor**:
+     - In `PortRange.cs`: `DefaultDynamicRange => new(5100, 5199);`.
+     - In `RelayEndpoint.cs`:
+       - `FromHostAndPort(host, port)` formats `Value = $"percolator://{trimmedHost}:{port}"`.
+       - `Create(endpoint)`: Validates that if `endpoint` contains `://`, the scheme must equal `"percolator"`. Rejects `relay://`, `https://`, and `http://` with `INVALID_RELAY_SCHEME`. If raw `host:port` is passed, normalizes to `percolator://{host}:{port}`.
+       - Expose `public Uri ToUri() => new(Value);`.
+  2. **Infrastructure Transport Adapter Translation**:
+     - In `PeerGrpcChannelFactory.GetOrCreateChannel(Uri address)`:
+       ```csharp
+       var targetAddress = address.Scheme.Equals("percolator", StringComparison.OrdinalIgnoreCase)
+           ? new UriBuilder(address) { Scheme = Uri.UriSchemeHttps }.Uri
+           : address;
+       ```
+     - In `TransportDispatcher.ParseEndpointUri(string endpointStr)`: If starts with `percolator://`, returns `new Uri(endpointStr)`. If lacks scheme, returns `new Uri($"percolator://{endpointStr}")`.
+     - In `GrpcRelayMailboxProvisioner.CreateClient`: Call `_channelFactory.GetOrCreateChannel(endpoint.ToUri())`.
+     - In `DiscoveryQueryClient.ToUri`: Return `endpoint.ToUri()`.
+     - In `NearbyDiscoveryEndpoint.cs`: Set `RelayEndpoint = $"percolator://127.0.0.1:{_boundPort}"`.
+  3. **Desktop Realignment**:
+     - In `PortReservationService.cs`: `DefaultRangeStart = 5100; DefaultRangeEnd = 5199;`.
+     - In `AddConnectionDialogViewModel.cs`: Strip prefix `percolator://` on relay input; reject `relay://` with clear error message.
+     - In `AddConnectionDialog.axaml`: Change label and watermark from `relay://` to `percolator://`.
+     - In `ShareInvitationDialog.axaml`: Update default dynamic range text to `5100-5199`.
+  4. **Simulator Host & UI Realignment**:
+     - In `SimulatedRelayHost.cs`: Bind Kestrel to `IPAddress.Loopback` and initialize `BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");`.
+     - In `SimulatedPersonaHost.cs`: Initialize `BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");`.
+     - In `RelayCardView.axaml`: Replace `DropDownButton` with `<Button Content="📋 Copy Endpoint" Command="{Binding CopyEndpointCommand}" />`.
+     - In `RelayCardViewModel.cs`: Implement `[RelayCommand] private async Task CopyEndpointAsync()` copying `percolator://127.0.0.1:{_host.BoundPort}`. Remove `EndpointExport`.
+     - Delete `RelayEndpointExportFlyoutViewModel.cs` and `RelayEndpointExportFlyoutViewModelTests.cs`.
+     - In `PersonaInvitationExportFlyoutViewModel.cs`: Lock host to `127.0.0.1` and default port range to `5100-5199`.
+  5. **Coordinator Decoupling & Bypass Elimination**:
+     - In `RelayProvisioningCoordinator.InitiateRelayedHandshakeAsync`:
+       - Remove recipient DB writes (lines 335–346).
+       - Remove manual `DirectChannel` and `PeerContact` creation (lines 365–390).
+       - Replace with:
+         ```csharp
+         using var scope = initiator.Services.CreateScope();
+         var connectionService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
+         var result = await connectionService.ConnectToPeerAsync(target.PublicIdentityId, DeviceId.Primary, relayEndpoint, ct);
+         if (result.IsFailure) { /* Toast and return false */ }
+         await initiator.FlushOutboxAsync(ct);
+         ```
+     - In `DirectChatCoordinator.SendDirectMessageAsync`: Replace cross-host `recipient.HomeRelay` check with `sender.Services.GetRequiredService<IRoutingCoordinator>().ResolveRouteAsync(...)`.
+
+- **Semantic Unit Tests:**
+  - `RelayEndpointTests`:
+    - `Create_WithPercolatorScheme_ReturnsNormalizedEndpoint`
+    - `Create_WithDisallowedScheme_ReturnsInvalidSchemeError`
+    - `Create_WithRawHostAndPort_NormalizesToPercolatorScheme`
+  - `PortRangeTests`:
+    - `DefaultDynamicRange_Is5100To5199`
+  - `PeerGrpcChannelFactoryTests`:
+    - `GetOrCreateChannel_WithPercolatorScheme_MapsToHttpsForUnderlyingSocket`
+  - `AddConnectionDialogViewModelTests`:
+    - `ConnectRelay_WithPercolatorScheme_NormalizesAndInitiates`
+    - `ConnectRelay_WithDisallowedRelayScheme_SetsErrorMessage`
+  - `RelayCardViewModelTests`:
+    - `CopyEndpointCommand_CopiesPercolatorUriToClipboard`
+
+- **Verify:**
+  - `dotnet test Percolator.Domain.Tests`
+  - `dotnet test Percolator.Infrastructure.Tests`
+  - `dotnet test Percolator.Application.Tests`
+  - `dotnet test Percolator.Desktop.Tests`
+  - `dotnet test Percolator.Simulator.Tests`
+  - `dotnet test Percolator.sln`
+  - `dotnet run --project Percolator.Simulator --framework net10.0-windows10.0.19041.0 -- --replay Scenarios`
+  - `pwsh scripts/verify-code-integrity.ps1`
+
+- **QMS:** [`DEC-CANONICAL-PORT-RANGE`], [`DEC-CANONICAL-URI-SCHEME`], [`SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`], [`HAZ-TRANSPORT-SPOOFING`], [`HAZ-INGRESS-RESOURCE-EXHAUSTION`]
+
+---
+
 
 ### CONN-13 ⬜ Bi-Directional Multi-Node Integration Suite & Scenario Automation
 
