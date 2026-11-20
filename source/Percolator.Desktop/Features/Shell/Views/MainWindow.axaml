@@ -5,6 +5,7 @@
         xmlns:ui="using:FluentAvalonia.UI.Controls"
         xmlns:controls="using:Percolator.Desktop.Common.Controls"
         xmlns:transports="using:Percolator.Desktop.Features.Transports.Views"
+        xmlns:chats="using:Percolator.Desktop.Features.Chats.Views"
         x:Class="Percolator.Desktop.Features.Shell.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Percolator"
@@ -52,27 +53,7 @@
                        IsPaneOpen="{Binding IsChatsSidebarOpen, Mode=TwoWay}">
 
                 <SplitView.Pane>
-                    <Border Background="{DynamicResource LayerFillColorAltBrush}"
-                            BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
-                            BorderThickness="0,0,1,0">
-                        <Grid RowDefinitions="Auto,*">
-                            <TextBlock Grid.Row="0"
-                                       Text="Chats"
-                                       Theme="{StaticResource SubtitleTextBlockStyle}"
-                                       Margin="{StaticResource CardPadding}" />
-                            <StackPanel Grid.Row="1" Spacing="4" HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" Margin="{StaticResource CardPadding}">
-                                <TextBlock Text="No conversations yet."
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                           TextWrapping="Wrap"
-                                           TextAlignment="Center" />
-                                <TextBlock Text="Send a message to start chatting."
-                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                           TextWrapping="Wrap"
-                                           TextAlignment="Center" />
-                            </StackPanel>
-                        </Grid>
-                    </Border>
+                    <chats:ChatsSidebarView DataContext="{Binding ChatsSidebar}" />
                 </SplitView.Pane>
 
                 <!-- Content Area: header, message list placeholder, chat composer -->

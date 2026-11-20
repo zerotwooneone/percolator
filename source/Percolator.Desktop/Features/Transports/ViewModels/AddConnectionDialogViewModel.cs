@@ -13,6 +13,7 @@ using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Invitations;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Chats.Services;
 using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -31,6 +32,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
     private readonly IRelayMailboxProvisioner _relayProvisioner;
     private readonly IClipboardService _clipboardService;
     private readonly IPersonaDirectory _personaDirectory;
+    private readonly IConversationStateService _conversationStateService;
     private readonly ILogger<AddConnectionDialogViewModel> _logger;
     private readonly TimeProvider _timeProvider;
 
@@ -44,6 +46,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
         IRelayMailboxProvisioner relayProvisioner,
         IClipboardService clipboardService,
         IPersonaDirectory personaDirectory,
+        IConversationStateService conversationStateService,
         ILogger<AddConnectionDialogViewModel> logger,
         TimeProvider timeProvider)
     {
@@ -54,6 +57,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
         _relayProvisioner = relayProvisioner ?? throw new ArgumentNullException(nameof(relayProvisioner));
         _clipboardService = clipboardService ?? throw new ArgumentNullException(nameof(clipboardService));
         _personaDirectory = personaDirectory ?? throw new ArgumentNullException(nameof(personaDirectory));
+        _conversationStateService = conversationStateService ?? throw new ArgumentNullException(nameof(conversationStateService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
@@ -168,9 +172,25 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
                 return;
             }
 
-            var dialogStatus = workflowResult.Value!.Status == AppOutboundStatus.Connected
-                ? OutboundConnectionStatus.Connected
-                : OutboundConnectionStatus.PendingOffline;
+            var peerDisplayName = payload.EndpointHosts.FirstOrDefault(h => !string.IsNullOrWhiteSpace(h))
+                ?? $"Peer {payload.IdentityId.Value:N}"[..12];
+
+            OutboundConnectionStatus dialogStatus;
+            if (workflowResult.Value!.Status == AppOutboundStatus.Connected)
+            {
+                dialogStatus = OutboundConnectionStatus.Connected;
+                _conversationStateService.RegisterDirectConversation(payload.IdentityId, peerDisplayName);
+            }
+            else
+            {
+                dialogStatus = OutboundConnectionStatus.PendingOffline;
+                var pendingModel = new OutboundPendingConnectionModel(
+                    payload.IdentityId,
+                    peerDisplayName,
+                    payload,
+                    _timeProvider.GetUtcNow());
+                _conversationStateService.StagePendingOutbound(pendingModel);
+            }
 
             CloseWithResult(new AddConnectionDialogResult(
                 dialogStatus,

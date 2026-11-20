@@ -19,6 +19,7 @@ using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Startup.Models;
 using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.Features.Transports.ViewModels;
+using Percolator.Desktop.Tests.Features.Chats;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;
@@ -38,6 +39,7 @@ public sealed class AddConnectionDialogViewModelTests
     private FakeRelayMailboxProvisioner _fakeRelayProvisioner = null!;
     private FakeClipboardService _fakeClipboardService = null!;
     private Mock<IPersonaDirectory> _mockPersonaDirectory = null!;
+    private FakeConversationStateService _fakeConversationService = null!;
 
     private PublicIdentityId _testPersonaId;
     private PeerInvitationPayload _testInvitationPayload = null!;
@@ -53,6 +55,7 @@ public sealed class AddConnectionDialogViewModelTests
         _fakeRelayProvisioner = new FakeRelayMailboxProvisioner();
         _fakeClipboardService = new FakeClipboardService();
         _mockPersonaDirectory = new Mock<IPersonaDirectory>(MockBehavior.Strict);
+        _fakeConversationService = new FakeConversationStateService();
 
         _testPersonaId = PublicIdentityId.New();
         _testInvitationPayload = new PeerInvitationPayload(
@@ -69,6 +72,12 @@ public sealed class AddConnectionDialogViewModelTests
             .Callback<AddConnectionDialogResult>(r => _dialogResult = r);
         _contextMock.Setup(c => c.Cancel())
             .Callback(() => _dialogResult = new AddConnectionDialogResult(OutboundConnectionStatus.Cancelled));
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _fakeConversationService.Dispose();
     }
 
     private AddConnectionDialogViewModel CreateViewModel(bool initializeWithPersona = true)
@@ -92,6 +101,7 @@ public sealed class AddConnectionDialogViewModelTests
             _fakeRelayProvisioner,
             _fakeClipboardService,
             _mockPersonaDirectory.Object,
+            _fakeConversationService,
             NullLogger<AddConnectionDialogViewModel>.Instance,
             TimeProvider.System);
 
@@ -108,31 +118,34 @@ public sealed class AddConnectionDialogViewModelTests
 
         Action act0 = () => new AddConnectionDialogViewModel(
             null!, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
-            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, _fakeConversationService, logger, time);
         Action act1 = () => new AddConnectionDialogViewModel(
             contextMock.Object, null!, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
-            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, _fakeConversationService, logger, time);
         Action act2 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, null!, _mockRelayDirectory.Object,
-            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, _fakeConversationService, logger, time);
         Action act3 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, null!,
-            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, _fakeConversationService, logger, time);
         Action act4 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
-            null!, _fakeClipboardService, _mockPersonaDirectory.Object, logger, time);
+            null!, _fakeClipboardService, _mockPersonaDirectory.Object, _fakeConversationService, logger, time);
         Action act5 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
-            _fakeRelayProvisioner, null!, _mockPersonaDirectory.Object, logger, time);
+            _fakeRelayProvisioner, null!, _mockPersonaDirectory.Object, _fakeConversationService, logger, time);
         Action act6 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
-            _fakeRelayProvisioner, _fakeClipboardService, null!, logger, time);
+            _fakeRelayProvisioner, _fakeClipboardService, null!, _fakeConversationService, logger, time);
         Action act7 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
-            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, null!, time);
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, null!, logger, time);
         Action act8 = () => new AddConnectionDialogViewModel(
             contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
-            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, logger, null!);
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, _fakeConversationService, null!, time);
+        Action act9 = () => new AddConnectionDialogViewModel(
+            contextMock.Object, _mockCodec.Object, _mockOutboundWorkflow.Object, _mockRelayDirectory.Object,
+            _fakeRelayProvisioner, _fakeClipboardService, _mockPersonaDirectory.Object, _fakeConversationService, logger, null!);
 
         act0.Should().Throw<ArgumentNullException>();
         act1.Should().Throw<ArgumentNullException>();
@@ -143,6 +156,7 @@ public sealed class AddConnectionDialogViewModelTests
         act6.Should().Throw<ArgumentNullException>();
         act7.Should().Throw<ArgumentNullException>();
         act8.Should().Throw<ArgumentNullException>();
+        act9.Should().Throw<ArgumentNullException>();
     }
 
     [Test]
@@ -255,6 +269,7 @@ public sealed class AddConnectionDialogViewModelTests
         _dialogResult.PeerId.Should().Be(_testInvitationPayload.IdentityId);
         _dialogResult.Invitation.Should().Be(_testInvitationPayload);
         vm.ErrorMessage.Should().BeNull();
+        _fakeConversationService.RegisteredDirect.Should().ContainSingle(r => r.PeerId == _testInvitationPayload.IdentityId);
     }
 
     [Test]
@@ -287,6 +302,7 @@ public sealed class AddConnectionDialogViewModelTests
         _dialogResult.PeerId.Should().Be(_testInvitationPayload.IdentityId);
         _dialogResult.Invitation.Should().Be(_testInvitationPayload);
         vm.ErrorMessage.Should().BeNull("failing the fast offline probe stages background retry without UI error");
+        _fakeConversationService.StagedPending.Should().ContainSingle(p => p.PeerId == _testInvitationPayload.IdentityId);
     }
 
     [Test]

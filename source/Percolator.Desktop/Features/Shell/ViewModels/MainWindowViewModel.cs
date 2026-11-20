@@ -6,6 +6,7 @@ using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Features.Chats.ViewModels;
 using Percolator.Desktop.Features.Shell.Models;
 using Percolator.Desktop.Features.Transports.ViewModels;
 using Percolator.Desktop.ViewModels;
@@ -13,7 +14,7 @@ using R3;
 
 /// <summary>
 /// ViewModel for the DESK-01 / CONN-11 responsive 3-pane shell frame. Owns transient shell-view state
-/// (drawer open/closed, active conversation header) and composes the Left Rail sidebar ([DESK-05]).
+/// (drawer open/closed, active conversation header) and composes the Left Rail and Chats sidebars ([DESK-05], [DESK-06]).
 /// </summary>
 public sealed partial class MainWindowViewModel : ViewModelBase
 {
@@ -23,6 +24,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// ViewModel governing the 72px fixed Left Rail navigation sidebar ([DESK-05]).
     /// </summary>
     public TransportsSidebarViewModel TransportsSidebar { get; }
+
+    /// <summary>
+    /// ViewModel governing the 240px contextual right sidebar chats directory ([DESK-06]).
+    /// </summary>
+    public ChatsSidebarViewModel ChatsSidebar { get; }
 
     /// <summary>
     /// Two-way bound to the right-anchored inspector <c>SplitView.IsPaneOpen</c>.
@@ -54,10 +60,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public MainWindowViewModel(
         ICurrentPersonaService currentPersonaService,
-        TransportsSidebarViewModel transportsSidebar)
+        TransportsSidebarViewModel transportsSidebar,
+        ChatsSidebarViewModel chatsSidebar)
     {
         _currentPersonaService = currentPersonaService ?? throw new ArgumentNullException(nameof(currentPersonaService));
         TransportsSidebar = transportsSidebar ?? throw new ArgumentNullException(nameof(transportsSidebar));
+        ChatsSidebar = chatsSidebar ?? throw new ArgumentNullException(nameof(chatsSidebar));
 
         _currentPersona = _currentPersonaService.CurrentPersona;
 
