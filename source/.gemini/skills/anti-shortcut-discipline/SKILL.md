@@ -31,6 +31,7 @@ This skill enforces zero-tolerance standards against AI code shortcuts in Percol
 | **13** | **Zero In-Process Transport Bypasses** | `relay.Services.CreateScope()` in client/coordinator | In simulated multi-node environments, client-to-relay operations (e.g. roster mutations) must call real gRPC services (`AnonymousGroupRelayService`), never mutate the relay DB via DI. |
 | **14** | **No Coordinator State Backdoors** | `_groupMembers` dictionary in coordinator | The coordinator/harness must not maintain side-channel state dictionaries to spoon-feed state out-of-band to nodes. Node state transitions must occur solely through protocol messages or local storage. |
 | **15** | **Deterministic Signal Awaiting** | `await Task.Delay(150)` in scenario steps | Prohibit arbitrary sleep delays as synchronization substitutes. Await explicit reactive signals (`_stateBus.Signals`), outbox job completions, or deterministic task tokens. |
+| **16** | **Zero Captive Scope Facades (`IDbContextFactory` Standard)** | `Desktop*QueryService` creating `scope.ServiceProvider.GetService<Sql*>() ?? GetServices<I*>()` | Prohibit captive-dependency facade wrappers that create scopes and perform fallback resolution gymnastics. In desktop/client applications, inject `IDbContextFactory<TDbContext>` directly into query services/repositories so they can be registered as thread-safe Singletons without intermediate facades. |
 
 ---
 
@@ -181,6 +182,35 @@ await _stateBus.Signals
     .FirstAsync(cancellationToken: ct);
 ```
 
+### 16. Zero Captive Scope Facades (IDbContextFactory Standard)
+```csharp
+// BAD: Facade manually managing scopes with recursive fallback hacks
+public sealed class DesktopPeerContactQueryService : IPeerContactQueryService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+    public async Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(PublicIdentityId id, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var inner = scope.ServiceProvider.GetService<SqlPeerContactQueryService>()
+            ?? scope.ServiceProvider.GetServices<IPeerContactQueryService>().FirstOrDefault(s => s is not DesktopPeerContactQueryService);
+        return await inner.GetContactSummariesAsync(id, ct);
+    }
+}
+
+// GOOD: Query service directly injects IDbContextFactory and creates context per call; registered as Singleton
+public sealed class SqlPeerContactQueryService : IPeerContactQueryService
+{
+    private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
+    public SqlPeerContactQueryService(IDbContextFactory<PercolatorDbContext> contextFactory) => _contextFactory = contextFactory;
+
+    public async Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(PublicIdentityId id, CancellationToken ct)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(ct);
+        return await db.PeerContacts.AsNoTracking()...;
+    }
+}
+```
+
 ---
 
 ## Anti-Shortcut Pre-Flight Checklist
@@ -202,5 +232,6 @@ Before completing any task, ticket, or PR, verify:
 - [ ] **13. No Transport Bypasses**: Client-to-relay operations go through real gRPC endpoints, never `relay.Services`.
 - [ ] **14. No Coordinator Backdoors**: No central coordinator dictionaries to side-channel state between nodes.
 - [ ] **15. Deterministic Awaiting**: Scenarios await explicit reactive signals, never `Task.Delay(N)`.
+- [ ] **16. Zero Captive Scope Facades**: Query services inject `IDbContextFactory<TDbContext>` directly; no `Desktop*QueryService` facades resolving concrete types via `IServiceScopeFactory`.
 - [ ] **Verification**: Run `dotnet run --project Percolator.Simulator\Percolator.Simulator.csproj -f net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator\Scenarios` (all pass).
 - [ ] **Regression**: Run all test projects (`dotnet test`) and verify 0 failures.

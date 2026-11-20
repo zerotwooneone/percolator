@@ -19,7 +19,7 @@ public sealed class SqlConversationListQueryServiceTests
     {
         using var testDb = new SqliteTestDb();
         var repo = new SqlChatMessageRepository(testDb.DbContext);
-        var convQueryService = new SqlConversationListQueryService(testDb.DbContext);
+        var convQueryService = new SqlConversationListQueryService(testDb.ContextFactory);
 
         var channelId = ChannelId.New();
         var currentUserId = Domain.Identities.PublicIdentityId.New();

@@ -66,22 +66,19 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<OutboundPendingRetryWorker>();
         services.AddSingleton<IOutboundPendingRetryWorker>(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
         services.AddHostedService(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
-        // Conversation state and query services (DESK-06)
-        services.AddScoped<SqlConversationListQueryService>();
-        services.AddSingleton<IConversationListQueryService, DesktopConversationListQueryService>();
+        // Conversation state and query services (DESK-06) - thread-safe singleton over IDbContextFactory
+        services.AddSingleton<IConversationListQueryService, SqlConversationListQueryService>();
         services.AddSingleton<IConversationStateService, ConversationStateService>();
         services.AddTransient<ChatsSidebarViewModel>();
         services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
         services.AddScoped<InboundConnectionWorkflow>();
         services.AddSingleton<IInboundConnectionWorkflow, DesktopInboundConnectionWorkflow>();
 
-        // Inbound contact query service singleton facade (CONN-11)
-        services.AddScoped<SqlPeerContactQueryService>();
-        services.AddSingleton<IPeerContactQueryService, DesktopPeerContactQueryService>();
+        // Inbound contact query service (CONN-11) - thread-safe singleton over IDbContextFactory
+        services.AddSingleton<IPeerContactQueryService, SqlPeerContactQueryService>();
 
-        // Persona relay query service (CONN-12d)
-        services.AddScoped<SqlPersonaRelayQueryService>();
-        services.AddSingleton<IPersonaRelayQueryService, DesktopPersonaRelayQueryService>();
+        // Persona relay query service (CONN-12d) - thread-safe singleton over IDbContextFactory
+        services.AddSingleton<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
 
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as

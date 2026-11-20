@@ -29,14 +29,7 @@ public sealed class DesktopInboundConnectionWorkflow : IInboundConnectionWorkflo
         CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var inner = scope.ServiceProvider.GetService<InboundConnectionWorkflow>()
-            ?? scope.ServiceProvider.GetServices<IInboundConnectionWorkflow>().FirstOrDefault(s => s is not DesktopInboundConnectionWorkflow);
-
-        if (inner == null)
-        {
-            return DomainResult<bool>.Failure(new DomainError("WORKFLOW_UNAVAILABLE", "InboundConnectionWorkflow is not registered in scope."));
-        }
-
+        var inner = scope.ServiceProvider.GetRequiredService<InboundConnectionWorkflow>();
         return await inner.AcceptRequestAsync(personaId, requesterId, ct).ConfigureAwait(false);
     }
 
@@ -46,14 +39,7 @@ public sealed class DesktopInboundConnectionWorkflow : IInboundConnectionWorkflo
         CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var inner = scope.ServiceProvider.GetService<InboundConnectionWorkflow>()
-            ?? scope.ServiceProvider.GetServices<IInboundConnectionWorkflow>().FirstOrDefault(s => s is not DesktopInboundConnectionWorkflow);
-
-        if (inner == null)
-        {
-            return DomainResult<bool>.Failure(new DomainError("WORKFLOW_UNAVAILABLE", "InboundConnectionWorkflow is not registered in scope."));
-        }
-
+        var inner = scope.ServiceProvider.GetRequiredService<InboundConnectionWorkflow>();
         return await inner.RejectRequestAsync(personaId, requesterId, ct).ConfigureAwait(false);
     }
 
@@ -63,14 +49,7 @@ public sealed class DesktopInboundConnectionWorkflow : IInboundConnectionWorkflo
         CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var inner = scope.ServiceProvider.GetService<InboundConnectionWorkflow>()
-            ?? scope.ServiceProvider.GetServices<IInboundConnectionWorkflow>().FirstOrDefault(s => s is not DesktopInboundConnectionWorkflow);
-
-        if (inner == null)
-        {
-            return DomainResult<bool>.Failure(new DomainError("WORKFLOW_UNAVAILABLE", "InboundConnectionWorkflow is not registered in scope."));
-        }
-
+        var inner = scope.ServiceProvider.GetRequiredService<InboundConnectionWorkflow>();
         return await inner.BlockRequestAsync(personaId, requesterId, ct).ConfigureAwait(false);
     }
 }

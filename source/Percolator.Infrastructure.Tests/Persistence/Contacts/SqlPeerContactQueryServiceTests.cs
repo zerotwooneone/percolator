@@ -21,7 +21,7 @@ public class SqlPeerContactQueryServiceTests
     {
         _testDb = new SqliteTestDb();
         _repository = new SqlitePeerContactRepository(_testDb.DbContext);
-        _queryService = new SqlPeerContactQueryService(_testDb.DbContext);
+        _queryService = new SqlPeerContactQueryService(_testDb.ContextFactory);
     }
 
     [TearDown]

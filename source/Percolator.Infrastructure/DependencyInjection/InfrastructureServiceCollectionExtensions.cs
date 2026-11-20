@@ -208,8 +208,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOutboxQueryService, SqlOutboxQueryService>();
 
         services.AddScoped<IPeerContactRepository, SqlitePeerContactRepository>();
-        services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
-        services.AddScoped<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
+        services.AddSingleton<IPeerContactQueryService, SqlPeerContactQueryService>();
+        services.AddSingleton<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
         services.AddScoped<IChannelRepository, SqliteChannelRepository>();
 
         services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>()));
@@ -338,7 +338,7 @@ public static class InfrastructureServiceCollectionExtensions
     {
         services.AddScoped<IChatMessageRepository, SqlChatMessageRepository>();
         services.AddScoped<IChatMessageQueryService, SqlChatMessageQueryService>();
-        services.AddScoped<IConversationListQueryService, SqlConversationListQueryService>();
+        services.AddSingleton<IConversationListQueryService, SqlConversationListQueryService>();
         services.AddScoped<IGroupInvitationRepository, SqlGroupInvitationRepository>();
         services.AddScoped<IGroupInvitationQueryService, SqlGroupInvitationQueryService>();
         services.AddScoped<IUnknownGroupMessageCacheRepository, SqlUnknownGroupMessageCacheRepository>();

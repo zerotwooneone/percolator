@@ -13,78 +13,90 @@ using Percolator.Domain.Identities.ValueObjects;
 
 public sealed class SqlPeerContactQueryService : IPeerContactQueryService
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbFactory;
 
-    public SqlPeerContactQueryService(PercolatorDbContext dbContext)
+    public SqlPeerContactQueryService(IDbContextFactory<PercolatorDbContext> dbFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
     }
 
-    public async Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
+    private async Task<TResult> WithContextAsync<TResult>(Func<PercolatorDbContext, Task<TResult>> query)
     {
-        var ownerGuid = ownerId.Value;
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+        return await query(db).ConfigureAwait(false);
+    }
 
-        var contacts = await _dbContext.PeerContacts
-            .AsNoTracking()
-            .Where(c => c.OwnerIdentityId == ownerGuid)
-            .OrderBy(c => c.Nickname)
-            .Select(c => new
+    public Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
+    {
+        return WithContextAsync(async db =>
+        {
+            var ownerGuid = ownerId.Value;
+
+            var contacts = await db.PeerContacts
+                .AsNoTracking()
+                .Where(c => c.OwnerIdentityId == ownerGuid)
+                .OrderBy(c => c.Nickname)
+                .Select(c => new
+                {
+                    c.RemotePeerId,
+                    c.Nickname,
+                    c.TrustLevel,
+                    c.State,
+                    c.CreatedAtUtc,
+                    c.LastSeenAtUtc
+                })
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            var now = DateTimeOffset.UtcNow;
+            return (IReadOnlyList<PeerContactSummaryReadModel>)contacts.Select(c =>
             {
-                c.RemotePeerId,
-                c.Nickname,
-                c.TrustLevel,
-                c.State,
-                c.CreatedAtUtc,
-                c.LastSeenAtUtc
-            })
-            .ToListAsync(ct);
-
-        var now = DateTimeOffset.UtcNow;
-        return contacts.Select(c =>
-        {
-            var isOnline = c.LastSeenAtUtc.HasValue && (now - c.LastSeenAtUtc.Value).TotalMinutes < 5;
-            return new PeerContactSummaryReadModel(
-                new Domain.Identities.PublicIdentityId(c.RemotePeerId),
-                c.Nickname,
-                (PeerTrustLevel)c.TrustLevel,
-                (ContactState)c.State,
-                c.CreatedAtUtc,
-                isOnline);
-        }).ToList();
+                var isOnline = c.LastSeenAtUtc.HasValue && (now - c.LastSeenAtUtc.Value).TotalMinutes < 5;
+                return new PeerContactSummaryReadModel(
+                    new Domain.Identities.PublicIdentityId(c.RemotePeerId),
+                    c.Nickname,
+                    (PeerTrustLevel)c.TrustLevel,
+                    (ContactState)c.State,
+                    c.CreatedAtUtc,
+                    isOnline);
+            }).ToList();
+        });
     }
 
-    public async Task<PeerContactDetailReadModel?> GetContactDetailAsync(Domain.Identities.PublicIdentityId ownerId, Domain.Identities.PublicIdentityId contactId, CancellationToken ct = default)
+    public Task<PeerContactDetailReadModel?> GetContactDetailAsync(Domain.Identities.PublicIdentityId ownerId, Domain.Identities.PublicIdentityId contactId, CancellationToken ct = default)
     {
-        var ownerGuid = ownerId.Value;
-        var contactGuid = contactId.Value;
-
-        var entity = await _dbContext.PeerContacts
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.OwnerIdentityId == ownerGuid && c.RemotePeerId == contactGuid, ct);
-
-        if (entity == null)
+        return WithContextAsync(async db =>
         {
-            return null;
-        }
+            var ownerGuid = ownerId.Value;
+            var contactGuid = contactId.Value;
 
-        var devices = await _dbContext.PeerContactDevices
-            .AsNoTracking()
-            .Where(d => d.OwnerIdentityId == ownerGuid && d.RemotePeerId == contactGuid)
-            .Select(d => new DeviceId(d.DeviceId))
-            .ToListAsync(ct);
+            var entity = await db.PeerContacts
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.OwnerIdentityId == ownerGuid && c.RemotePeerId == contactGuid, ct).ConfigureAwait(false);
 
-        var primaryKey = entity.PrimaryPublicKey != null && entity.PrimaryPublicKey.Length == 32
-            ? IdentityKey.FromSpan(entity.PrimaryPublicKey)
-            : IdentityKey.FromSpan(new byte[32]);
+            if (entity == null)
+            {
+                return null;
+            }
 
-        return new PeerContactDetailReadModel(
-            contactId,
-            entity.Nickname,
-            (PeerTrustLevel)entity.TrustLevel,
-            (ContactState)entity.State,
-            primaryKey,
-            devices,
-            entity.CreatedAtUtc,
-            entity.LastSeenAtUtc ?? entity.CreatedAtUtc);
+            var devices = await db.PeerContactDevices
+                .AsNoTracking()
+                .Where(d => d.OwnerIdentityId == ownerGuid && d.RemotePeerId == contactGuid)
+                .Select(d => new DeviceId(d.DeviceId))
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            var primaryKey = entity.PrimaryPublicKey != null && entity.PrimaryPublicKey.Length == 32
+                ? IdentityKey.FromSpan(entity.PrimaryPublicKey)
+                : IdentityKey.FromSpan(new byte[32]);
+
+            return new PeerContactDetailReadModel(
+                contactId,
+                entity.Nickname,
+                (PeerTrustLevel)entity.TrustLevel,
+                (ContactState)entity.State,
+                primaryKey,
+                devices,
+                entity.CreatedAtUtc,
+                entity.LastSeenAtUtc ?? entity.CreatedAtUtc);
+        });
     }
 }

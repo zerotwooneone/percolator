@@ -18,7 +18,7 @@ public sealed class SqlPersonaRelayQueryServiceTests
     public async Task GetRelayLinksForPersonaAsync_ReturnsOnlyBindingsForTargetPersona()
     {
         using var testDb = new SqliteTestDb();
-        var queryService = new SqlPersonaRelayQueryService(testDb.DbContext);
+        var queryService = new SqlPersonaRelayQueryService(testDb.ContextFactory);
 
         var targetPersonaId = PublicIdentityId.New();
         var otherPersonaId = PublicIdentityId.New();
@@ -76,7 +76,7 @@ public sealed class SqlPersonaRelayQueryServiceTests
     public async Task GetRelayLinksForPersonaAsync_ProjectsCorrectRelayLinkStatus()
     {
         using var testDb = new SqliteTestDb();
-        var queryService = new SqlPersonaRelayQueryService(testDb.DbContext);
+        var queryService = new SqlPersonaRelayQueryService(testDb.ContextFactory);
 
         var personaId = PublicIdentityId.New();
         var relayId = PublicIdentityId.New();
@@ -110,7 +110,7 @@ public sealed class SqlPersonaRelayQueryServiceTests
     public async Task GetRelayLinksForPersonaAsync_ReturnsEmptyWhenNoBindingsExist()
     {
         using var testDb = new SqliteTestDb();
-        var queryService = new SqlPersonaRelayQueryService(testDb.DbContext);
+        var queryService = new SqlPersonaRelayQueryService(testDb.ContextFactory);
 
         var unlinkedPersonaId = PublicIdentityId.New();
 
