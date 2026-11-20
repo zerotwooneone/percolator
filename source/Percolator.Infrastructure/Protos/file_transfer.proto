@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package percolator.infrastructure2.protos;
+
+option csharp_namespace = "Percolator.Infrastructure2.Protos";
+
+message FileEntryProto {
+  int32 index = 1;
+  string relative_path = 2;
+  int64 file_size_bytes = 3;
+  int64 start_offset = 4;
+  int64 last_modified_unix_seconds = 5;
+}
+
+message TransferManifestProto {
+  bytes manifest_id = 1;           // 16-byte UUID (RFC 4122 big-endian)
+  string root_name = 2;
+  int64 total_size_bytes = 3;
+  int32 chunk_size_bytes = 4;
+  bytes merkle_root = 5;           // 32-byte SHA-256 root
+  bytes concatenated_leaves = 6;   // Contiguous N * 32-byte SHA-256 leaf hashes (zero per-leaf tag overhead)
+  repeated FileEntryProto files = 7;
+}
+
+message TransferBundleSummaryProto {
+  string root_name = 1;
+  int64 total_size_bytes = 2;
+  int32 total_files = 3;
+  int32 chunk_size_bytes = 4;
+  int32 total_chunks = 5;
+  bytes merkle_root = 6;           // 32-byte SHA-256 root
+}
+
+message ManifestBlobDescriptorProto {
+  string blob_id = 1;
+  bytes ciphertext_sha256 = 2;     // 32-byte SHA-256
+  int64 plaintext_size_bytes = 3;
+  string relay_endpoint_uri = 4;
+}
+
+message ManifestDistributionProto {
+  uint32 kind = 1;                 // 1 = Inline, 2 = RemoteBlob
+  oneof distribution {
+    bytes inline_manifest_data = 2;
+    ManifestBlobDescriptorProto remote_blob = 3;
+  }
+}
+
+message RelayRendezvousDescriptorProto {
+  string endpoint_uri = 1;
+  bytes token = 2;                 // 32-byte RelayPipeToken
+}
+
+message DirectEndpointCandidateProto {
+  string host = 1;
+  int32 port = 2;
+  uint32 kind = 3;                 // 1 = DirectLan, 2 = DirectWanUpnp, 3 = DirectWanStun
+}
+
+message FileTransferOfferProto {
+  bytes transfer_session_id = 1;   // 16-byte UUID
+  TransferBundleSummaryProto summary = 2;
+  ManifestDistributionProto manifest = 3;
+  bytes session_encryption_key = 4;// 32-byte TransferKey
+  bytes base_nonce = 5;            // 12-byte BaseNonce
+  bytes stream_auth_token = 6;     // 32-byte StreamAuthToken
+  RelayRendezvousDescriptorProto relay_rendezvous = 7;
+  repeated DirectEndpointCandidateProto direct_candidates = 8;
+}
+
+message FileTransferAcceptProto {
+  bytes transfer_session_id = 1;   // 16-byte UUID
+  repeated DirectEndpointCandidateProto receiver_candidates = 2;
+  uint32 routing_preference = 3;   // 1 = DirectPreferred, 2 = RelayOnly
+  int32 total_chunks = 4;
+  bytes resumption_bitfield = 5;
+}
+
+message FileTransferCancelProto {
+  bytes transfer_session_id = 1;   // 16-byte UUID
+  string reason = 2;
+}

@@ -1,0 +1,246 @@
+using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Tests.TestDoubles;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+
+namespace Percolator.Domain.Tests.Delivery;
+
+[TestFixture]
+public class RelayMailboxQueueTests
+{
+    private FakeDateTimeProvider _timeProvider = null!;
+    private PublicIdentityId _relayIdentityId;
+    private RelayMailboxQueue _queue = null!;
+    private BlindedRoutingToken _recipientToken;
+    private DeliveryToken _deliveryToken = null!;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _timeProvider = new FakeDateTimeProvider(new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero));
+        _relayIdentityId = PublicIdentityId.New();
+        _queue = new RelayMailboxQueue(_relayIdentityId);
+        _recipientToken = BlindedRoutingToken.New();
+        _deliveryToken = DeliveryToken.FromSpan(new byte[32]);
+
+        _queue.RegisterRecipient(_recipientToken, _deliveryToken);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _deliveryToken?.Dispose();
+    }
+
+    [Test]
+    public void Enqueue_WithValidDeliveryToken_StoresEnvelope()
+    {
+        var envelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 1, 2, 3 },
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(7));
+
+        var result = _queue.Enqueue(envelope, _deliveryToken, _timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        _queue.TotalCount.Should().Be(1);
+    }
+
+    [Test]
+    public void Enqueue_WithDuplicateEnvelopeId_ReturnsDuplicateEnvelopeIdError()
+    {
+        var duplicateId = EnvelopeId.New();
+        var env1 = new MailboxEnvelope(duplicateId, _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(7));
+        var env2 = new MailboxEnvelope(duplicateId, _recipientToken, new byte[] { 2 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(7));
+
+        _queue.Enqueue(env1, _deliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+        var duplicateResult = _queue.Enqueue(env2, _deliveryToken, _timeProvider);
+
+        duplicateResult.IsFailure.Should().BeTrue();
+        duplicateResult.Error.Code.Should().Be("DUPLICATE_ENVELOPE_ID");
+        _queue.TotalCount.Should().Be(1);
+    }
+
+    [Test]
+    public void Enqueue_WhenEnvelopeAlreadyExpired_ReturnsEnvelopeExpiredError()
+    {
+        var expiredEnvelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 1, 2, 3 },
+            _timeProvider.UtcNow.AddDays(-2),
+            _timeProvider.UtcNow.AddDays(-1)); // already expired relative to _timeProvider.UtcNow
+
+        var result = _queue.Enqueue(expiredEnvelope, _deliveryToken, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("ENVELOPE_EXPIRED");
+        _queue.TotalCount.Should().Be(0);
+    }
+
+    [Test]
+    public void Enqueue_WithUnauthorizedDeliveryToken_ReturnsError()
+    {
+        using var invalidToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0xFF, 32).ToArray());
+        var envelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 1, 2, 3 },
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(7));
+
+        var result = _queue.Enqueue(envelope, invalidToken, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("UNAUTHORIZED_DELIVERY_TOKEN");
+        _queue.TotalCount.Should().Be(0);
+    }
+
+    [Test]
+    public void Enqueue_WhenEnvelopeExceedsMaxSize_ReturnsEnvelopeTooLargeError()
+    {
+        var smallSizePolicy = new PurgePolicy(
+            DefaultTtl: TimeSpan.FromDays(1),
+            MaxRetainedEnvelopes: 100,
+            MaxEnvelopeSizeBytes: 50);
+
+        var oversizedPayload = new byte[51];
+        var envelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            oversizedPayload,
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(1));
+
+        var result = _queue.Enqueue(envelope, _deliveryToken, _timeProvider, smallSizePolicy);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("ENVELOPE_TOO_LARGE");
+        _queue.TotalCount.Should().Be(0);
+    }
+
+    [Test]
+    public void Enqueue_WhenQuotaExceeded_ReturnsQuotaExceededError()
+    {
+        var tightPolicy = new PurgePolicy(DefaultTtl: TimeSpan.FromDays(1), MaxRetainedEnvelopes: 1);
+
+        var env1 = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 1 },
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(1));
+
+        var env2 = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 2 },
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(1));
+
+        _queue.Enqueue(env1, _deliveryToken, _timeProvider, tightPolicy).IsSuccess.Should().BeTrue();
+        var result = _queue.Enqueue(env2, _deliveryToken, _timeProvider, tightPolicy);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("MAILBOX_QUOTA_EXCEEDED");
+        _queue.TotalCount.Should().Be(1);
+    }
+
+    [Test]
+    public void PurgeExpired_RemovesOnlyExpiredEnvelopes()
+    {
+        var shortLivedEnv = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 1 },
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(1));
+
+        var longLivedEnv = new MailboxEnvelope(
+            EnvelopeId.New(),
+            _recipientToken,
+            new byte[] { 2 },
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow.AddDays(5));
+
+        _queue.Enqueue(shortLivedEnv, _deliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+        _queue.Enqueue(longLivedEnv, _deliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+
+        // Advance virtual time past the short-lived envelope's expiration
+        _timeProvider.Advance(TimeSpan.FromDays(2));
+
+        int removed = _queue.PurgeExpired(_timeProvider);
+
+        removed.Should().Be(1);
+        _queue.TotalCount.Should().Be(1);
+        _queue.Envelopes.Single().Id.Should().Be(longLivedEnv.Id);
+    }
+
+    [Test]
+    public void DrainForToken_RemovesAndReturnsMatchingEnvelopes()
+    {
+        var otherToken = BlindedRoutingToken.New();
+        using var otherDeliveryToken = DeliveryToken.FromSpan(new byte[32]);
+        _queue.RegisterRecipient(otherToken, otherDeliveryToken);
+
+        var env1 = new MailboxEnvelope(EnvelopeId.New(), _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        var env2 = new MailboxEnvelope(EnvelopeId.New(), otherToken, new byte[] { 2 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        var env3 = new MailboxEnvelope(EnvelopeId.New(), _recipientToken, new byte[] { 3 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+
+        _queue.Enqueue(env1, _deliveryToken, _timeProvider);
+        _queue.Enqueue(env2, otherDeliveryToken, _timeProvider);
+        _queue.Enqueue(env3, _deliveryToken, _timeProvider);
+
+        var drained = _queue.DrainForToken(_recipientToken);
+
+        drained.Should().HaveCount(2);
+        drained.Select(e => e.Id).Should().Contain([env1.Id, env3.Id]);
+        _queue.TotalCount.Should().Be(1);
+        _queue.Envelopes.Single().Id.Should().Be(env2.Id);
+    }
+
+    [Test]
+    public void DrainForToken_WhenNonExistentToken_ReturnsEmptyAndDoesNotMutateQueue()
+    {
+        var env = new MailboxEnvelope(EnvelopeId.New(), _recipientToken, new byte[] { 1 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        _queue.Enqueue(env, _deliveryToken, _timeProvider);
+
+        var unknownToken = BlindedRoutingToken.New();
+        var drained = _queue.DrainForToken(unknownToken);
+
+        drained.Should().BeEmpty();
+        _queue.TotalCount.Should().Be(1);
+    }
+
+    [Test]
+    public void TryDrainForToken_WhenDistinctDrainTokenRegistered_RejectsSenderDeliveryTokenAndAllowsRecipientDrainToken()
+    {
+        var securedRoutingToken = BlindedRoutingToken.New();
+        using var senderDeliveryToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x11, 32).ToArray());
+        using var recipientDrainToken = DeliveryToken.FromSpan(Enumerable.Repeat((byte)0x22, 32).ToArray());
+
+        _queue.RegisterRecipient(securedRoutingToken, senderDeliveryToken, recipientDrainToken);
+
+        var env = new MailboxEnvelope(EnvelopeId.New(), securedRoutingToken, new byte[] { 42 }, _timeProvider.UtcNow, _timeProvider.UtcNow.AddDays(1));
+        _queue.Enqueue(env, senderDeliveryToken, _timeProvider).IsSuccess.Should().BeTrue();
+
+        // Unauthenticated drain must not return or delete envelopes
+        _queue.DrainForToken(securedRoutingToken).Should().BeEmpty();
+        _queue.TotalCount.Should().Be(1);
+
+        // Sender attempting to drain using the sender DeliveryToken must be rejected
+        var unauthorizedDrain = _queue.TryDrainForToken(securedRoutingToken, senderDeliveryToken);
+        unauthorizedDrain.IsFailure.Should().BeTrue();
+        unauthorizedDrain.Error.Code.Should().Be("UNAUTHORIZED_DRAIN_TOKEN");
+        _queue.TotalCount.Should().Be(1);
+
+        // Recipient draining with secret DrainToken succeeds
+        var authorizedDrain = _queue.TryDrainForToken(securedRoutingToken, recipientDrainToken);
+        authorizedDrain.IsSuccess.Should().BeTrue();
+        authorizedDrain.Value.Should().ContainSingle(e => e.Id == env.Id);
+        _queue.TotalCount.Should().Be(0);
+    }
+}

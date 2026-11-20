@@ -1,0 +1,228 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
+using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Startup.Models;
+using Percolator.Desktop.ViewModels;
+using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+
+namespace Percolator.Desktop.Features.Startup.ViewModels;
+
+/// <summary>
+/// Input parameters for configuring the Exchange Manage surface dialog.
+/// </summary>
+public sealed record ExchangeManageInput(
+    ExchangeTileViewModel Exchange,
+    IReadOnlyList<PersonaDirectoryEntry> Personas);
+
+/// <summary>
+/// Manage surface for an exchange tile: the same persona-link checkbox component as the
+/// creation wizard. Checking a persona links it immediately (a vault-local row write);
+/// unchecking routes through the "Stop using this Exchange?" confirmation — unlinks are
+/// revocations, so they warrant a dialog. Self-hosted exchanges offer the additional
+/// local queue-purge option ([INV-DESKTOP-PRESENTATION-MODELS]).
+/// </summary>
+public partial class ExchangeManageViewModel : ViewModelBase
+{
+    private readonly IDialogContext<ExchangeManageInput, bool> _dialogContext;
+    private readonly IExchangeDirectory _exchanges;
+    private readonly IWindowManager _windows;
+    private readonly IIdenticonGenerator _identicons;
+    private readonly ILogger<ExchangeManageViewModel> _logger;
+
+    private bool _initialized;
+    private Guid _relayIdentityId;
+    private int _preferredPort;
+    private bool _suppressToggle;
+    private bool _changed;
+
+    public ExchangeManageViewModel(
+        IDialogContext<ExchangeManageInput, bool> dialogContext,
+        IExchangeDirectory exchanges,
+        IWindowManager windows,
+        IIdenticonGenerator identicons,
+        ILogger<ExchangeManageViewModel> logger)
+    {
+        _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
+        _exchanges = exchanges ?? throw new ArgumentNullException(nameof(exchanges));
+        _windows = windows ?? throw new ArgumentNullException(nameof(windows));
+        _identicons = identicons ?? throw new ArgumentNullException(nameof(identicons));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        if (dialogContext.Data is not null)
+        {
+            Initialize(dialogContext.Data.Exchange, dialogContext.Data.Personas);
+        }
+    }
+
+
+    /// <summary>Exchange display name shown in the dialog header.</summary>
+    public string ExchangeDisplayName { get; private set; } = string.Empty;
+
+    /// <summary>Self-hosted exchanges get the badge, profile accent, and queue-purge option.</summary>
+    public bool IsSelfHosted { get; private set; }
+
+    [ObservableProperty]
+    private string? _errorMessage;
+
+    /// <summary>Persona checkbox rows, pre-checked for personas already linked.</summary>
+    public IReadOnlyList<LinkablePersonaModel> Personas { get; private set; } =
+        Array.Empty<LinkablePersonaModel>();
+
+    /// <summary>Seeds the surface for the given exchange tile and current persona roster.</summary>
+    public void Initialize(
+        ExchangeTileViewModel exchange,
+        IReadOnlyList<PersonaDirectoryEntry> personas)
+    {
+        ArgumentNullException.ThrowIfNull(exchange);
+        ArgumentNullException.ThrowIfNull(personas);
+
+        _initialized = true;
+        _relayIdentityId = exchange.RelayIdentityId;
+        _preferredPort = exchange.PreferredPort;
+        _changed = false;
+        ErrorMessage = null;
+        ExchangeDisplayName = exchange.DisplayName;
+        IsSelfHosted = exchange.IsSelfHosted;
+        OnPropertyChanged(nameof(ExchangeDisplayName));
+        OnPropertyChanged(nameof(IsSelfHosted));
+
+        var linked = new HashSet<PublicIdentityId>(exchange.LinkedPersonaIds.Select(id => new PublicIdentityId(id)));
+        Personas = personas
+            .Select(p => new LinkablePersonaModel(
+                p.IdentityId,
+                p.DisplayName,
+                AvatarPresentation.FromIdenticon(_identicons.Generate(p.IdentityId)),
+                isLinked: linked.Contains(p.IdentityId),
+                notifyChanged: model => TogglePersonaCommand.Execute(model)))
+            .ToList();
+        OnPropertyChanged(nameof(Personas));
+    }
+
+    /// <summary>
+    /// Persona checkbox toggle. Checking writes the link immediately; unchecking
+    /// displays the confirmation dialog and rolls back if cancelled ([VM-006]).
+    /// </summary>
+    [RelayCommand]
+    private async Task TogglePersonaAsync(LinkablePersonaModel? persona, System.Threading.CancellationToken ct)
+    {
+        if (persona is null || _suppressToggle)
+        {
+            return;
+        }
+
+        if (persona.IsLinked)
+        {
+            var result = await _exchanges
+                .LinkPersonaAsync(new PublicIdentityId(_relayIdentityId), persona.PersonaId, ct)
+                .ConfigureAwait(true);
+            if (result.IsFailure)
+            {
+                _logger.LogWarning("Exchange link failed for {PersonaId}: {Error}", persona.PersonaId, result.Error.Description);
+                Revert(persona, isLinked: false);
+                ErrorMessage = result.Error.Description;
+                return;
+            }
+        }
+        else
+        {
+            var dialogResult = await _windows
+                .ShowDialogAsync<StopUsingExchangeDialogViewModel, StopUsingExchangeInput, StopUsingExchangeResult>(
+                    new StopUsingExchangeInput(persona.DisplayName, ExchangeDisplayName, IsSelfHosted))
+                .ConfigureAwait(true);
+            if (dialogResult?.Confirmed != true)
+            {
+                Revert(persona, isLinked: true);
+                return;
+            }
+
+            var result = await _exchanges
+                .UnlinkPersonaAsync(
+                    new PublicIdentityId(_relayIdentityId),
+                    persona.PersonaId,
+                    purgeQueuedEnvelopes: IsSelfHosted && dialogResult.PurgeQueuedEnvelopes,
+                    ct)
+                .ConfigureAwait(true);
+            if (result.IsFailure)
+            {
+                _logger.LogWarning("Exchange unlink failed for {PersonaId}: {Error}", persona.PersonaId, result.Error.Description);
+                Revert(persona, isLinked: true);
+                ErrorMessage = result.Error.Description;
+                return;
+            }
+        }
+
+        ErrorMessage = null;
+        _changed = true;
+    }
+
+    /// <summary>
+    /// [ Edit profile ] — self-hosted only: display name + preferred port through the
+    /// persona editor dialog ([VM-014]). Remote exchanges have no editable profile.
+    /// </summary>
+    [RelayCommand]
+    private async Task EditProfileAsync(System.Threading.CancellationToken ct)
+    {
+        if (!_initialized || !IsSelfHosted)
+        {
+            return;
+        }
+
+        var result = await _windows
+            .ShowDialogAsync<CreatePersonaDialogViewModel, PersonaEditorInput, PersonaEditorResult?>(
+                PersonaEditorInput.ForEdit(ExchangeDisplayName, _preferredPort, new PublicIdentityId(_relayIdentityId)))
+            .ConfigureAwait(true);
+        if (result is null)
+        {
+            return;
+        }
+
+        var update = await _exchanges
+            .UpdateSelfHostedProfileAsync(
+                new PublicIdentityId(_relayIdentityId),
+                result.DisplayName,
+                result.PreferredPort,
+                ct)
+            .ConfigureAwait(true);
+        if (update.IsFailure)
+        {
+            _logger.LogWarning("Exchange profile edit failed for {RelayId}: {Error}", _relayIdentityId, update.Error.Description);
+            ErrorMessage = update.Error.Description;
+            return;
+        }
+
+        ExchangeDisplayName = result.DisplayName;
+        _preferredPort = result.PreferredPort;
+        OnPropertyChanged(nameof(ExchangeDisplayName));
+        ErrorMessage = null;
+        _changed = true;
+    }
+
+    /// <summary>[ Done ] — closes with the changed-flag result.</summary>
+    [RelayCommand]
+    private void Done()
+    {
+        _dialogContext.Close(_changed);
+    }
+
+    private void Revert(LinkablePersonaModel persona, bool isLinked)
+    {
+        _suppressToggle = true;
+        try
+        {
+            persona.IsLinked = isLinked;
+        }
+        finally
+        {
+            _suppressToggle = false;
+        }
+    }
+}

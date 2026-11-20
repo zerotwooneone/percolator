@@ -1,0 +1,284 @@
+using System.ComponentModel;
+using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
+
+namespace Percolator.Domain.Identities.Model;
+
+public enum PeerTrustLevel
+{
+    Untrusted = 0,
+    Tofu = 1,
+    Verified = 2,
+    Blocked = 3
+}
+
+public enum ContactState
+{
+    Active = 0,
+    PendingApproval = 1,
+    Rejected = 2
+}
+
+public readonly record struct PeerContactId(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId);
+
+public sealed class PeerContact : AggregateRoot<PublicIdentityId>
+{
+    public const int MaxRegisteredDevicesPerPeer = 32;
+
+    public override PublicIdentityId Id => RemotePeerId;
+    public PeerContactId ContactId => new(OwnerIdentityId, RemotePeerId);
+    public PublicIdentityId OwnerIdentityId { get; }
+    public PublicIdentityId RemotePeerId { get; }
+    public IdentityKey? PrimaryPublicKey { get; private set; }
+    public ContactNickname Nickname { get; private set; }
+    public PeerTrustLevel TrustLevel { get; private set; }
+    public ContactState State { get; private set; }
+    public DateTimeOffset CreatedAtUtc { get; private set; }
+    public DateTimeOffset? LastSeenAtUtc { get; private set; }
+
+    private readonly HashSet<DeviceId> _registeredDevices = [];
+    public IReadOnlySet<DeviceId> RegisteredDevices => _registeredDevices;
+
+    public PeerContact(
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId remotePeerId,
+        ContactNickname nickname,
+        PeerTrustLevel trustLevel,
+        DateTimeOffset createdAtUtc,
+        IdentityKey? primaryPublicKey = null,
+        ContactState state = ContactState.Active)
+    {
+        if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
+        if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
+        if (ownerIdentityId == remotePeerId) throw new ArgumentException("Owner cannot add self as contact.", nameof(remotePeerId));
+
+        OwnerIdentityId = ownerIdentityId;
+        RemotePeerId = remotePeerId;
+        Nickname = nickname;
+        TrustLevel = trustLevel;
+        State = state;
+        CreatedAtUtc = createdAtUtc;
+        PrimaryPublicKey = primaryPublicKey;
+
+        // Primary device is implicitly registered
+        _registeredDevices.Add(DeviceId.Primary);
+    }
+
+    public static DomainResult<PeerContact> CreateInboundRequest(
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId remotePeerId,
+        IdentityKey primaryPublicKey,
+        string? proposedNickname,
+        IDateTimeProvider timeProvider)
+    {
+        if (!ownerIdentityId.IsValid)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("INVALID_OWNER_ID", "Owner identity id cannot be empty."));
+        }
+
+        if (!remotePeerId.IsValid)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("INVALID_PEER_ID", "Remote peer identity id cannot be empty."));
+        }
+
+        if (ownerIdentityId == remotePeerId)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("CANNOT_CONTACT_SELF", "Cannot create a contact request for oneself."));
+        }
+
+        if (primaryPublicKey == null)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("NULL_PUBLIC_KEY", "Primary public key cannot be null."));
+        }
+
+        var nickname = ContactNickname.Create(proposedNickname, remotePeerId);
+
+        var contact = new PeerContact(
+            ownerIdentityId,
+            remotePeerId,
+            nickname,
+            PeerTrustLevel.Untrusted,
+            timeProvider.UtcNow,
+            primaryPublicKey,
+            ContactState.PendingApproval);
+
+        return DomainResult<PeerContact>.Success(contact);
+    }
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static PeerContact Rehydrate(
+        PublicIdentityId ownerIdentityId,
+        PublicIdentityId remotePeerId,
+        ContactNickname nickname,
+        PeerTrustLevel trustLevel,
+        ContactState state,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset? lastSeenAtUtc,
+        IdentityKey? primaryPublicKey,
+        IEnumerable<DeviceId>? registeredDevices = null)
+    {
+        if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
+        if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
+        if (ownerIdentityId == remotePeerId) throw new ArgumentException("Owner cannot add self as contact.", nameof(remotePeerId));
+
+        var contact = new PeerContact(ownerIdentityId, remotePeerId, nickname, trustLevel, createdAtUtc, primaryPublicKey, state)
+        {
+            LastSeenAtUtc = lastSeenAtUtc
+        };
+        if (registeredDevices != null)
+        {
+            foreach (var device in registeredDevices)
+            {
+                if (!device.IsValid) throw new ArgumentException("DeviceId cannot be empty.", nameof(registeredDevices));
+                contact._registeredDevices.Add(device);
+            }
+
+            if (contact._registeredDevices.Count > MaxRegisteredDevicesPerPeer)
+            {
+                throw new ArgumentException($"Cannot register more than {MaxRegisteredDevicesPerPeer} devices per peer.", nameof(registeredDevices));
+            }
+        }
+        return contact;
+    }
+
+    public DomainResult SetNickname(ContactNickname newNickname)
+    {
+        if (TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Cannot change nickname of a blocked contact."));
+        }
+
+        Nickname = newNickname;
+        return DomainResult.Success();
+    }
+
+    public DomainResult Approve(PeerTrustLevel initialTrust = PeerTrustLevel.Tofu)
+    {
+        if (State == ContactState.Active)
+        {
+            return DomainResult.Success();
+        }
+
+        if (TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Cannot approve a blocked contact without unblocking first."));
+        }
+
+        State = ContactState.Active;
+        TrustLevel = initialTrust;
+        return DomainResult.Success();
+    }
+
+    public DomainResult Reject(bool block = false)
+    {
+        State = ContactState.Rejected;
+        if (block)
+        {
+            TrustLevel = PeerTrustLevel.Blocked;
+        }
+
+        return DomainResult.Success();
+    }
+
+    public DomainResult Block()
+    {
+        TrustLevel = PeerTrustLevel.Blocked;
+        return DomainResult.Success();
+    }
+
+    public DomainResult Unblock(PeerTrustLevel restoreTrust = PeerTrustLevel.Untrusted)
+    {
+        if (TrustLevel != PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Success();
+        }
+
+        TrustLevel = restoreTrust;
+        return DomainResult.Success();
+    }
+
+    public DomainResult UpdateTrust(PeerTrustLevel trustLevel)
+    {
+        if (State != ContactState.Active)
+        {
+            return DomainResult.Failure(new DomainError(
+                "CONTACT_NOT_ACTIVE",
+                "Cannot update trust level of a non-active contact. Approve the contact first."));
+        }
+
+        if (TrustLevel == PeerTrustLevel.Blocked && trustLevel != PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError(
+                "CONTACT_BLOCKED",
+                "Cannot update trust level of a blocked contact without unblocking first."));
+        }
+
+        TrustLevel = trustLevel;
+        return DomainResult.Success();
+    }
+
+    public DomainResult RotatePrimaryPublicKey(IdentityKey newKey)
+    {
+        if (newKey == null)
+        {
+            return DomainResult.Failure(new DomainError("NULL_PUBLIC_KEY", "New primary public key cannot be null."));
+        }
+
+        if (PrimaryPublicKey != null && PrimaryPublicKey.Equals(newKey))
+        {
+            return DomainResult.Success();
+        }
+
+        PrimaryPublicKey = newKey;
+        // Signal protocol: When an identity key changes, safety number changes -> trust drops to Untrusted.
+        TrustLevel = PeerTrustLevel.Untrusted;
+
+        // Security: Secondary devices linked against the old primary key are invalidated until fresh link proofs are verified.
+        _registeredDevices.Clear();
+        _registeredDevices.Add(DeviceId.Primary);
+
+        return DomainResult.Success();
+    }
+
+    public DomainResult RegisterSecondaryDevice(
+        DeviceId deviceId,
+        IdentityKey secondaryDevicePublicKey,
+        DeviceLinkProof linkProof,
+        IdentityKey primaryPeerPublicKey,
+        ICryptoEngine cryptoEngine)
+    {
+        if (deviceId.IsPrimary || !deviceId.IsValid)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_DEVICE_ID", "Secondary device must have a valid non-zero DeviceId and cannot be Primary DeviceId(1)."));
+        }
+
+        if (secondaryDevicePublicKey == null || linkProof == null || primaryPeerPublicKey == null)
+        {
+            return DomainResult.Failure(new DomainError("NULL_KEY_MATERIAL", "Device keys and link proof cannot be null."));
+        }
+
+        if (_registeredDevices.Contains(deviceId))
+        {
+            return DomainResult.Success();
+        }
+
+        if (_registeredDevices.Count >= MaxRegisteredDevicesPerPeer)
+        {
+            return DomainResult.Failure(new DomainError("DEVICE_LIMIT_EXCEEDED", $"Cannot exceed maximum registered devices ({MaxRegisteredDevicesPerPeer})."));
+        }
+
+        if (!linkProof.Verify(deviceId, secondaryDevicePublicKey, primaryPeerPublicKey, cryptoEngine))
+        {
+            return DomainResult.Failure(new DomainError("INVALID_LINK_PROOF_SIGNATURE", "The device link proof signature is invalid or forged."));
+        }
+
+        _registeredDevices.Add(deviceId);
+        return DomainResult.Success();
+    }
+
+    public void TouchLastSeen(IDateTimeProvider timeProvider)
+    {
+        LastSeenAtUtc = timeProvider.UtcNow;
+    }
+}

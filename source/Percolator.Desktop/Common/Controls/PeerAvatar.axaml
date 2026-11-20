@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Percolator.Desktop.Common.Controls"
+             xmlns:converters="using:Percolator.Desktop.Common.Converters"
+             x:Class="Percolator.Desktop.Common.Controls.PeerAvatar"
+             x:Name="RootAvatar">
+
+    <UserControl.Resources>
+        <converters:IdentityHashToBrushConverter x:Key="IdentityHashToBrushConverter" />
+    </UserControl.Resources>
+
+    <Grid Width="{Binding AvatarSize, ElementName=RootAvatar}"
+          Height="{Binding AvatarSize, ElementName=RootAvatar}">
+        <!-- Avatar Circle Background -->
+        <Border CornerRadius="999"
+                Background="{Binding IdentityKeyHex, ElementName=RootAvatar, Converter={StaticResource IdentityHashToBrushConverter}}"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch">
+            <TextBlock Text="{Binding Initials, ElementName=RootAvatar}"
+                       FontSize="{Binding FontSize, ElementName=RootAvatar}"
+                       FontWeight="SemiBold"
+                       Foreground="White"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+        </Border>
+
+        <!-- Presence Indicator Dot -->
+        <Ellipse Width="{Binding PresenceDotSize, ElementName=RootAvatar}"
+                 Height="{Binding PresenceDotSize, ElementName=RootAvatar}"
+                 Fill="{Binding PresenceBrush, ElementName=RootAvatar}"
+                 Stroke="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                 StrokeThickness="2"
+                 HorizontalAlignment="Right"
+                 VerticalAlignment="Bottom"
+                 IsVisible="{Binding ShowPresence, ElementName=RootAvatar}" />
+    </Grid>
+</UserControl>

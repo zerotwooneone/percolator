@@ -1,0 +1,90 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+        xmlns:models="using:Percolator.Desktop.Features.Startup.Models"
+        xmlns:sys="using:System"
+        x:Class="Percolator.Desktop.Features.Startup.Views.CreatePersonaDialogWindow"
+        x:DataType="vm:CreatePersonaDialogViewModel"
+        Title="{Binding Title}"
+        Width="400"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="*,Auto" Margin="24">
+        <StackPanel Grid.Row="0" Spacing="14" Margin="0,0,0,20">
+            <!-- Deterministic identicon preview; re-roll samples a new candidate identity -->
+            <Border Classes="identicon-tile"
+                    Width="80" Height="80"
+                    HorizontalAlignment="Center">
+                <ItemsControl DataContext="{Binding Avatar}"
+                              ItemsSource="{Binding Cells}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="5" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="sys:Boolean">
+                            <Border Margin="1"
+                                    CornerRadius="1"
+                                    IsVisible="{Binding .}"
+                                    Background="{Binding $parent[ItemsControl].((models:AvatarPresentation)DataContext).Color}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Border>
+            <Button Content="Re-roll Avatar"
+                    Command="{Binding RerollAvatarCommand}"
+                    HorizontalAlignment="Center"
+                    IsVisible="{Binding CanRerollAvatar}" />
+
+            <TextBox Watermark="Display name"
+                     MaxLength="32"
+                     Text="{Binding DisplayName, Mode=TwoWay}" />
+            <TextBox Watermark="Preferred port (e.g. 5100)"
+                     Text="{Binding PreferredPort, Mode=TwoWay}" />
+
+            <!-- Connected Relays (visible in edit mode when the persona has linked relays) -->
+            <StackPanel Spacing="8" IsVisible="{Binding HasConnectedRelays}" Margin="0,8,0,0">
+                <TextBlock Text="Connected Relays"
+                           Theme="{StaticResource CaptionTextBlockStyle}"
+                           FontWeight="SemiBold" />
+                <ItemsControl ItemsSource="{Binding ConnectedRelays}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PersonaRelayItemViewModel">
+                            <Border Classes="persona-card" Padding="8" Margin="0,0,0,6">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Endpoint}" Theme="{StaticResource CaptionTextBlockStyle}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1"
+                                                  IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                                                  OnContent="Enabled"
+                                                  OffContent="Disabled"
+                                                  VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </StackPanel>
+
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,*">
+            <Button Grid.Column="0"
+                    Content="Cancel"
+                    Command="{Binding CancelCommand}"
+                    HorizontalAlignment="Stretch"
+                    Margin="0,0,12,0" />
+            <Button Grid.Column="1"
+                    Classes="accent"
+                    Content="{Binding PrimaryText}"
+                    Command="{Binding SaveCommand}"
+                    HorizontalAlignment="Stretch" />
+        </Grid>
+    </Grid>
+</Window>

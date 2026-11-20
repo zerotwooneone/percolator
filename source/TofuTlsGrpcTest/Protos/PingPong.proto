@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option csharp_namespace = "TofuTlsGrpcTest";
+
+package PingPong;
+
+service PingPongService {
+  rpc SendPing (PingRequest) returns (PongResponse);
+}
+
+message PingRequest {
+  int32 counter = 1;
+  string sender_name = 2;
+}
+
+message PongResponse {
+  int32 counter = 1;
+  string message = 2;
+}

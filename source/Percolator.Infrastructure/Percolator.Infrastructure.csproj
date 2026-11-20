@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Percolator.Infrastructure</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.25.2" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.57.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.57.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.57.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite.Core" Version="10.0.0" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.10" />
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Signal.Interop">
+      <HintPath>..\vendor\Signal.Interop\Signal.Interop.dll</HintPath>
+    </Reference>
+    <Content Include="..\vendor\Signal.Interop\runtimes\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Percolator.Infrastructure.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Percolator.Domain\Percolator.Domain.csproj" />
+    <ProjectReference Include="..\Percolator.Application\Percolator.Application.csproj" />
+    <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
+    <ProjectReference Include="..\Percolator.Apps.Chat\Percolator.Apps.Chat.csproj" />
+    <ProjectReference Include="..\Percolator.Apps.Discovery\Percolator.Apps.Discovery.csproj" />
+    <ProjectReference Include="..\Percolator.Apps.FileTransfer\Percolator.Apps.FileTransfer.csproj" />
+    <ProjectReference Include="..\Percolator.Apps.FileTransfer.Domain\Percolator.Apps.FileTransfer.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos\*.proto" ProtoRoot="Protos" GrpcServices="Both" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Chat\" />
+  </ItemGroup>
+
+</Project>

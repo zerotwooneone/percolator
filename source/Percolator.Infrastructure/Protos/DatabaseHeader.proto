@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+message DatabaseHeader {
+  int32 version = 1;
+  int32 argon2_memory_kb = 2;
+  int32 argon2_iterations = 3;
+  int32 argon2_parallelism = 4;
+  bytes master_slot_salt = 5;
+  bytes master_slot_nonce = 6;
+  bytes master_slot_payload = 7;
+  bytes duress_slot_salt = 8;
+  bytes duress_slot_nonce = 9;
+  bytes duress_slot_payload = 10;
+}

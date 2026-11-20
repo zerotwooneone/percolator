@@ -1,0 +1,123 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Desktop.Features.Transports.ViewModels"
+             xmlns:m="using:Percolator.Desktop.Features.Transports.Models"
+             xmlns:ui="using:FluentAvalonia.UI.Controls"
+             xmlns:controls="using:Percolator.Desktop.Common.Controls"
+             x:Class="Percolator.Desktop.Features.Transports.Views.TransportsSidebarView"
+             x:DataType="vm:TransportsSidebarViewModel">
+
+    <Border Width="72"
+            Background="{DynamicResource LayerFillColorAltBrush}"
+            BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="0,0,1,0">
+        <Grid RowDefinitions="Auto,*,Auto,Auto,Auto" Margin="0,8,0,8">
+
+            <!-- Row 0: Direct Messages button (Discord home icon) -->
+            <Grid Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,8">
+                <Button Classes="shell-icon"
+                        HorizontalAlignment="Center"
+                        ToolTip.Tip="Direct Messages"
+                        Command="{Binding SelectDirectMessagesCommand}">
+                    <ui:SymbolIcon Symbol="Message" FontSize="20" />
+                </Button>
+            </Grid>
+
+            <!-- Row 1: Relays list (Discord post offices) -->
+            <ScrollViewer Grid.Row="1"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Relays}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="m:RelayChannelModel">
+                            <Button Classes="shell-icon"
+                                    HorizontalAlignment="Center"
+                                    Margin="0,4"
+                                    ToolTip.Tip="{Binding DisplayName}"
+                                    Command="{Binding $parent[UserControl].((vm:TransportsSidebarViewModel)DataContext).SelectRelayCommand}"
+                                    CommandParameter="{Binding RelayIdentityId}">
+                                <Grid Width="40" Height="40">
+                                    <!-- Relay Avatar / Icon -->
+                                    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="20"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Stretch">
+                                        <ui:SymbolIcon Symbol="World" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+
+                                    <!-- Status Dot (Bottom-Right) -->
+                                    <Ellipse Width="10" Height="10"
+                                             HorizontalAlignment="Right"
+                                             VerticalAlignment="Bottom"
+                                             Margin="0,0,2,2"
+                                             Fill="{DynamicResource SystemFillColorSuccessBrush}" />
+
+                                    <!-- Unread Badge (Top-Right) -->
+                                    <Border Background="{DynamicResource SystemFillColorCriticalBrush}"
+                                            CornerRadius="8"
+                                            MinHeight="16" MinWidth="16"
+                                            Padding="4,1"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Top"
+                                            Margin="0,-2,-2,0"
+                                            IsVisible="{Binding HasUnread}">
+                                        <TextBlock Text="{Binding UnreadCount}"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="White"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <!-- Row 2: Add Connection (+) button -->
+            <Button Grid.Row="2"
+                    Classes="shell-icon"
+                    HorizontalAlignment="Center"
+                    Margin="0,4"
+                    ToolTip.Tip="Add Connection"
+                    Command="{Binding OpenAddConnectionCommand}">
+                <ui:SymbolIcon Symbol="AddFriend" FontSize="20" />
+            </Button>
+
+            <!-- Row 3: Pending Requests button with pull-based silent indicator light -->
+            <Button Grid.Row="3"
+                    Classes="shell-icon"
+                    HorizontalAlignment="Center"
+                    Margin="0,4"
+                    ToolTip.Tip="Pending Requests"
+                    Command="{Binding OpenPendingRequestsCommand}">
+                <Grid Width="40" Height="40">
+                    <ui:SymbolIcon Symbol="People" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Ellipse Width="10" Height="10"
+                             Fill="{DynamicResource SystemFillColorCriticalBrush}"
+                             HorizontalAlignment="Right"
+                             VerticalAlignment="Top"
+                             Margin="0,4,4,0"
+                             IsVisible="{Binding HasPendingRequests}" />
+                </Grid>
+            </Button>
+
+            <!-- Row 4: Identity area & Share My Invitation -->
+            <Button Grid.Row="4"
+                    Classes="shell-icon"
+                    Margin="0,8,0,0"
+                    HorizontalAlignment="Center"
+                    ToolTip.Tip="Active Identity (Click to Share Invitation)"
+                    Command="{Binding OpenShareInvitationCommand}">
+                <controls:PeerAvatar DisplayName="{Binding CurrentPersona.DisplayName, FallbackValue='Percolator User'}"
+                                     IdentityKeyHex="{Binding CurrentPersona.IdentityId.Value, FallbackValue='PERCOLATOR-USER'}"
+                                     AvatarSize="40"
+                                     ShowPresence="False" />
+            </Button>
+        </Grid>
+    </Border>
+</UserControl>

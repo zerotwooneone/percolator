@@ -1,0 +1,126 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Desktop.Features.Transports.ViewModels"
+             xmlns:m="using:Percolator.Desktop.Features.Transports.Models"
+             xmlns:ui="using:FluentAvalonia.UI.Controls"
+             xmlns:controls="using:Percolator.Desktop.Common.Controls"
+             x:Class="Percolator.Desktop.Features.Transports.Views.PendingRequestsPanelView"
+             x:DataType="vm:PendingRequestsPanelViewModel">
+
+    <Grid RowDefinitions="Auto,*" Margin="{StaticResource CardPadding}">
+        <!-- Header area -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+            <StackPanel Grid.Column="0" Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ui:SymbolIcon Symbol="People" FontSize="20" Foreground="{DynamicResource AccentFillColorDefaultBrush}" />
+                    <TextBlock Text="Pending Requests"
+                               Theme="{StaticResource SubtitleTextBlockStyle}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="Review inbound connection offers. Senders cannot see if you dismiss or block them."
+                           Theme="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Button Grid.Column="1"
+                    Classes="shell-icon"
+                    Command="{Binding LoadRequestsCommand}"
+                    ToolTip.Tip="Refresh pending requests"
+                    VerticalAlignment="Top">
+                <ui:SymbolIcon Symbol="Refresh" FontSize="16" />
+            </Button>
+        </Grid>
+
+        <!-- Body area -->
+        <Grid Grid.Row="1">
+            <!-- Loading indicator -->
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsLoading}"
+                         VerticalAlignment="Top"
+                         Margin="0,0,0,8" />
+
+            <!-- Empty state -->
+            <StackPanel IsVisible="{Binding IsEmpty}"
+                        Spacing="12"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        MaxWidth="360">
+                <controls:NerdIcon GlyphType="Shield"
+                                   FontSize="48"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   HorizontalAlignment="Center" />
+                <TextBlock Text="No Pending Requests"
+                           Theme="{StaticResource BodyStrongTextBlockStyle}"
+                           HorizontalAlignment="Center" />
+                <TextBlock Text="You have no inbound connection requests awaiting approval. Unsolicited requests are quarantined here silently without alerting you."
+                           Theme="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center" />
+            </StackPanel>
+
+            <!-- List of pending requests -->
+            <ScrollViewer IsVisible="{Binding HasRequests}">
+                <ItemsControl ItemsSource="{Binding Requests}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="m:InboundPendingRequestModel">
+                            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="{StaticResource CardCornerRadius}"
+                                    Padding="12"
+                                    Margin="0,0,0,8">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <!-- Avatar -->
+                                    <controls:PeerAvatar Grid.Column="0"
+                                                         DisplayName="{Binding DisplayName}"
+                                                         IdentityKeyHex="{Binding RequesterId.Value}"
+                                                         AvatarSize="40"
+                                                         ShowPresence="False"
+                                                         VerticalAlignment="Center"
+                                                         Margin="0,0,12,0" />
+
+                                    <!-- Request info -->
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   Theme="{StaticResource BodyStrongTextBlockStyle}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding FingerprintPreview, StringFormat='Fingerprint: {0}'}"
+                                                   Theme="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding ReceivedAtUtc, StringFormat='Received: {0:g}'}"
+                                                   Theme="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    </StackPanel>
+
+                                    <!-- Action buttons -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <Button Classes="accent"
+                                                Content="Accept"
+                                                ToolTip.Tip="Accept request and establish mutual connection"
+                                                Command="{Binding $parent[UserControl].((vm:PendingRequestsPanelViewModel)DataContext).AcceptRequestCommand}"
+                                                CommandParameter="{Binding}" />
+
+                                        <Button Content="Dismiss"
+                                                ToolTip.Tip="Silently dismiss request without notifying sender"
+                                                Command="{Binding $parent[UserControl].((vm:PendingRequestsPanelViewModel)DataContext).RejectRequestCommand}"
+                                                CommandParameter="{Binding}" />
+
+                                        <Button Classes="danger"
+                                                Content="Block"
+                                                ToolTip.Tip="Permanently blacklist requester and silently drop packets"
+                                                Command="{Binding $parent[UserControl].((vm:PendingRequestsPanelViewModel)DataContext).BlockRequestCommand}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+option csharp_namespace = "Percolator.Infrastructure.Protos";
+
+import "google/protobuf/timestamp.proto";
+
+message QueuedSealedEnvelopeProto {
+  string queue_id = 1;
+  bytes envelope_payload = 2;
+  google.protobuf.Timestamp enqueued_at_utc = 3;
+}
+
+message AuthChallengeProto {
+  bytes nonce = 1;
+  google.protobuf.Timestamp expires_at_utc = 2;
+}
+
+message AuthResponseProto {
+  bytes routing_token = 1;
+  bytes challenge_hmac = 2; // HMAC-SHA256(drain_token, challenge_nonce)
+}
+
+message AuthResultProto {
+  bool authenticated = 1;
+  string reason = 2;
+}
+
+message MailboxAckProto {
+  string queue_id = 1;
+  bool acknowledged = 2;
+}
+
+message MailboxStreamClientMessage {
+  oneof payload {
+    AuthResponseProto auth_response = 1;
+    MailboxAckProto ack = 2;
+  }
+}
+
+message MailboxStreamServerMessage {
+  oneof payload {
+    AuthChallengeProto auth_challenge = 1;
+    AuthResultProto auth_result = 2;
+    QueuedSealedEnvelopeProto envelope = 3;
+  }
+}
+
+message RegisterMailboxRequest {
+  bytes routing_token = 1;
+  bytes authorized_delivery_token = 2;
+  bytes drain_token = 3;
+  bytes existing_drain_token = 4;
+}
+
+message RegisterMailboxResponse {
+  bool success = 1;
+}
+
+message OneTimePreKeyProto {
+  uint32 key_id = 1;
+  bytes public_key = 2;
+}
+
+// Flat, drain-token-authenticated publish matching Signal's PUT /v2/keys.
+// The relay never learns the owner identity — the mailbox routing token is the
+// storage key and the drain token is the only write credential. The only signature
+// is the bundle's own signed-prekey signature, verified by consumers during X3DH.
+message PublishPreKeyBundleRequest {
+  bytes routing_token = 1;                  // 16-byte BlindedRoutingToken identifying the mailbox
+  bytes drain_token = 2;                    // 32-byte DeliveryToken proving mailbox ownership
+  uint32 device_id = 3;                     // DeviceId (1 = primary)
+  bytes identity_key = 4;                   // 32-byte Ed25519 public key (pinned on first publish)
+  uint32 signed_prekey_id = 5;              // Signed pre-key ID
+  bytes signed_prekey = 6;                  // 32-byte X25519 signed pre-key public key
+  bytes prekey_signature = 7;               // 64-byte Ed25519(identity_key, signed_prekey) signature
+  repeated OneTimePreKeyProto one_time_prekeys = 8;
+}
+
+message PublishPreKeyBundleResponse {
+  bool success = 1;
+}
+
+// Drain-token-authenticated hosted bundle status — lets a publisher decide
+// whether to seed, top up one-time prekeys, or republish a rotated signed prekey.
+message GetPreKeyStatusRequest {
+  bytes routing_token = 1;
+  bytes drain_token = 2;
+  uint32 device_id = 3;
+}
+
+message GetPreKeyStatusResponse {
+  bool found = 1;
+  uint32 one_time_prekey_count = 2;
+  uint32 signed_prekey_id = 3;
+}
+
+service AuthenticatedRelayService {
+  rpc ConnectMailboxStream(stream MailboxStreamClientMessage) returns (stream MailboxStreamServerMessage);
+  rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);
+  rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
+  rpc GetPreKeyStatus(GetPreKeyStatusRequest) returns (GetPreKeyStatusResponse);
+}

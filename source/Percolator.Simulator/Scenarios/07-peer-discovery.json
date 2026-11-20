@@ -1,0 +1,117 @@
+{
+  "name": "07 Peer Discovery and Rendezvous",
+  "description": "Verifies nearby peer discovery over gRPC on relay with admission gates, opt-out visibility toggle, one-click direct connection, blinded locator derivation (HMAC-SHA256) with 3-day window matching, and 24-hour virtual clock epoch rotation.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "Aliases": [ "Alice", "Bob", "Charlie" ]
+    },
+    {
+      "$type": "SpawnRelay",
+      "RelayAlias": "Relay-1"
+    },
+    {
+      "$type": "RegisterMailboxes",
+      "RelayAlias": "Relay-1",
+      "PersonaAliases": [ "Alice", "Bob", "Charlie" ]
+    },
+    {
+      "$type": "PublishPreKeys",
+      "RelayAlias": "Relay-1",
+      "PersonaAliases": [ "Alice", "Bob", "Charlie" ],
+      "OneTimeKeyCount": 25
+    },
+    {
+      "$type": "SetDiscoveryVisibility",
+      "PersonaAlias": "Alice",
+      "IsDiscoverable": true
+    },
+    {
+      "$type": "SetDiscoveryVisibility",
+      "PersonaAlias": "Bob",
+      "IsDiscoverable": true
+    },
+    {
+      "$type": "SetDiscoveryVisibility",
+      "PersonaAlias": "Charlie",
+      "IsDiscoverable": false
+    },
+    {
+      "$type": "QueryNearbyPeers",
+      "PersonaAlias": "Alice",
+      "RelayAlias": "Relay-1",
+      "Limit": 10
+    },
+    {
+      "$type": "ConnectDiscoveredPeer",
+      "InitiatorAlias": "Alice",
+      "CandidateAlias": "Bob",
+      "RelayAlias": "Relay-1"
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "OwnerAlias": "Bob",
+      "SenderAlias": "Alice"
+    },
+    {
+      "$type": "SendDirectMessage",
+      "SenderAlias": "Alice",
+      "RecipientAlias": "Bob",
+      "Text": "Connected via nearby relay directory!"
+    },
+    {
+      "$type": "PublishBlindedLocator",
+      "PersonaAlias": "Alice",
+      "RelayAlias": "Relay-1",
+      "SharedSecret": "alpha-rendezvous-shared-secret",
+      "RouteDescriptor": "rendezvous-route-alice"
+    },
+    {
+      "$type": "ResolveBlindedLocator",
+      "PersonaAlias": "Charlie",
+      "RelayAlias": "Relay-1",
+      "TargetAlias": "Alice",
+      "SharedSecret": "alpha-rendezvous-shared-secret"
+    },
+    {
+      "$type": "AdvanceVirtualTime",
+      "Seconds": 86400
+    },
+    {
+      "$type": "QueryNearbyPeers",
+      "PersonaAlias": "Charlie",
+      "RelayAlias": "Relay-1",
+      "Limit": 10
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertNearbyCandidateCount",
+      "ObserverAlias": "Alice",
+      "ExpectedCount": 1
+    },
+    {
+      "$type": "AssertNearbyCandidateCount",
+      "ObserverAlias": "Charlie",
+      "ExpectedCount": 0
+    },
+    {
+      "$type": "AssertDirectRatchetSession",
+      "Alias1": "Alice",
+      "Alias2": "Bob"
+    },
+    {
+      "$type": "AssertMessageDelivered",
+      "RecipientAlias": "Bob",
+      "ExpectedText": "Connected via nearby relay directory!"
+    },
+    {
+      "$type": "AssertBlindedLocatorResolved",
+      "ObserverAlias": "Charlie",
+      "TargetAlias": "Alice"
+    },
+    {
+      "$type": "AssertZeroErrors"
+    }
+  ]
+}
