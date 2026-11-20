@@ -39,15 +39,23 @@
    * Presentation models implement `.ToSnapshot()` returning immutable C# `record` types for lock-free background reads, caching, and export.
 5. **State Ownership Boundary (`INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`)**:
    * **Local State (Owned by ViewModels)**: Transient view state (input text, validation errors, accordion expansion, dialog visibility, scroll offsets) is private to the ViewModel.
-   * **Shared State (Owned by Stateful UI Services)**: Cross-cutting application state (active identities, peer sessions, message queues, DHT discovery tables, swarm file transfers) is owned exclusively by singleton/scoped **Stateful UI Services** (`IdentityStateService`, `PeerConnectionStateService`, `ChatStateService`, `DiscoveryStateService`, `FileTransferStateService`, `TimelineCardStateService`).
-   * Stateful UI Services are **100% UI-agnostic**—they operate on background worker threads, guard mutations with concurrency gates (`SemaphoreSlim`), and expose canonical `ObservableList<T>` / `ObservableDictionary<TKey, TValue>` collections.
+    * **Shared State (Owned by Stateful UI Services)**: Cross-cutting presentation state (active persona, configured relays, quarantined consent queue, conversation directory, and volatile drafts) is owned exclusively by singleton/scoped **Stateful UI Services** (`CurrentPersonaService`, `RelayStateService`, `InboundRequestStateService`, `ConversationStateService`, `ShellNavigationStateService`, `ChatDraftStateService`, `DiscoveryStateService`, `FileTransferStateService`, `TimelineCardStateService`).
+   * Stateful UI Services are **100% UI-agnostic**—they operate on background worker threads, guard mutations with concurrency gates (`lock` / `SemaphoreSlim`), and expose canonical read-only synchronized views (`ISynchronizedView<TSource, TView>`) or `IReadOnlyList<T>` (`[UISS-002]`, `[UISS-005]`).
 6. **Volatile Draft & LRU ViewModel Caching (`DEP-DESKTOP-VOLATILE-DRAFT-ISOLATION`, `DEC-LRU-SESSION-SCOPES`, `DEC-DEBOUNCED-DROP-RELOAD`)**:
    * The desktop application maintains an in-memory `ChatDraftStateService` and an LRU cache of recently active `ChatViewModel` instances (capacity 3–5).
    * Switching between chats or personas restores unsent message drafts, scroll positions, and attachment states from volatile memory without database re-fetching or schema pollution.
 7. **Strict R3 Reactive Programming Rules (`R3-001` through `R3-014`)**:
    * **Avalonia Dispatcher Integration (`R3-001`)**: Configured in `Program.cs` via `.UseR3()`, wiring `AvaloniaDispatcherTimeProvider` and `AvaloniaDispatcherFrameProvider` into `ObservableSystem`.
-   * **Filter Early, Marshal Late (`R3-002`)**: Perform filtering, deduplication, debounce, and sorting on background worker threads; only marshal to the UI thread at the terminal step via `.ObserveOn(AvaloniaSynchronizationContext.Current)`.
+   * **Filter Early, Marshal Late (`R3-002`, `R3-011`)**: Perform filtering, deduplication, debounce, and sorting on background worker threads; only marshal to the UI thread at the terminal step via `.ObserveOnCurrentSynchronizationContext()` or `.ObserveOnUIThread()`.
    * **Throttle the Firehose (`R3-007`)**: High-frequency streaming events (network packet rates, DHT search hops, file piece bitfields) must be sampled (`.Sample(TimeSpan.FromMilliseconds(16), _timeProvider)`) to protect the UI thread from 60fps+ inundation.
+8. **CQRS Read Model Boundary & Domain Repository Prohibition (`[VM-006]`, `anti-shortcut-discipline` Rule 6)**:
+   * **Strict CQRS Read Rule**: UI State Services and ViewModels MUST NEVER inject write-side domain aggregate repositories (`*Repository`) to load data for UI display.
+   * **Mandatory Query Services**: All UI list populations and read projections MUST consume dedicated CQRS Query Services (`*QueryService`: `IPersonaRelayQueryService`, `IPeerContactQueryService`, `IConversationListQueryService`, `IChatMessageQueryService`, `IPeerProfileQueryService`) returning flat, immutable read models (`*ReadModel`). Domain repositories are reserved strictly for transactional write operations inside application workflows.
+9. **Zero-Tolerance Anti-Shortcut Disciplines (`[VM-003]`, `[VM-018]`, `[VM-019]`, `[UISS-002]`, `[UISS-005]`, `[UISS-006]`)**:
+   * **Mandatory Constructor DI (`[VM-003]`)**: All required dependencies must be non-nullable constructor parameters validated with `ArgumentNullException.ThrowIfNull(dep)`. Nullable defaults (`dep = null`) or default mock fallbacks to take shortcuts in tests are strictly prohibited.
+   * **Prohibition Against Synthetic In-Memory Databases (`anti-shortcut-discipline` Rule 2)**: Storing mutable dictionaries of all messages or contacts in RAM as a duplicate database is strictly prohibited. Historical data resides in encrypted SQLite; UI State Services manage only shared *transient* presentation state.
+   * **Safe Collection Event Dispatching (`[VM-019]`)**: When calling `view.ToNotifyCollectionChanged(...)`, conditionally pass `SynchronizationContextCollectionEventDispatcher.Current` only if `SynchronizationContext.Current != null`. Unconditional access throws `TypeInitializationException` in unit tests.
+   * **Compiled Bindings Contract (`[VM-018]`)**: All Views and `DataTemplate` roots must specify explicit `x:DataType` to prevent runtime reflection fallback.
 
 ---
 
@@ -147,281 +155,238 @@ Percolator.Desktop/
 
 ```mermaid
 flowchart TD
-    subgraph Phase 1: Shell & Theming Bootstrap
-        C1["[DESK-01] Shell Token Foundation & Responsive 3-Pane Frame"]
-        C2["[DESK-02] Pre-Unlock Vault Gate (StartupWindow Screen 1A & 1B + Duress Decoy)"]
-        C3["[DESK-03] Multi-Persona Gate & Stealth Port Binding (Screen 2 + DesktopIdentitySettings)"]
-        C4["[DESK-04] Two-Stage DI & Window Handoff Coordinator (Lifecycle & Relocking)"]
+    subgraph Phase 1: Shell & Theming Bootstrap (Completed)
+        C1["[DESK-01] Shell Token Foundation & Responsive 3-Pane Frame (Completed)"]
+        C2["[DESK-02] Pre-Unlock Vault Gate (StartupWindow Screen 1A & 1B + Duress Decoy) (Completed)"]
+        C3["[DESK-03] Multi-Persona Gate & Stealth Port Binding (Screen 2 + DesktopIdentitySettings) (Completed)"]
+        C4["[DESK-04] Two-Stage DI & Window Handoff Coordinator (Lifecycle & Relocking) (Completed)"]
     end
 
-    subgraph Phase 2: Transports, Messaging & Inspection
-        C5["[DESK-05] Two-Tier Sidebar, Add Connection & Pending Requests (Signal Inspector)"]
-        C6["[DESK-06] Real-Time Chat, Volatile Drafts & Disappearing Messages (Apps.Chat)"]
+    subgraph Phase 2: Transports, Navigation & Messaging (Discord Model)
+        C5["[DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1)"]
+        C6["[DESK-06] Direct P2P & Relayed Conversation Directory with Outbound Pending (Flows B & C Phase 2)"]
+        C7["[DESK-07] Real-Time Messaging Experience, Volatile Drafts & Disappearing Messages (Apps.Chat)"]
+        C8["[DESK-08] Right-Anchored Profile & Connection Inspector Drawer"]
     end
 
     subgraph Phase 3: P2P Swarm & Platform Services
-        C7["[DESK-07] Sovereign Discovery & Swarm Telemetry (Apps.Discovery)"]
-        C8["[DESK-08] Swarm File Transfer Dashboard & In-Chat Cards (Apps.FileTransfer)"]
-        C9["[DESK-09] Timeline Cards & PluginSdk Integration (PluginSdk)"]
-        C10["[DESK-10] Desktop System Integration, Native Notifications & Quick-Switcher (Ctrl+K)"]
-        C11["[DESK-11] Headless UI & Concurrency Verification Test Suite"]
+        C9["[DESK-09] Sovereign Discovery & Swarm Telemetry (Apps.Discovery)"]
+        C10["[DESK-10] Swarm File Transfer Dashboard & In-Chat PieceMap Canvas (Apps.FileTransfer)"]
+        C11["[DESK-11] Timeline Cards & PluginSdk Integration (PluginSdk)"]
+        C12["[DESK-12] Desktop System Integration, Native Notifications & Quick-Switcher (Ctrl+K)"]
+        C13["[DESK-13] Headless UI & Comprehensive Verification Test Suite"]
     end
 
-    C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C8 --> C9 --> C10 --> C11
+    C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C8 --> C9 --> C10 --> C11 --> C12 --> C13
 ```
 
 ---
 
-### [DESK-01] Shell Token Foundation & Responsive 3-Pane Frame
-* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE` (Desktop bounded strictly to UI presentation, layout, and windowing; zero cryptographic or transport state mutations)
-* **Detailed Design**: `INV-DESKTOP-TWO-STAGE-HANDOFF`, `INV-DESKTOP-THREAD-DISCIPLINE`
-* **Governing Specs**: `[STYLE-001]` to `[STYLE-008]`, `[VIEW-001]`, `[VIEW-002]`, `[VIEW-003]`, `[VIEW-007]`, `[VIEW-008]`, `[VIEW-009]`, `[CB-001]`, `[CB-002]`, `[CB-003]`, `[CB-005]`, `[CB-007]`, `[CB-009]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[R3-001]`, `[R3-002]`, `[R3-003]`
-* **Target Deliverables**:
-  * Create: `Common/Styles/Spacing.axaml` (geometry and spacing tokens: `CardCornerRadius` = 6, `OverlayCornerRadius` = 8, `ControlCornerRadius` = 4, margin tokens)
-  * Create: `Common/Styles/CustomStyles.axaml` (`Button.danger` with `SystemFillColorCriticalBrush`, `Border.persona-card` with hover `BrushTransition`)
-  * Modify: `App.axaml` & `App.axaml.cs` (configure `<sty:FluentAvaloniaTheme PreferUserAccentColor="True" PreferSystemTheme="True" />`, merge resource dictionaries, embed FiraCode Nerd Font, zero theme mixing)
-  * Create: `Features/Shell/Views/MainWindow.axaml` & `Features/Shell/Views/MainWindow.axaml.cs`
-  * Create: `Features/Shell/ViewModels/MainWindowViewModel.cs`
-* **Acceptance Criteria**:
-  * Boots into responsive, fully themed 3-pane Discord/Teams-inspired shell frame ($1200 \times 800\text{ px}$, min $800 \times 600\text{ px}$).
-  * Layout panes: Left Sidebar ($72\text{ px}$ fixed), Right Sidebar ($240\text{ px}$ collapsible), Content Area (header, message list placeholder, chat composer placeholder), Right-Anchored Inspector Drawer ($300\text{ px}$ slide-over).
-  * Responsive layout breakpoints: Window width $< 1000\text{ px}$ transitions Inspector drawer to an overlay drawer with backdrop dismiss scrim; window width $< 850\text{ px}$ collapses Right Sidebar into a slide-out drawer with hamburger toggle.
-  * Theme switching between Light, Dark, and High Contrast occurs dynamically using semantic system brush tokens (`[STYLE-005]`).
-  * FiraCode Nerd Font definitions linked and accessible via `NerdFontFamily`.
-* **Verification Gate**:
-  * `dotnet build Percolator.Desktop/Percolator.Desktop.csproj` succeeds with 0 errors and 0 warnings.
-  * Resizing window across $1200\text{ px} \rightarrow < 1000\text{ px} \rightarrow < 850\text{ px}$ executes smooth responsive layout transitions without clipping or visual artifacts.
+### [DESK-01] Shell Token Foundation & Responsive 3-Pane Frame (COMPLETED)
+* **Summary**: Established the base FluentAvalonia theme, geometry/spacing tokens (`Spacing.axaml`, `CustomStyles.axaml`), embedded FiraCode Nerd Font, and the responsive 3-pane shell frame in `MainWindow.axaml` ($1200 \times 800\text{ px}$ target, $72\text{ px}$ left rail, $240\text{ px}$ right sidebar, content pane, and $300\text{ px}$ right-anchored inspector drawer). Implemented responsive layout breakpoints switching the inspector to overlay below $1000\text{ px}$ and the right sidebar into a slide-out drawer below $850\text{ px}$. Verified clean theme switching across Light, Dark, and High Contrast.
 
 ---
 
-### [DESK-02] Pre-Unlock Vault Gate & Duress Decoy
-* **QMS Traceability**: `DEP-DESKTOP-STARTUP-VAULT-AUTHENTICATION` (allocates `SYS-STARTUP-VAULT-AUTHENTICATION`), `DEP-DESKTOP-TWO-STAGE-CONTAINER-LIFECYCLE`
-* **Detailed Design**: `INV-DESKTOP-TWO-STAGE-HANDOFF`, `DEC-CANARY-ERROR26-UNWRAP`, `DEC-PINNED-SQLITE-KEY`, `DEC-TWIN-SLOT-DURESS-HEADER`, `DEC-ARGON2ID-PARAMETERS`
-* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-004]`, `[VIEW-009]`, `[CB-001]`, `[CB-002]`, `[CB-003]`, `[CB-004]`, `[CB-008]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-010]`, `[VM-014]`, `[VM-016]`, `[R3-001]`, `[R3-003]`, `[R3-004]`
-* **Target Deliverables**:
-  * Create: `Features/Startup/Views/StartupWindow.axaml` & `Features/Startup/Views/StartupWindow.axaml.cs`
-  * Create: `Features/Startup/ViewModels/StartupHostViewModel.cs`
-  * Create: `Features/Startup/Views/VaultSetupView.axaml` & `Features/Startup/Views/VaultSetupView.axaml.cs`
-  * Create: `Features/Startup/ViewModels/VaultSetupViewModel.cs`
-  * Create: `Features/Startup/Views/VaultUnlockView.axaml` & `Features/Startup/Views/VaultUnlockView.axaml.cs`
-  * Create: `Features/Startup/ViewModels/VaultUnlockViewModel.cs`
-  * Create: `Features/Startup/Models/StartupStateModel.cs`
-* **Acceptance Criteria**:
-  * Unified $480 \times 600\text{ px}$ centered, non-resizable frame hosting Screen 1 and Screen 2 views via dynamic transition.
-  * State 1A (`VaultSetupView`):
-    * Header: Title *"Welcome to Percolator"* (`Theme="{StaticResource TitleTextBlockStyle}"`), Subtitle *"Choose a master password to protect your messages, keys, and contacts on this device."* (`Theme="{StaticResource CaptionTextBlockStyle}"`, `Foreground="{DynamicResource TextFillColorSecondaryBrush}"`).
-    * Master Password + Confirm Password fields (`PasswordChar="•"` with built-in reveal toggle).
-    * Expandable `[+ Add Emergency Duress Passphrase]` progressive disclosure link.
-    * Validation: Duress cannot match master password; whitespace-only disallowed.
-    * Blank Password Dialog: If password is empty, presents a confirmation modal via the application's injected dialog service abstraction: *"Skip password protection? Your vault will still be encrypted with a random key, but that key will be accessible without a password."* with actions `[ Cancel ]` and `[ Continue Without Password ]`.
-    * Calls `IDatabaseUnlockCoordinator.InitializeAsync(masterPassword, duressPassword, ct)`.
-  * State 1B (`VaultUnlockView`):
-    * Header: *"Percolator"* / *"Unlock Vault"* (`Theme="{StaticResource TitleTextBlockStyle}"`).
-    * Auto-focused master password field with show/hide toggle.
-    * Inline loading spinner during Argon2id key derivation.
-    * Error feedback: subtle shake animation and critical inline text (*"Incorrect password. Please try again."*) on native error `26` (`SQLITE_NOTADB`).
-    * Auto-launch preference bypass *(deferred to DESK-03 — requires `IDesktopSettingsRepository` for the auto-start flag; DESK-02 always transitions to Screen 2 on successful unlock)*: If auto-start is enabled for a persona, unlock immediately launches `MainWindow`. Holding `Shift` (or `Shift+Enter`) overrides bypass and forces Screen 2 to appear.
-    * Emergency Duress Activation: Entering duress passphrase cryptographically shreds real header in $< 2\text{ ms}$, creates a valid decoy SQLite DB encrypted with duress key, and transitions smoothly into Screen 2 (State 2B: Empty Vault) with zero error popups or forensic crash signatures.
-  * Corrupted Vault Modal: If database header is unparseable or damaged, displays *"Vault Data Damaged"* dialog (*"The database file could not be opened. It may have been damaged or altered."*) with actions `[ Open Data Folder ]` and `[ Exit ]`.
-  * Security Engine Error Modal: If native cryptographic smoke test fails (`SignalCrypto.TestConnection() != 42` due to missing VC++ runtimes), displays *"Security Engine Error"* dialog (*"The native cryptographic library (signal_shim) could not be loaded on your system."*) with actions `[ View Diagnostic Log ]` and `[ Exit ]`.
-* **Verification Gate**:
-  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~Vault"`
-  * Fresh install presents `VaultSetupView` with proper typography hierarchy. Initializing with empty password prompts confirmation dialog. Subsequent launch presents `VaultUnlockView`. Incorrect passphrase shows inline error without crashing. Duress passphrase wipes vault and smoothly displays empty vault state.
+### [DESK-02] Pre-Unlock Vault Gate & Duress Decoy (COMPLETED)
+* **Summary**: Implemented the unified $480 \times 600\text{ px}$ non-resizable `StartupWindow` hosting Screen 1A (`VaultSetupView`: master password + optional duress passphrase + empty password alert dialog) and Screen 1B (`VaultUnlockView`: Argon2id key derivation, native error 26 inline feedback, and twin-slot duress cryptographic wipe to decoy vault). Added canary verification trapping `SQLITE_NOTADB` and verified clean in-memory error transitions without crashing.
 
 ---
 
-### [DESK-03] Multi-Persona Gate & Stealth Port Binding
-* **QMS Traceability**: `DEP-DESKTOP-PRE-ACTIVATION-STEALTH` (allocates `SYS-PRE-ACTIVATION-STEALTH`), `DEP-DESKTOP-PERSONA-ISOLATION` (allocates `SYS-PERSONA-KEY-SEGREGATION`)
-* **Detailed Design**: `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `INV-DESKTOP-PRESENTATION-MODELS`
-* **Governing Specs**: `[STYLE-002]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-004]`, `[CB-001]`, `[CB-004]`, `[CB-008]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[VM-013]`, `[VM-014]`, `[R3-004]`, `[R3-005]`
-* **Target Deliverables**:
-  * Create: `Common/Storage/IDesktopSettingsRepository.cs` + vault-backed `VaultDesktopSettingsRepository` over `IVaultSettingsStore` (Stage-2; rows are `IdentityLaunchSettings` records — `PreferredPort`, `LastBoundPort`, `AutoStart`, `SidebarOrder` — keyed by `PublicIdentityId` inside the encrypted vault)
-  * Create: `Common/Services/PortReservationService.cs` (`IPortReservationService` probing range `5100`–`5299`)
-  * Extend: `Features/Startup/Views/IdentityGateView.axaml` & `Features/Startup/Views/IdentityGateView.axaml.cs` (shell created by DESK-02 as the State 2B empty-vault duress landing; add persona cards, port pills, context menus)
-  * Extend: `Features/Startup/ViewModels/IdentityGateViewModel.cs` (skeleton created by DESK-02; add persona collection, auto-start flag, launch command)
-  * Create: `Features/Startup/Models/SelectablePersonaModel.cs`
-  * Create: `Features/Startup/Views/CreatePersonaDialog.axaml` & `Features/Startup/ViewModels/CreatePersonaDialogViewModel.cs`
-  * Create: `Features/Startup/Views/DeletePersonaDialog.axaml` & `Features/Startup/ViewModels/DeletePersonaDialogViewModel.cs`
-* **Acceptance Criteria**:
-  * State 2A (Normal Return):
-    * Multi-select persona cards (`Border.persona-card`).
-    * Port status pill: Green dot (`Port 5100 Ready`), Orange dot (`Port 5100 in use → Auto-selected 5101`), Red alert pill (`All default ports busy` in range `5100`–`5299`).
-    * Inline port editor popover (`[ ✎ ]`) to customize port.
-    * Card Context Menu (right-click or `···` kebab menu): `Edit Profile` (display name/avatar) and `Delete Persona`.
-    * Port Race Condition Recovery: If a port is claimed by another process between selection and launch, displays inline banner (*"Port 5101 was claimed by another application. Re-probing next available port..."*) and automatically re-leases next free port.
-    * Single-persona auto-start checkbox: `[ ] Always auto-start with this persona on unlock`.
-    * Primary button `[ Launch Selected Personas → ]` (disabled if zero checked or conflict unresolved).
-  * State 2B (Empty Vault):
-    * Centered card: *"No personas yet"*, with friendly tip callout: *"Tip: Many people create separate personas for Work vs. Personal, or Family vs. Friends."*
-    * `[ Create Your First Persona ]` action button.
-  * `CreatePersonaDialog`: Display name (max 32 chars, whitespace-trimmed), avatar picker with identicon generator, advanced port settings.
-  * `DeletePersonaDialog`: Selectable persona name box so power users can copy with keyboard/mouse. Confirmation prompt requiring user to type exact persona name to enable `[ Shred & Delete Persona ]` (`Button.danger`).
-* **Verification Gate**:
-  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~IdentityGate|FullyQualifiedName~PortReservation"`
-  * Assert zero network sockets are opened prior to `LaunchPersonasCommand.Execute()`. Port conflict correctly auto-selects next free port. Deleting persona shreds keys and removes profile only when typed name matches exactly.
+### [DESK-03] Multi-Persona Gate & Stealth Port Binding (COMPLETED)
+* **Summary**: Implemented Screen 2 (`IdentityGateView`), multi-persona card presentation with identicon generation, persona creation (`CreatePersonaDialog`) and deletion (`DeletePersonaDialog`), and vault-backed `VaultDesktopSettingsRepository` storing launch settings inside the encrypted vault. Added dynamic port probing and conflict resolution across `5100`–`5299` via `PortReservationService` while enforcing total network stealth (zero open ports prior to explicit persona confirmation).
 
 ---
 
-### [DESK-04] Two-Stage DI & Window Handoff Coordinator
-* **QMS Traceability**: `DEP-DESKTOP-TWO-STAGE-CONTAINER-LIFECYCLE`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION` (allocates `SYS-SESSION-LOCK-ZEROIZATION`), `DEP-INFRA-VAULT-SCHEMA-MIGRATION` (allocates `SYS-VAULT-UPGRADE-DATA-PRESERVATION`), `DEP-INFRA-DURESS-DECOY-VAULT-LIFECYCLE` (allocates `SYS-DECOY-VAULT-DENIABILITY`), `DEP-INFRA-LOCAL-STORAGE-CONTAINMENT` (allocates `SYS-LOCAL-STORAGE-CONTAINMENT`)
-* **Detailed Design**: `INV-DESKTOP-TWO-STAGE-HANDOFF`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`
-* **Governing Specs**: `[VIEW-009]`, `[CB-001]`, `[CB-002]`, `[CB-009]`, `[VM-003]`, `[VM-004]`, `[VM-007]`, `[VM-010]`, `[R3-001]`, `[R3-014]`
-* **Target Deliverables**:
-  * Modify: `App.axaml.cs` (wire Stage 1 `BootstrapContainer` and Stage 2 `AuthenticatedSession` builder)
-  * Extend: `Common/Windowing/IWindowHandoffCoordinator.cs` & `Common/Windowing/WindowHandoffCoordinator.cs` (interface and window-swap/relock shells created by DESK-02; add port leasing, stealth-gate deactivation, geometry restore)
-  * Create: `Common/Services/INetworkStealthGate.cs` & `Common/Services/NetworkStealthGate.cs`
-  * **Explicit VM→Window mapping (replace reflection convention)**: `WindowManager.ResolveWindowByConvention` currently resolves dialog windows via `FooViewModel` → `FooWindow`/`FooView` name mangling + `Activator.CreateInstance` — fragile, untrimmed-safe, and silently broken until DESK-03 exercised it. Replace with a registered `IReadOnlyDictionary<Type, Type>` (or equivalent `IDialogRegistry` service) populated at composition root: each dialog ViewModel type maps explicitly to its `Window` type, resolved with compile-time checking and zero reflection — prerequisite for Native AOT and removes the namespace-convention foot-gun entirely.
-  * **Schema versioning (EF Core migrations)**: The DESK-03 wiring fix made `SqlCipherSchemaMigrator`/`SqliteDatabaseMigrator` run at unlock, but with zero EF migration classes it falls back to an idempotent `CREATE ... IF NOT EXISTS` script — which handles *missing* tables yet cannot evolve an existing schema (column adds/drops, index changes). Promote migrations to the primary mechanism:
-    * Create: `Percolator.Infrastructure/Migrations/` baseline via `dotnet ef migrations add InitialSchema` plus a `IDesignTimeDbContextFactory<PercolatorDbContext>` (throwaway unencrypted context for tooling) and the `Microsoft.EntityFrameworkCore.Design` package.
-    * Preserve: the idempotent-create fallback for databases that predate the migrations baseline (no `__EFMigrationsHistory` row) — a one-time bootstrap adoption path so existing vaults are not stranded.
-    * Policy: subsequent model changes must ship a generated migration; the manual `IF NOT EXISTS` path is bootstrap-only, not a schema-evolution story.
-* **Acceptance Criteria**:
-  * Stage 1 `BootstrapContainer`: Minimal services (`IWindowManager`, `IWindowHandoffCoordinator`, `ICryptoEngine`, `IDateTimeProvider`, `IDatabaseUnlockCoordinator`, `StartupHostViewModel`). Zero DbContexts, repositories, or network listeners.
-  * Stage 2 `AuthenticatedSession`: Instantiated only after successful canary verification, containing `PercolatorDbContext`, connection pools with native `sqlite3_key` interceptor, domain repositories, and hosted services.
-  * `TransitionToGateAsync(session)`: Transitions `StartupWindow` from Screen 1 to Screen 2.
-  * `TransitionToMainShellAsync(activePersonas)`: Acquires port leases via `IPortReservationService`, binds Kestrel listeners strictly for chosen personas, closes `StartupWindow`, opens `MainWindow`, restoring geometry.
-  * `LockSessionAsync()`: Deactivates network listeners via `INetworkStealthGate.DeactivateAsync()`, stops `IHost`, flushes SQLite connection pools (`SqliteConnection.ClearAllPools()`), zeroizes master key span (`CryptographicOperations.ZeroMemory`), disposes `IHost`, closes `MainWindow`, and instantiates fresh `StartupWindow` in State 1B unlock state.
-  * **Versioned schema evolution**: `Database.MigrateAsync()` applies pending EF migrations at unlock inside `SqlCipherSchemaMigrator` before repositories resolve; `__EFMigrationsHistory` records applied versions. A model change that adds/renames/drops a column produces a migration which alters the existing vault table in place without data loss; legacy vaults without `__EFMigrationsHistory` adopt the baseline via the idempotent-create path, then migrate forward.
-  * **Hazard re-rating**: once the migration regression evidence above is green, update `RiskRegister.md` — flip `HAZ-VAULT-SCHEMA-EVOLUTION-INCOMPATIBILITY` residual status `Identified` → `Controlled` citing the migration control (human approval required per `risk-register-spec` §3.3; the deliverable includes producing the verification evidence for approval, not self-approving).
-* **Verification Gate**:
-  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~WindowHandoff|FullyQualifiedName~Lifecycle"`
-  * `dotnet test Percolator.Infrastructure.Tests/Percolator.Infrastructure.Tests.csproj --filter "FullyQualifiedName~Migrat"`
-  * Verifies complete socket teardown, connection pool flushing, key zeroization, and window swap upon session lock.
-  * Migration regression: a seeded DB containing only `__percolator_vault` gains the full model schema; a seeded older-schema DB gains the new column/index via `ALTER`-style migration while retaining existing rows.
-  * QMS bookkeeping: `HAZ-VAULT-SCHEMA-EVOLUTION-INCOMPATIBILITY` re-rated to `Controlled` in `RiskRegister.md` after human approval; `SYS-VAULT-UPGRADE-DATA-PRESERVATION` marked verified.
+### [DESK-04] Two-Stage DI & Window Handoff Coordinator (COMPLETED)
+* **Summary**: Established the two-stage dependency injection lifecycle (`BootstrapContainer` for Stage 1 pre-unlock vs. `AuthenticatedSession` for Stage 2 post-unlock) coordinated by `WindowHandoffCoordinator`. Implemented `TransitionToMainShellAsync` (port leasing, hosted services startup, geometry restoration) and `LockSessionAsync` (network listener teardown via `NetworkStealthGate`, SQLite connection pool clearing, master key zeroization via `CryptographicOperations.ZeroMemory`, and window swap back to `StartupWindow`). Established EF Core migration baseline and verified schema evolution.
 
 ---
 
-### [DESK-05] Two-Tier Sidebar, Add Connection & Pending Requests
-* **QMS Traceability**: `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`, `SYS-DIRECT-CONTACT-REQUEST-OUTBOX`), `DEP-DESKTOP-PEER-BLOCK-UI-SILENCE` (allocates `SYS-PEER-BLOCK-SILENT-DROP`), `DEP-DESKTOP-OUT-OF-BAND-VERIFICATION` (allocates `SYS-OUT-OF-BAND-SECURITY-CODE`), `DEP-DESKTOP-KEY-CHANGE-WARNING` (allocates `SYS-KEY-CHANGE-TRUST-HALT`)
-* **Detailed Design**: `DEC-PULL-BASED-CONSENT-STAGING`, `INV-DESKTOP-PRESENTATION-MODELS`
-* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-002]`, `[VIEW-003]`, `[VIEW-004]`, `[CB-001]`, `[CB-004]`, `[CB-008]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-004]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[R3-002]`, `[R3-004]`, `[R3-005]`
+### [DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1)
+* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE`, `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`, `SYS-DIRECT-CONTACT-REQUEST-OUTBOX`)
+* **Detailed Design**: `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`, `DEC-PULL-BASED-CONSENT-STAGING`
+* **Governing Specs**: `[UISS-001]` to `[UISS-010]`, `[STYLE-002]`, `[STYLE-005]`, `[VIEW-001]`, `[VIEW-002]`, `[CB-001]`, `[CB-004]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-006]`, `[VM-017]`, `[VM-018]`, `[VM-019]`, `[R3-001]` to `[R3-014]`
 * **Target Deliverables**:
-  * Create: `Features/Transports/Views/TransportsSidebarView.axaml` & `Features/Transports/Views/TransportsSidebarView.axaml.cs`
-  * Create: `Features/Transports/ViewModels/TransportsSidebarViewModel.cs`
-  * Create: `Features/Transports/Views/PendingRequestsPanelView.axaml` & `Features/Transports/ViewModels/PendingRequestsPanelViewModel.cs`
-  * Create: `Features/Transports/Views/AddConnectionDialog.axaml` & `Features/Transports/ViewModels/AddConnectionDialogViewModel.cs`
+  * Create: `Common/Navigation/LeftRailTarget.cs` (`DirectMessages` vs `Relay(RelayIdentityId)`)
+  * Create: `Common/Navigation/IShellNavigationStateService.cs` & `ShellNavigationStateService.cs` (coordinates active Left Rail target, selected chat ID, and inspector drawer state)
+  * Create: `Features/Transports/Models/RelayChannelModel.cs` (`RelayIdentityId`, `FriendlyName`, `Endpoint`, `ConnectionStatus`, `LatencyMs`, `UnreadCount`, `FolderId`, `DisplayOrder`)
+  * Create: `Features/Transports/Services/IRelayStateService.cs` & `RelayStateService.cs` (manages active persona's configured relays, live ping/status, folders, unread badges, and vertical ordering)
+  * Create: `Features/Transports/Services/IInboundRequestStateService.cs` & `InboundRequestStateService.cs` (quarantines unsolicited inbound contact requests, exposes `PendingCount` for indicator light, and provides `Accept`/`Reject`/`Block` actions)
+  * Create: `Features/Transports/Views/TransportsSidebarView.axaml` & `Features/Transports/ViewModels/TransportsSidebarViewModel.cs` (Left Sidebar rail: DM button, dynamic relay collection, folders, `+`, pending requests button, avatar)
+  * Modify: `Features/Shell/Views/MainWindow.axaml` & `Features/Shell/ViewModels/MainWindowViewModel.cs` (embed `TransportsSidebarView`, wire `AddConnectionDialogResult` into `RelayStateService`)
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * **Mandatory CQRS Read Port**: `RelayStateService` MUST inject `IPersonaRelayQueryService` to load `PersonaRelayLinkReadModel` list snapshots. `InboundRequestStateService` MUST inject `IPeerContactQueryService` to query `PeerContactSummaryReadModel` list snapshots.
+  * **Prohibited Domain Repositories**: Implementing agents MUST NOT inject write-side domain repositories (`IRelayRepository`, `IPeerContactRepository`) to populate UI state or read models (`[VM-006]`, `anti-shortcut-discipline` Rule 6).
+  * **Constructor Invariants**: All required service dependencies MUST be non-nullable constructor parameters (`ArgumentNullException.ThrowIfNull`) (`[VM-003]`).
+  * **Compiled Bindings**: `TransportsSidebarView.axaml` must declare `x:DataType="vm:TransportsSidebarViewModel"`, and relay list `DataTemplate` must declare `x:DataType="models:RelayChannelModel"` (`[VM-018]`).
+  * **Collection Dispatcher Fallback**: Collection bindings MUST use `SynchronizationContext.Current != null ? view.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current) : view.ToNotifyCollectionChanged()` (`[VM-019]`).
+* **Acceptance Criteria**:
+  * **Flow A (Add Relay Post Office)**:
+    * User clicks `[+] Add Connection` in the Left Sidebar, enters a relay endpoint (e.g. `127.0.0.1:5100`), and submits.
+    * `AddConnectionDialogViewModel` registers the relay in SQLite (`IRelayDirectory`), links identity, and calls `RelayStateService.AddRelayAsync(...)`.
+    * Left Sidebar immediately renders the new Relay icon with friendly display name tooltip and connection status indicator.
+  * **Flow C Phase 1 (Left Rail Navigation)**:
+    * Top icon: Prominent `[Direct Messages]` button with aggregate direct P2P unread message badge. Clicking sets `ShellNavigationStateService.ActiveLeftRailTarget = LeftRailTarget.DirectMessages`.
+    * Middle list: Configured Relays rendered as vertical icon stack with live ping status. Drag-and-drop vertical reordering persisted to `IDesktopSettingsRepository`. Collapsible relay folder support. Clicking a relay sets `ShellNavigationStateService.ActiveLeftRailTarget = LeftRailTarget.Relay(relayId)`.
+    * Bottom Pending Requests: Subtle notification indicator light bound to `InboundRequestStateService.PendingCount`. Inbound unsolicited handshakes illuminate badge without OS toasts or audio (`INV-UNSOLICITED-CONNECTION-SILENCE`). Clicking opens `PendingRequestsPanelViewModel` backed by `InboundRequestStateService`.
+  * **Free-Threaded & Thread-Safe (`UiStateService.spec.md`)**:
+    * All state services are 100% free-threaded (`[UISS-002]`), mutate state under lock (`[UISS-003]`), publish events outside lock (`[UISS-004]`), and expose `ISynchronizedView` (`[UISS-005]`).
+* **Verification Gate**:
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~RelayState|FullyQualifiedName~Navigation|FullyQualifiedName~TransportsSidebar"`
+  * Verifies adding relay dynamically renders icon in Left Rail; clicking relay updates navigation target; drag-and-drop reorders collection; inbound request increments pending count.
+
+---
+
+### [DESK-06] Direct P2P & Relayed Conversation Directory with Outbound Pending (Flows B & C Phase 2)
+* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE`, `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`, `SYS-DIRECT-CONTACT-REQUEST-OUTBOX`), `DEP-DESKTOP-PEER-BLOCK-UI-SILENCE` (allocates `SYS-PEER-BLOCK-SILENT-DROP`)
+* **Detailed Design**: `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-PRESENTATION-MODELS`, `DEC-PULL-BASED-CONSENT-STAGING`
+* **Governing Specs**: `[UISS-001]` to `[UISS-010]`, `[STYLE-002]`, `[STYLE-005]`, `[VIEW-001]`, `[VIEW-003]`, `[CB-001]`, `[CB-004]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-006]`, `[VM-017]`, `[VM-018]`, `[VM-019]`, `[R3-001]`, `[R3-008]`, `[R3-010]`
+* **Target Deliverables**:
+  * Delete / Replace: `Features/Transports/Services/IPeerConnectionStateService.cs` & `PeerConnectionStateService.cs` (replace orphan retry-only class with comprehensive conversation directory)
+  * Create: `Features/Chats/Models/ConversationSummaryModel.cs` (`ConversationId`, `PeerOrGroupId`, `DisplayName`, `AvatarHash`, `RouteType` [`DirectP2P`, `Relayed`], `RelayId`, `LastMessageSnippet`, `LastActivityUtc`, `UnreadCount`, `IsPendingOutbound`, `DeliveryStatus`)
+  * Create: `Features/Chats/Services/IConversationStateService.cs` & `ConversationStateService.cs` (manages active persona conversations, encapsulates `IOutboundPendingRetryWorker`, projects P2P DMs vs Relayed chats)
   * Create: `Features/Chats/Views/ChatsSidebarView.axaml` & `Features/Chats/Views/ChatsSidebarView.axaml.cs`
   * Create: `Features/Chats/ViewModels/ChatsSidebarViewModel.cs`
-  * Create: `Features/Inspector/Views/ProfileInspectorView.axaml` & `Features/Inspector/Views/ProfileInspectorView.axaml.cs`
-  * Create: `Features/Inspector/ViewModels/ProfileInspectorViewModel.cs`
-  * Create: `Features/Transports/Services/IPeerConnectionStateService.cs` & `Features/Transports/Services/PeerConnectionStateService.cs`
-  * Create: `Features/Transports/Models/TransportChannelModel.cs`, `PendingHandshakeModel.cs`
-  * Create: `Features/Inspector/Models/PeerProfileInspectorModel.cs`, `RelayInspectorModel.cs`
+  * Modify: `Features/Transports/ViewModels/AddConnectionDialogViewModel.cs` (Tab 0 direct peer connections wired to `ConversationStateService`)
+  * Modify: `Features/Shell/ViewModels/MainWindowViewModel.cs` & `MainWindow.axaml` (embed `ChatsSidebarView` in 240px right sidebar pane)
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * **Mandatory CQRS Read Ports**: `ConversationStateService` MUST inject `IConversationListQueryService` (loading `ConversationSummaryReadModel`) and `IPeerContactQueryService` (loading `PeerContactSummaryReadModel`).
+  * **Prohibited Domain Repositories**: Implementing agents MUST NOT inject write-side domain repositories (`IChatRepository`, `IPeerContactRepository`) to query conversation lists or direct contacts (`[VM-006]`, `anti-shortcut-discipline` Rule 6).
+  * **No Synthetic Message Databases**: `ConversationStateService` MUST NOT hold message histories or aggregate entity graphs in RAM (`anti-shortcut-discipline` Rule 2). Only active conversation summaries, presence, and outbound retry placeholders reside in presentation state.
+  * **Compiled Bindings**: `ChatsSidebarView.axaml` must declare `x:DataType="vm:ChatsSidebarViewModel"`, and conversation list `DataTemplate` must declare `x:DataType="models:ConversationSummaryModel"` (`[VM-018]`).
+  * **Collection Dispatcher Fallback**: Collection bindings MUST use `SynchronizationContext.Current != null ? view.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current) : view.ToNotifyCollectionChanged()` (`[VM-019]`).
 * **Acceptance Criteria**:
-  * Left Sidebar ($72\text{ px}$ fixed):
-    * Top Pending Requests Button: Unobtrusive icon button with subtle notification light. **Inbound Connection Silence Invariant**: Zero OS toasts, popups, or audio pings on unsolicited inbound handshakes.
-    * Middle Transport Channels List: Direct peer profile picture (or identicon) and relay badges. Zero technical clutter (no IP addresses, ports, or protocol strings in the list). Mouse hover shows remote display name in clean tooltip. Reorderable via drag-and-drop (persisted via `IDesktopSettingsRepository` as `IdentityLaunchSettings` inside the encrypted vault). Right-click context menus: *"View Profile"*, *"Mute"*, *"Remove Connection"* / *"Relay Details"*, *"Reconnect"*.
-    * Bottom Add Connection (`+`) Button: Prominent `+` button opening `AddConnectionDialog.axaml`: Tab 1 (*Connect Outbound* - peer endpoint or relay URI, validates connectivity and initiates handshake), Tab 2 (*Share My Invitation* - generates and displays active identity's out-of-band invitation URL and QR code).
-    * Identity Area: Profile picture, local display name truncated with ellipsis (`...`). Unread indicator acts as anchor for **Active Identity Switcher Flyout** to switch shell context to another active persona.
-  * Pending Requests Panel: Displays requester display name and fingerprint preview with `Accept`, `Reject`, and `Burn` (permanent blacklist) actions.
-  * Right Sidebar ($240\text{ px}$ collapsible): Contextual chats for selected transport (single 1-on-1 chat for direct peer; individual and group channels for relays). Avatar, display name, unread badge count, last message snippet. Zero route tags like `(Relayed 1-on-1)`. Right-click context menu: *"View Details"*, *"Mute Notifications"*, *"Clear History"*, *"Leave Group"*.
-  * Profile & Connection Inspector ($300\text{ px}$ slide-over):
-    * Direct Peer Inspector (Signal-inspired): Profile summary (avatar, remote name, copyable truncated Identity ID), Disappearing Messages selector presets (*Off, 30s, 5m, 1h, 1d, 1w, 4w*), Notification mute toggle presets (*1h, 8h, 1d, 7d, Always*), Contextual Safety Numbers panel (hidden by default; appears if handshake is incomplete or Identity Key Change Alert is triggered; displays 60-digit fingerprint with *"Mark as Verified"* toggle), connection route telemetry (Direct LAN, STUN, Relayed) and roundtrip ping, contact actions (*"Clear Chat History"*, *"Block & Burn Contact"*).
-    * Relay / Group Inspector Variant: Relay URI, connection status, latency, hosted mailboxes. Group name, avatar, disappearing timer, member roster with Admin/Member badges.
+  * **Flow B (Add Direct Connection & Outbound Pending)**:
+    * User clicks `[+] Add Connection`, selects Tab 0 (*"Connect to Direct Peer"*), pastes peer invitation, clicks `Connect`.
+    * If peer responds immediately: handshake establishes contact; `ConversationStateService` registers direct P2P conversation; appears in Right Sidebar immediately.
+    * If peer is offline (`PendingOffline`): staged as outbound pending; `OutboundPendingRetryWorker` begins background retry; appears in Right Sidebar under `[Direct Messages]` with *"Pending..."* badge.
+    * When background retry succeeds: `OutboundPendingRetryWorker` fires event; `ConversationStateService` automatically transitions item from *"Pending..."* to *"Connected"*.
+  * **Flow C Phase 2 (Contextual Right Sidebar Population)**:
+    * When `ShellNavigationStateService.ActiveLeftRailTarget` is `DirectMessages`: Right Sidebar displays all direct, peer-to-peer (LAN/STUN, no relay) 1:1 conversations, plus P2P outbound-pending items.
+    * When `ShellNavigationStateService.ActiveLeftRailTarget` is `Relay(relayId)`: Right Sidebar displays all 1:1 direct chats routing through that relay, plus group chats hosted on that relay.
+    * Selecting a chat updates `ShellNavigationStateService.SelectedConversationId`.
 * **Verification Gate**:
-  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~Transports|FullyQualifiedName~Inspector"`
-  * Inbound unsolicited handshake illuminates pending requests indicator without firing OS toasts. Accepting establishes chat; burning blacklists peer. Safety numbers panel remains hidden until key change is simulated.
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~ConversationState|FullyQualifiedName~ChatsSidebar"`
+  * Verifies selecting Direct Messages displays P2P chats; selecting Relay displays relayed chats; offline outbound peer displays *"Pending..."* badge; retry success transitions badge to connected.
 
 ---
 
-### [DESK-06] Real-Time Chat, Volatile Drafts & Disappearing Messages
+### [DESK-07] Real-Time Messaging Experience, Volatile Drafts & Disappearing Messages (Apps.Chat)
 * **QMS Traceability**: `DEP-DESKTOP-VOLATILE-DRAFT-ISOLATION` (allocates `SYS-VOLATILE-DRAFT-ISOLATION`), `DEP-DESKTOP-MEDIA-METADATA-SANITIZATION-INGRESS` (allocates `SYS-MEDIA-METADATA-SANITIZATION-INGRESS`)
 * **Detailed Design**: `DEC-LRU-SESSION-SCOPES`, `DEC-DEBOUNCED-DROP-RELOAD`, `DEC-REACTIVE-EVENT-BUS-BRIDGE`, `INV-DESKTOP-PRESENTATION-MODELS`
-* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-005]`, `[CB-001]`, `[CB-003]`, `[CB-004]`, `[CB-008]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-004]`, `[VM-005]`, `[VM-006]`, `[VM-007]`, `[VM-010]`, `[VM-012]`, `[VM-014]`, `[R3-002]`, `[R3-003]`, `[R3-004]`, `[R3-005]`, `[R3-006]`, `[R3-007]`, `[R3-009]`
+* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-005]`, `[CB-001]`, `[CB-003]`, `[CB-004]`, `[CB-008]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-004]`, `[VM-005]`, `[VM-006]`, `[VM-007]`, `[VM-010]`, `[VM-012]`, `[VM-014]`, `[R3-002]`, `[R3-003]`, `[R3-004]`, `[R3-005]`, `[R3-006]`, `[R3-007]`, `[R3-009]`, `[R3-010]`, `[R3-013]`
 * **Target Deliverables**:
-  * Create: `Features/Chats/Models/ChatMessageModel.cs` (properties: `MessageId`, `SessionId`, `SenderId`, `SenderDisplayName`, `ContentText`, `TimestampUtc`, `DeliveryStatus` [`Queued`, `Sending`, `Sent`, `Delivered`, `Read`, `Failed`], `IsOutgoing`, `IsEdited`, `IsDeleted`, `ExpiresAtUtc`, `Reactions` [`ObservableList<ReactionModel>`], `Attachments` [`ObservableList<MediaAttachmentModel>`])
-  * Create: `Features/Chats/Models/ChatMessageSnapshot.cs` (immutable `record` for lock-free background reads, search indexing, and export)
-  * Create: `Features/Chats/Models/ConversationSummaryModel.cs`
-  * Create: `Features/Chats/Services/IChatStateService.cs` & `Features/Chats/Services/ChatStateService.cs`
-  * Create: `Features/Chats/Services/IChatDraftStateService.cs` & `Features/Chats/Services/ChatDraftStateService.cs`
-  * Create: `Features/Chats/Services/ChatReloadCoordinator.cs`
-  * Create: `Features/Chats/Services/SessionScopeFactory.cs`
-  * Create: `Features/Chats/Controls/ChatComposer.axaml` & `Features/Chats/Controls/ChatComposer.axaml.cs`
+  * Create: `Features/Chats/Models/ChatMessageModel.cs` & `ChatMessageSnapshot.cs`
+  * Create: `Features/Chats/Services/IChatDraftStateService.cs` & `ChatDraftStateService.cs` (volatile in-memory drafts, cursor positions, and pending attachments)
+  * Create: `Features/Chats/Services/ChatReloadCoordinator.cs` (debounced `50ms` SQLite query batching with `AwaitOperation.Drop`)
+  * Create: `Features/Chats/Services/SessionScopeFactory.cs` (LRU child DI container cache for active chats, capacity 5)
+  * Create: `Features/Chats/Controls/ChatComposer.axaml` & `ChatComposer.axaml.cs`
   * Create: `Features/Chats/Controls/ReactionPickerFlyout.axaml`
   * Create: `Features/Chats/Views/ChatView.axaml` & `Features/Chats/Views/ChatView.axaml.cs`
   * Create: `Features/Chats/ViewModels/ChatViewModel.cs`, `ChatMessageViewModel.cs`
   * Create: `Features/Chats/Views/GroupCreationDialog.axaml` & `Features/Chats/ViewModels/GroupCreationDialogViewModel.cs`
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * **Mandatory CQRS Read Port**: `ChatViewModel` MUST inject `IChatMessageQueryService` (loading `ChatMessageReadModel` pages from SQLite). Write operations (e.g. sending a message) MUST route through application port `IChatService.SendMessageAsync`.
+  * **Prohibited Domain Repositories**: Implementing agents MUST NOT inject write-side domain repositories (`IChatMessageRepository`, `IConversationRepository`) into `ChatViewModel` (`[VM-006]`).
+  * **No Synthetic Message Databases**: `ChatViewModel` must not hold unbounded historical message collections in RAM; paging queries load on demand.
+  * **Compiled Bindings**: `ChatView.axaml` must declare `x:DataType="vm:ChatViewModel"`, and message item template must declare `x:DataType="vm:ChatMessageViewModel"` (`[VM-018]`).
 * **Acceptance Criteria**:
-  * `ChatDraftStateService`: In-memory volatile store for unsent drafts, pending attachments, and conversation scroll offsets. Restores drafts instantly when switching between chats or identities without database re-fetching or schema pollution.
-  * `SessionScopeFactory`: Manages child `IServiceScope` instances for active conversation tabs (LRU capacity = 5); opening 6th chat disposes least-recently used scope.
-  * `ChatReloadCoordinator`: Debounces message arrivals and receipt updates by `50ms` with `AwaitOperation.Drop` to coalesce SQLite roundtrips.
-  * `ChatComposer`: Auto-expanding `TextBox` (1 to 6 lines max). Keyboard handling: `Enter` sends message; `Shift+Enter` or `Ctrl+Enter` inserts newline. Attachment button triggering file picker flyout. Emoji reaction picker flyout.
-  * `ChatView`: Virtualized message list with smooth scroll-to-bottom on new messages. Asymmetric message bubbles: Right-aligned accent bubble for outgoing messages; left-aligned surface bubble for incoming messages. Message status icons: Single tick (Sent), Double tick (Delivered), Colored double tick (Read), Exclamation (Failed). Inline message editor and tombstone (*"This message was deleted"*) placeholder. Reaction summary pills with click-to-toggle reaction. Disappearing Messages Reaper monitoring `ExpiresAtUtc` and purging expired messages.
-  * `GroupCreationDialog`: Group creation UI requiring all members to be on a shared relay. Orchestrates pairwise relay invitations and awaits peer join confirmations before dispatching Groups V2 ZK invitations.
+  * `ChatView`: Displays selected conversation header, virtualized message list, asymmetric bubbles (right-aligned accent for sent, left-aligned surface for received), delivery ticks (Sent, Delivered, Read, Failed), and emoji reaction chips.
+  * Pending Connection Banner: When viewing an outbound-pending chat, displays informational banner: *"Waiting for peer to come online. Messages will be queued once connected."* Composer is disabled until handshake completes.
+  * `ChatDraftStateService`: Switching between chats or Left Rail modes preserves unsent message drafts, scroll positions, and attachment lists in volatile RAM without database writes.
+  * `GroupCreationDialog`: Group creation UI restricted to members sharing a common relay. Orchestrates pairwise relay invitations and awaits peer join confirmations before dispatching Groups V2 ZK invitations.
+  * Disappearing Messages: Messages with `ExpiresAtUtc` render countdown indicator; reaper timer updates tombstones (*"This message was deleted"*) upon expiration.
 * **Verification Gate**:
   * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~Chat|FullyQualifiedName~Scope"`
-  * Typing an unsent message in Chat A, switching to Chat B, and returning restores draft text and scroll position. Opening 6 consecutive chats evicts the 1st chat's `IServiceScope`. 50ms debounced reload drops redundant query invocations. Disappearing message timer expiration triggers tombstone update.
+  * Verifies draft restoration on chat switch; 50ms debounced SQLite reload; pending banner behavior; disappearing message tombstone transitions.
 
 ---
 
-### [DESK-07] Sovereign Peer Discovery & Swarm Telemetry
-* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE` (Desktop UI presentation layer for discovery telemetry)
-* **Detailed Design**: `INV-DESKTOP-THREAD-DISCIPLINE`, `INV-DESKTOP-PRESENTATION-MODELS`
-* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-003]`, `[CB-001]`, `[CB-003]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-004]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[R3-002]`, `[R3-004]`, `[R3-005]`, `[R3-007]`, `[R3-009]`, `[R3-010]`
+### [DESK-08] Right-Anchored Profile & Connection Inspector Drawer
+* **QMS Traceability**: `DEP-DESKTOP-OUT-OF-BAND-VERIFICATION` (allocates `SYS-OUT-OF-BAND-SECURITY-CODE`), `DEP-DESKTOP-KEY-CHANGE-WARNING` (allocates `SYS-KEY-CHANGE-TRUST-HALT`), `DEP-DESKTOP-PEER-BLOCK-UI-SILENCE` (allocates `SYS-PEER-BLOCK-SILENT-DROP`)
+* **Detailed Design**: `INV-DESKTOP-PRESENTATION-MODELS`, `INV-DESKTOP-THREAD-DISCIPLINE`
+* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-003]`, `[CB-001]`, `[CB-004]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-010]`, `[VM-014]`, `[R3-002]`, `[R3-004]`, `[R3-005]`
 * **Target Deliverables**:
-  * Create: `Features/Discovery/Models/DiscoveredPeerModel.cs` (`PeerId`, `DisplayName`, `Endpoint`, `NatTraversalStatus` [`DirectPublic`, `StunTraversed`, `RelayedOnly`], `RoundtripLatencyMs`, `DiscoveredViaRelayId`, `DiscoveredAtUtc`)
-  * Create: `Features/Discovery/Models/BlindedRendezvousModel.cs` (`CurrentEpochNumber`, `BlindedLocatorHex`, `NextEpochTransitionUtc`, `MatchedContactsCount`)
-  * Create: `Features/Discovery/Models/SwarmTelemetryModel.cs` (`ActivePeersCount`, `KnownRelaysCount`, `AverageLatencyMs`, `BandwidthInBps`, `BandwidthOutBps`)
-  * Create: `Features/Discovery/Services/IDiscoveryStateService.cs` & `Features/Discovery/Services/DiscoveryStateService.cs`
+  * Create: `Features/Inspector/Models/PeerProfileInspectorModel.cs`, `RelayInspectorModel.cs`
+  * Create: `Features/Inspector/Views/ProfileInspectorView.axaml` & `Features/Inspector/Views/ProfileInspectorView.axaml.cs`
+  * Create: `Features/Inspector/ViewModels/ProfileInspectorViewModel.cs`
+  * Modify: `Features/Shell/Views/MainWindow.axaml` (bind inspector `SplitView.Pane` to `ProfileInspectorView`)
+* **Acceptance Criteria**:
+  * $300\text{ px}$ slide-over inspector drawer toggled via chat header, context menu, or keyboard shortcut (`Ctrl+I`).
+  * Direct Peer Inspector Variant:
+    * Profile summary: large avatar/identicon, remote display name, copyable truncated Identity ID.
+    * Disappearing Messages timer selector (*Off, 30s, 5m, 1h, 1d, 1w, 4w*).
+    * Notification mute toggle presets (*1h, 8h, 1d, 7d, Always*).
+    * Contextual Safety Numbers panel: Hidden by default; visible only when handshake is unverified or an Identity Key Change Alert is triggered; displays 60-digit fingerprint with *"Mark as Verified"* toggle.
+    * Route Telemetry: Clean route pill (Direct LAN, STUN, or Relayed via Relay Name) and live roundtrip ping.
+    * Contact Actions: *"Clear Chat History"* and *"Block Contact"* (`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`).
+  * Relay Inspector Variant: Relay URI, connection status, latency, hosted mailboxes, and member roster.
+* **Verification Gate**:
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~Inspector"`
+  * Verifies safety numbers hidden by default and displayed on key change; route telemetry reflects direct vs relayed path; blocking contact destroys session and removes conversation.
+
+---
+
+### [DESK-09] Sovereign Peer Discovery & Swarm Telemetry (Apps.Discovery)
+* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE` (Desktop presentation layer for discovery telemetry), `DEP-DESKTOP-PRE-ACTIVATION-STEALTH`
+* **Detailed Design**: `INV-DESKTOP-THREAD-DISCIPLINE`, `INV-DESKTOP-PRESENTATION-MODELS`
+* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-003]`, `[CB-001]`, `[CB-003]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-004]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[R3-002]`, `[R3-004]`, `[R3-005]`, `[R3-007]`, `[R3-010]`
+* **Target Deliverables**:
+  * Create: `Features/Discovery/Models/DiscoveredPeerModel.cs`, `BlindedRendezvousModel.cs`, `SwarmTelemetryModel.cs`
+  * Create: `Features/Discovery/Services/IDiscoveryStateService.cs` & `DiscoveryStateService.cs`
   * Create: `Features/Discovery/Views/DiscoveryView.axaml` & `Features/Discovery/Views/DiscoveryView.axaml.cs`
   * Create: `Features/Discovery/ViewModels/DiscoveryViewModel.cs`, `DiscoveredPeerItemViewModel.cs`
 * **Acceptance Criteria**:
-  * `DiscoveryStateService`: Bridges `INearbyPeerDiscoveryWorkflow`, `IPrivateRendezvousService`, and `IRelayPeerDirectory`. Throttles candidate event stream using `.Sample(TimeSpan.FromMilliseconds(16), _timeProvider)` to protect the UI thread from high-frequency candidate packet bursts.
-  * `DiscoveryView`: Candidate peer cards with public key preview, avatar hash, NAT status badge, and latency meter. One-click *"Connect / Handshake"* action triggering on-demand prekey retrieval and X3DH handshake. Blinded Rendezvous Panel: 24-hr UTC epoch countdown timer and matched sovereign contacts count. Sovereign Relay Selection dropdown allowing users to select which relay directory to query.
+  * `DiscoveryStateService`: Bridges `INearbyPeerDiscoveryWorkflow`, `IPrivateRendezvousService`, and `IRelayPeerDirectory`. Samples high-frequency discovery candidate bursts via `.Sample(TimeSpan.FromMilliseconds(16), _timeProvider)` to guarantee 60fps UI performance without thread-pool starvation.
+  * `DiscoveryView`: Candidate peer cards with public key preview, NAT traversal status badge (DirectPublic, StunTraversed, RelayedOnly), roundtrip latency, and one-click *"Connect"* initiating X3DH handshake. Blinded Rendezvous 24-hr UTC epoch countdown timer and matched contacts count.
 * **Verification Gate**:
   * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~Discovery"`
-  * High-frequency discovery stream (100 candidates/sec) is sampled down to 60fps without freezing UI thread. Clicking "Connect" initiates handshake. Latency meter updates reactively via `BindableReactiveProperty`.
+  * Verifies high-frequency packet sampling; clicking Connect triggers handshake; epoch timer updates reactively.
 
 ---
 
-### [DESK-08] High-Performance Swarm File Transfer Dashboard & In-Chat Cards
+### [DESK-10] Swarm File Transfer Dashboard & In-Chat PieceMap Canvas (Apps.FileTransfer)
 * **QMS Traceability**: `DEP-DESKTOP-MEDIA-METADATA-SANITIZATION-INGRESS` (allocates `SYS-MEDIA-METADATA-SANITIZATION-INGRESS`)
 * **Detailed Design**: `DEC-DIRECT-CANVAS-BITFIELD`, `INV-DESKTOP-THREAD-DISCIPLINE`
 * **Governing Specs**: `[STYLE-003]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-006]`, `[CB-001]`, `[CB-006]`, `[CB-008]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-004]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[R3-002]`, `[R3-004]`, `[R3-005]`, `[R3-007]`, `[R3-012]`
 * **Target Deliverables**:
-  * Create: `Features/FileTransfer/Models/FileTransferTaskModel.cs` (`TransferId`, `FileName`, `TotalSizeBytes`, `TransferredSizeBytes`, `TransferProgress` [$0.0 \dots 1.0$], `TransferSpeedBps`, `EtaTimeSpan`, `SwarmPeersCount`, `Direction` [`Download`, `Upload`], `Status` [`Queued`, `Transferring`, `Verifying`, `Paused`, `Completed`, `Failed`, `Canceled`])
-  * Create: `Features/FileTransfer/Models/TransferBitfieldSnapshot.cs` (immutable snapshot of piece bitfield array)
-  * Create: `Features/FileTransfer/Services/IFileTransferStateService.cs` & `Features/FileTransfer/Services/FileTransferStateService.cs`
-  * Create: `Features/FileTransfer/Controls/PieceMapControl.axaml` & `Features/FileTransfer/Controls/PieceMapControl.axaml.cs`
+  * Create: `Features/FileTransfer/Models/FileTransferTaskModel.cs`, `TransferBitfieldSnapshot.cs`
+  * Create: `Features/FileTransfer/Services/IFileTransferStateService.cs` & `FileTransferStateService.cs`
+  * Create: `Features/FileTransfer/Controls/PieceMapControl.axaml` & `PieceMapControl.axaml.cs` (direct `DrawingContext` bitfield rendering)
   * Create: `Features/FileTransfer/Views/FileTransferView.axaml` & `Features/FileTransfer/Views/FileTransferView.axaml.cs`
   * Create: `Features/FileTransfer/ViewModels/FileTransferViewModel.cs`, `TransferTaskItemViewModel.cs`
 * **Acceptance Criteria**:
-  * `FileTransferStateService`: Bridges `IFileTransferQueryService`, `ITransferSessionRepository`, and `DiskChunkAssembler`. Exposes `ObservableList<FileTransferTaskModel> ActiveTransfers` and `ObservableList<FileTransferTaskModel> CompletedTransfers`. Rate-samples progress updates via `.Sample(TimeSpan.FromMilliseconds(50), _timeProvider)`.
-  * `PieceMapControl`: Custom Avalonia control rendering a graphical bitfield piece grid directly on an Avalonia `DrawingContext`. Visual states: Empty cell (missing), Accent fill (downloaded & verified), Pulse amber (in-flight request). Handles 10,000+ pieces efficiently via direct rectangle drawing operations without creating individual XAML visual elements. Reusable in both full dashboard and in-chat transfer cards.
-  * `FileTransferView`: Active transfers list with file icon, transfer speed meter (KB/s, MB/s), ETA timer, and swarm peer count badge. Actions: Pause, Resume, Cancel, Open Containing Folder. Drag-and-drop target supporting Avalonia `DragDrop.DropEvent`. File picker button integrated with Avalonia `TopLevel.StorageProvider`.
-  * Integration with `IDesktopFileStorage` (`PortableDesktopFileStore`): Immediate zero-byte file allocation upon transfer acceptance, `.percolator-part` staging, and safe atomic rename on verification completion. Path sanitization enforcing zero Win32 reserved device names (`CON`, `PRN`, `AUX`, `NUL`), zero NTFS alternate data streams (`:`), and Unicode Form C normalization.
+  * `PieceMapControl`: Direct graphical rendering of piece bitfields onto an Avalonia `DrawingContext` (zero individual visual element allocations), rendering 10,000+ pieces with $< 1\text{ ms}$ layout pass. Visual states: Missing (surface), Downloaded/Verified (accent), In-Flight (amber pulse). Reusable in full dashboard and in-chat transfer cards.
+  * `FileTransferStateService`: Bridges `IFileTransferQueryService` and `DiskChunkAssembler`. Exposes active and completed transfers, sampled every $50\text{ ms}$.
+  * File storage containment: Zero-byte allocation upon transfer start, `.percolator-part` staging, and atomic rename upon verification completion. Enforces Win32 reserved name and Unicode Form C path sanitization.
 * **Verification Gate**:
   * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~FileTransfer"`
-  * Dropping a 50 MB file creates transfer manifest and stages upload. Inbound transfer renders `PieceMapControl` smoothly as chunks arrive without element inflation. Completed transfers rename `.percolator-part` staging files to target file names atomically.
+  * Verifies bitfield canvas rendering; drag-and-drop file staging; atomic rename on completion.
 
 ---
 
-### [DESK-09] Timeline Cards & PluginSdk Integration
-* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE` (Desktop UI presentation layer for plugin sinks)
+### [DESK-11] Timeline Cards & PluginSdk Integration (PluginSdk)
+* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE` (Desktop presentation layer for plugin sinks)
 * **Detailed Design**: `INV-DESKTOP-PRESENTATION-MODELS`, `INV-DESKTOP-THREAD-DISCIPLINE`
 * **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-003]`, `[CB-001]`, `[CB-003]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-004]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[R3-002]`, `[R3-004]`, `[R3-005]`, `[R3-013]`
 * **Target Deliverables**:
-  * Create: `Features/Timeline/Models/TimelineCardModel.cs` (`CardId`, `SourceAppId`, `Title`, `SummaryText`, `IconGlyph`, `TimestampUtc`, `Metadata` [`IReadOnlyDictionary<string, string>`], `Actions` [`ObservableList<TimelineActionModel>`])
-  * Create: `Features/Timeline/Models/TimelineActionModel.cs` (`ActionId`, `ButtonText`, `CustomPayload`, `IsDestructive`, `Command`)
-  * Create: `Features/Timeline/Services/ITimelineCardStateService.cs` & `Features/Timeline/Services/TimelineCardStateService.cs`
-  * Create: `Features/Timeline/Services/DesktopTimelinePostSink.cs` (implements `Percolator.PluginSdk.ITimelinePostSink`)
-  * Create: `Features/Timeline/Services/DesktopPluginActionHandler.cs` (implements `Percolator.PluginSdk.IPluginActionHandler`)
+  * Create: `Features/Timeline/Models/TimelineCardModel.cs`, `TimelineActionModel.cs`
+  * Create: `Features/Timeline/Services/ITimelineCardStateService.cs` & `TimelineCardStateService.cs`
+  * Create: `Features/Timeline/Services/DesktopTimelinePostSink.cs` (implements `ITimelinePostSink`)
+  * Create: `Features/Timeline/Services/DesktopPluginActionHandler.cs` (implements `IPluginActionHandler`)
   * Create: `Features/Timeline/Views/TimelineView.axaml` & `Features/Timeline/Views/TimelineView.axaml.cs`
   * Create: `Features/Timeline/ViewModels/TimelineViewModel.cs`, `TimelineCardViewModel.cs`
 * **Acceptance Criteria**:
-  * `TimelineCardStateService`: Manages active timeline cards posted by plugins. Exposes `ObservableList<TimelineCardModel> Cards`. Concurrency-guarded methods for adding, updating, and dismissing cards.
-  * Concrete Desktop Adapters for `Percolator.PluginSdk`:
-    * `DesktopTimelinePostSink`: `PublishCardAsync` (translates DTO to `TimelineCardModel` and pushes to state service), `UpdateCardStatusAsync` (updates existing card reactively), `RemoveCardAsync` (dismisses card).
-    * `DesktopPluginActionHandlerDispatcher`: Dispatches card action button clicks back to target plugin's registered action handler with custom payload.
-  * `TimelineView`: Feed of interactive cards with header, source app icon, summary text, metadata chips, and action buttons. Dismiss button removing card from view and invoking `ITimelinePostSink.RemoveCardAsync`.
+  * `TimelineCardStateService`: Concurrency-guarded state service managing interactive plugin cards.
+  * Adapters for `PluginSdk`: `PublishCardAsync`, `UpdateCardStatusAsync`, `RemoveCardAsync`, and action click dispatching to target plugins.
+  * `TimelineView`: Interactive card feed with metadata chips, dismiss gestures, and action buttons.
 * **Verification Gate**:
   * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~Timeline"`
-  * Calling `PublishCardAsync` displays card. Clicking card action button executes command and invokes `HandleActionAsync`. Dismissing a card removes it from the UI and invokes `RemoveCardAsync` cleanly.
+  * Verifies card publishing, reactive status updates, and action dispatching.
 
 ---
 
-### [DESK-10] Desktop System Integration, Native Notifications & Quick-Switcher
+### [DESK-12] Desktop System Integration, Native Notifications & Quick-Switcher (Ctrl+K)
 * **QMS Traceability**: `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION` (allocates `SYS-SESSION-LOCK-ZEROIZATION`), `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`)
 * **Detailed Design**: `DEC-PULL-BASED-CONSENT-STAGING`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`
 * **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VIEW-001]`, `[VIEW-004]`, `[VIEW-009]`, `[CB-001]`, `[CB-004]`, `[CB-008]`, `[CB-009]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-010]`, `[R3-004]`, `[R3-006]`
@@ -429,52 +394,30 @@ flowchart TD
   * Create: `Features/Shell/Models/QuickSwitcherItemModel.cs`
   * Create: `Features/Shell/Views/QuickSwitcherDialog.axaml` & `Features/Shell/Views/QuickSwitcherDialog.axaml.cs`
   * Create: `Features/Shell/ViewModels/QuickSwitcherViewModel.cs`
-  * Modify: `App.axaml` (cross-platform system tray icon configuration `TrayIcon`)
+  * Modify: `App.axaml` (system tray `TrayIcon` configuration)
   * Create: `Common/Services/PlatformNotificationBridge.cs` (`IPlatformNotificationBridge`)
 * **Acceptance Criteria**:
-  * Global Quick-Switcher (`Ctrl+K` / `Ctrl+P`): Centered modal Command Palette (`QuickSwitcherDialog.axaml`). Fuzzy-search navigation across direct peers, relays, group chats, and commands (*"Add Connection"*, *"Lock Session"*). Selecting an item switches transport and conversation focus immediately.
-  * System Tray Integration (`TrayIcon`): Cross-platform system tray icon configured in `App.axaml`. Context menu: *"Open Percolator"*, *"Lock Session (Stealth)"*, *"Exit"*. Minimize-to-tray on close when enabled in settings.
-  * Desktop Notifications Bridge: Cross-platform in-app notification toasts (`FluentAvalonia.UI.Controls.InfoBar` banner). Platform bridge: WinRT Toast notifications on Windows, D-Bus notifications on Linux, Notification Center on macOS. **Inbound Handshake Silence Invariant Enforcement**: Inbound unsolicited handshakes never fire OS toasts or audio. Only messages in established chats or system security alerts trigger toasts.
-  * Window State Preservation: Persist window position, width, height, and maximized state across restarts via `IShellWindowGeometryStore` (Stage-2 facade over `IVaultSettingsStore`, `VaultSettingKeys.ShellWindowGeometry` app-setting).
+  * Global Quick-Switcher (`Ctrl+K` / `Ctrl+P`): Centered modal Command Palette with fuzzy searching across relays, direct P2P chats, relayed channels, and quick commands (*"Add Connection"*, *"Lock Session"*). Selecting an item navigates immediately via `ShellNavigationStateService`.
+  * System Tray Integration: Menu with *"Open Percolator"*, *"Lock Session (Stealth)"*, and *"Exit"*. Optional minimize-to-tray on window close.
+  * Native Notifications: Cross-platform toasts (WinRT on Windows, D-Bus on Linux, Notification Center on macOS) and in-app banners. Strictly enforces inbound handshake silence: only messages in established chats fire toasts.
+  * Window Geometry: Restores window bounds, position, and maximized state across sessions via `IShellWindowGeometryStore`.
 * **Verification Gate**:
-  * Pressing `Ctrl+K` opens Quick-Switcher; fuzzy searching a peer and hitting Enter navigates directly to that conversation.
-  * Closing window with "Minimize to tray" enabled hides window to notification area without terminating background services.
-  * Inbound chat message triggers OS notification toast when window is not focused; inbound unsolicited handshake remains silent.
+  * Pressing `Ctrl+K` opens Quick-Switcher; selecting item navigates shell; closing with tray active minimizes silently; inbound chat triggers notification while unsolicited handshake remains silent.
 
 ---
 
-### [DESK-11] Headless UI & Concurrency Verification Test Suite
-* **QMS Traceability**: Software Item Verification (IEC 62304 Clause 5.7 / FDA 21 CFR 820.30(f)), verifying `DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `DEP-DESKTOP-STARTUP-VAULT-AUTHENTICATION`, `DEP-DESKTOP-SESSION-LOCK-ZEROIZATION`, `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`, `DEP-DESKTOP-VOLATILE-DRAFT-ISOLATION`, `DEP-DESKTOP-MEDIA-METADATA-SANITIZATION-INGRESS`
-* **Detailed Design**: Verifies `INV-DESKTOP-TWO-STAGE-HANDOFF`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `INV-DESKTOP-PRESENTATION-MODELS`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`, `DEC-DEBOUNCED-DROP-RELOAD`, `DEC-LRU-SESSION-SCOPES`, `DEC-DIRECT-CANVAS-BITFIELD`, `DEC-REACTIVE-EVENT-BUS-BRIDGE`, `DEC-CANARY-ERROR26-UNWRAP`, `DEC-PULL-BASED-CONSENT-STAGING`
-* **Governing Specs**: `[VM-008]`, `[VM-016]`, `[R3-009]`, `[CB-010]`
+### [DESK-13] Headless UI & Comprehensive Verification Test Suite
+* **QMS Traceability**: Software Item Verification (IEC 62304 Clause 5.7 / FDA 21 CFR 820.30(f))
+* **Detailed Design**: Verifies `INV-DESKTOP-TWO-STAGE-HANDOFF`, `INV-DESKTOP-STEALTH-ACTIVATION-GATE`, `INV-DESKTOP-PRESENTATION-MODELS`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`, `DEC-DEBOUNCED-DROP-RELOAD`, `DEC-LRU-SESSION-SCOPES`, `DEC-DIRECT-CANVAS-BITFIELD`
+* **Governing Specs**: `[VM-008]`, `[VM-010]`, `[VM-011]`, `[VM-012]`, `[VM-019]`, `[R3-009]`, `[CB-010]`
 * **Target Deliverables**:
-  * Scaffold / Enhance: `Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj` (Packages: `Avalonia.Headless.XUnit`, `Microsoft.NET.Test.Sdk`, `xunit`, `FluentAssertions`, `NSubstitute`, `R3`; headless test bootstrap: `[assembly: AvaloniaTestApplication(typeof(TestAppBuilder))]`)
-  * Create: `Percolator.Desktop.Tests/VaultGateTests.cs`
-  * Create: `Percolator.Desktop.Tests/WindowHandoffTests.cs`
-  * Create: `Percolator.Desktop.Tests/StealthModeTests.cs`
-  * Create: `Percolator.Desktop.Tests/SessionScopeFactoryTests.cs`
-  * Create: `Percolator.Desktop.Tests/ChatReloadCoordinatorTests.cs`
-  * Create: `Percolator.Desktop.Tests/ChatDraftStateServiceTests.cs`
-  * Create: `Percolator.Desktop.Tests/PieceMapControlTests.cs`
+  * Enhance: `Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj`
+  * Create: Comprehensive test suites across `VaultGateTests.cs`, `WindowHandoffTests.cs`, `RailNavigationTests.cs`, `ConversationStateTests.cs`, `OutboundRetryTests.cs`, `PieceMapControlTests.cs`.
 * **Acceptance Criteria**:
-  * Vault Gate & Two-Stage Lifecycle Headless Tests:
-    * Test `VaultSetupViewModel`: Assert `DetermineStatusAsync` returning `DatabaseSetupStatus.Uninitialized` presents setup view; assert empty password prompts confirmation dialog alert; assert duress password matching master password fails validation; assert successful initialization calls `IWindowHandoffCoordinator.TransitionToGateAsync`.
-    * Test `VaultUnlockViewModel`: Assert `DetermineStatusAsync` returning `DatabaseSetupStatus.Locked` presents unlock view; assert invalid passphrase sets inline error message without crashing; assert valid passphrase calls `TransitionToGateAsync` (or `TransitionToMainShellAsync` if auto-start enabled); assert duress passphrase triggers decoy initialization and transitions into empty vault state without error popups.
-    * Test `WindowHandoffCoordinator`: Assert `TransitionToMainShellAsync` starts hosted services, opens `MainWindow`, and closes `StartupWindow`; assert `LockSessionAsync` awaits `coordinator.LockAsync()`, closes `MainWindow`, and opens fresh `StartupWindow`.
-  * Stealth Mode & Network Gate Verification Tests:
-    * Assert zero network sockets are initialized upon test app startup. Sockets bind only after `IdentityGateViewModel.LaunchPersonasCommand.Execute()`. Locking session triggers `INetworkStealthGate.DeactivateAsync()`.
-  * `SessionScopeFactory` LRU Cache Tests:
-    * Simulate opening 6 consecutive chat sessions; verify the first session's `IServiceScope` is disposed and hot memory contains exactly 5 scopes.
-  * `ChatReloadCoordinator` Debounce & Drop Tests:
-    * Using `FakeTimeProvider`, simulate 100 rapid reload triggers in 10ms; assert database read service is invoked exactly once after 50ms advance.
-  * `ChatDraftStateService` Volatile Caching Tests:
-    * Verify draft text and attachment lists persist across conversation switches without touching SQLite.
-  * Synchronized View Projection & Disposal Tests:
-    * Verify `ObserveRemove` triggers `Dispose()` on projected ViewModel when item is removed from `ObservableList`.
-  * Canvas Piece Map Bitfield Tests:
-    * Verify bitfield state array calculation and direct canvas drawing performance for 10,000+ pieces.
+  * 100% automated test verification without `Task.Delay` or brittle interaction mocking (`[VM-010]`, `[VM-011]`).
+  * End-to-end verification of Flows A, B, and C across in-memory fixtures.
 * **Verification Gate**:
-  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj` executes cleanly in $< 5\text{ seconds}$ with 100% passing tests and zero cross-thread exceptions.
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj` executes cleanly in $< 5\text{ seconds}$ with 100% passing tests and zero warnings.
 
 ---
 
@@ -487,35 +430,30 @@ This matrix maps all infrastructure ports and desktop adapters across their owni
 | `IDatabaseUnlockCoordinator` | Application Ports | `SqlCipherDatabaseUnlockCoordinator` (Infrastructure) | Chunk 2 (`[DESK-02]`) |
 | `IAuthenticatedSession` | Application Ports | `AuthenticatedSession` (Infrastructure) | Chunk 4 (`[DESK-04]`) |
 | `IWindowHandoffCoordinator` | Desktop Windowing | `WindowHandoffCoordinator` | Chunk 4 (`[DESK-04]`) |
-| `INavigationService` | Desktop Shell | `NavigationService` | Chunk 1 (`[DESK-01]`) |
-| `IWindowManager` | Desktop Shell | `WindowManager` | Chunk 1 (`[DESK-01]`) |
-| `INetworkStealthGate` | Desktop Core | `NetworkStealthGate` | Chunk 3 (`[DESK-03]`) |
-| `IPortReservationService` | Desktop Core | `PortReservationService` | Chunk 3 (`[DESK-03]`) |
-| `IDesktopSettingsRepository`| Desktop Storage | `VaultDesktopSettingsRepository` (Stage-2) | Chunk 3 (`[DESK-03]`) |
-| `IVaultSettingsStore` | Application Ports | `SqliteVaultSettingsStore` (Stage-2) | Chunk 3 (`[DESK-03]`) |
-| `IShellWindowGeometryStore` | Desktop Windowing | `VaultShellWindowGeometryStore` (Stage-2) | Chunk 4 (`[DESK-04]`) |
-| `IIdentityProfileRepository` | Domain Identities | `SqliteIdentityProfileRepository` (session scope) | Chunk 3 (`[DESK-03]`) |
-| `ILocalIdentityKeyStore` | Domain Identities | `SqliteLocalIdentityKeyStore` (session scope) | Chunk 3 (`[DESK-03]`) |
-| `IPeerConnectionStateService` | Desktop Transports | `PeerConnectionStateService` | Chunk 5 (`[DESK-05]`) |
-| `IPeerContactQueryService` | Application Delivery | `SqlPeerContactQueryService` (Infrastructure) | Chunk 5 (`[DESK-05]`) |
-| `IPendingHandshakeRepository`| Domain Delivery | `SqlitePendingHandshakeRepository` | Chunk 5 (`[DESK-05]`) |
-| `IHandshakeService` | Application Handshake| `HandshakeService` | Chunk 5 (`[DESK-05]`) |
-| `IChatStateService` | Desktop Chats | `ChatStateService` | Chunk 6 (`[DESK-06]`) |
-| `IChatDraftStateService` | Desktop Chats | `ChatDraftStateService` | Chunk 6 (`[DESK-06]`) |
-| `IChatService` | Apps Chat | `ChatService` | Chunk 6 (`[DESK-06]`) |
-| `IChatMessageQueryService` | Apps Chat | `SqlChatMessageQueryService` (Infrastructure) | Chunk 6 (`[DESK-06]`) |
-| `IConversationListQueryService`| Apps Chat | `SqlConversationListQueryService` (Infrastructure)| Chunk 6 (`[DESK-06]`) |
-| `IDiscoveryStateService` | Desktop Discovery | `DiscoveryStateService` | Chunk 7 (`[DESK-07]`) |
-| `INearbyPeerDiscoveryWorkflow` | Apps Discovery | `NearbyPeerDiscoveryWorkflow` | Chunk 7 (`[DESK-07]`) |
-| `IPrivateRendezvousService` | Apps Discovery | `PrivateRendezvousService` | Chunk 7 (`[DESK-07]`) |
-| `IRelayPeerDirectory` | Apps Discovery | `SqliteRelayPeerDirectory` (Infrastructure) | Chunk 7 (`[DESK-07]`) |
-| `IFileTransferStateService` | Desktop FileTransfer| `FileTransferStateService` | Chunk 8 (`[DESK-08]`) |
-| `IFileTransferQueryService` | Apps FileTransfer | `FileTransferQueryService` | Chunk 8 (`[DESK-08]`) |
-| `ITransferSessionRepository` | Apps FileTransfer | `SqliteTransferSessionRepository` (Infrastructure)| Chunk 8 (`[DESK-08]`) |
-| `IDesktopFileStorage` | Apps FileTransfer | `PortableDesktopFileStore` (Infrastructure) | Chunk 8 (`[DESK-08]`) |
-| `ITimelineCardStateService` | Desktop Timeline | `TimelineCardStateService` | Chunk 9 (`[DESK-09]`) |
-| `ITimelinePostSink` | PluginSdk | `DesktopTimelinePostSink` | Chunk 9 (`[DESK-09]`) |
-| `IPluginActionHandler` | PluginSdk | `DesktopPluginActionHandlerDispatcher` | Chunk 9 (`[DESK-09]`) |
+| `IShellNavigationStateService` | Desktop Navigation | `ShellNavigationStateService` | Chunk 5 (`[DESK-05]`) |
+| `IRelayStateService` | Desktop Transports | `RelayStateService` | Chunk 5 (`[DESK-05]`) |
+| `IInboundRequestStateService` | Desktop Transports | `InboundRequestStateService` | Chunk 5 (`[DESK-05]`) |
+| `IConversationStateService` | Desktop Chats | `ConversationStateService` | Chunk 6 (`[DESK-06]`) |
+| `IOutboundPendingRetryWorker` | Desktop Transports | `OutboundPendingRetryWorker` | Chunk 6 (`[DESK-06]`) |
+| `IPeerContactQueryService` | Application Delivery | `SqlPeerContactQueryService` (Infrastructure) | Chunk 6 (`[DESK-06]`) |
+| `IPendingHandshakeRepository`| Domain Delivery | `SqlitePendingHandshakeRepository` | Chunk 6 (`[DESK-06]`) |
+| `IChatDraftStateService` | Desktop Chats | `ChatDraftStateService` | Chunk 7 (`[DESK-07]`) |
+| `IChatService` | Apps Chat | `ChatService` | Chunk 7 (`[DESK-07]`) |
+| `IChatMessageQueryService` | Apps Chat | `SqlChatMessageQueryService` (Infrastructure) | Chunk 7 (`[DESK-07]`) |
+| `IConversationListQueryService`| Apps Chat | `SqlConversationListQueryService` (Infrastructure)| Chunk 7 (`[DESK-07]`) |
+| `IDiscoveryStateService` | Desktop Discovery | `DiscoveryStateService` | Chunk 9 (`[DESK-09]`) |
+| `INearbyPeerDiscoveryWorkflow` | Apps Discovery | `NearbyPeerDiscoveryWorkflow` | Chunk 9 (`[DESK-09]`) |
+| `IPrivateRendezvousService` | Apps Discovery | `PrivateRendezvousService` | Chunk 9 (`[DESK-09]`) |
+| `IRelayPeerDirectory` | Apps Discovery | `SqliteRelayPeerDirectory` (Infrastructure) | Chunk 9 (`[DESK-09]`) |
+| `IFileTransferStateService` | Desktop FileTransfer| `FileTransferStateService` | Chunk 10 (`[DESK-10]`) |
+| `IFileTransferQueryService` | Apps FileTransfer | `FileTransferQueryService` | Chunk 10 (`[DESK-10]`) |
+| `ITransferSessionRepository` | Apps FileTransfer | `SqliteTransferSessionRepository` (Infrastructure)| Chunk 10 (`[DESK-10]`) |
+| `IDesktopFileStorage` | Apps FileTransfer | `PortableDesktopFileStore` (Infrastructure) | Chunk 10 (`[DESK-10]`) |
+| `ITimelineCardStateService` | Desktop Timeline | `TimelineCardStateService` | Chunk 11 (`[DESK-11]`) |
+| `ITimelinePostSink` | PluginSdk | `DesktopTimelinePostSink` | Chunk 11 (`[DESK-11]`) |
+| `IPluginActionHandler` | PluginSdk | `DesktopPluginActionHandlerDispatcher` | Chunk 11 (`[DESK-11]`) |
+| `IPlatformNotificationBridge` | Desktop Common | `PlatformNotificationBridge` | Chunk 12 (`[DESK-12]`) |
+| `IShellWindowGeometryStore` | Desktop Windowing | `VaultShellWindowGeometryStore` (Stage-2) | Chunk 12 (`[DESK-12]`) |
 | `IDateTimeProvider` | Domain Common | `SystemDateTimeProvider` | Chunk 1 (`[DESK-01]`) |
 
 ---
