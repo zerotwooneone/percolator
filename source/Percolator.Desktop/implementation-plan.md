@@ -163,7 +163,7 @@ flowchart TD
     end
 
     subgraph Phase 2: Transports, Navigation & Messaging (Discord Model)
-        C5["[DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1)"]
+        C5["[DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1) (Completed)"]
         C6["[DESK-06] Direct P2P & Relayed Conversation Directory with Outbound Pending (Flows B & C Phase 2)"]
         C7["[DESK-07] Real-Time Messaging Experience, Volatile Drafts & Disappearing Messages (Apps.Chat)"]
         C8["[DESK-08] Right-Anchored Profile & Connection Inspector Drawer"]
@@ -202,7 +202,7 @@ flowchart TD
 
 ---
 
-### [DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1)
+### [DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1) (COMPLETED)
 * **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE`, `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`, `SYS-DIRECT-CONTACT-REQUEST-OUTBOX`)
 * **Detailed Design**: `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`, `DEC-PULL-BASED-CONSENT-STAGING`
 * **Governing Specs**: `[UISS-001]` to `[UISS-010]`, `[STYLE-002]`, `[STYLE-005]`, `[VIEW-001]`, `[VIEW-002]`, `[CB-001]`, `[CB-004]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-006]`, `[VM-017]`, `[VM-018]`, `[VM-019]`, `[R3-001]` to `[R3-014]`

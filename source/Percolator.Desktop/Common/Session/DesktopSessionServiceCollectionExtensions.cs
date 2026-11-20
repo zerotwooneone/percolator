@@ -10,6 +10,7 @@ using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.FileTransfer;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Desktop.Common.Navigation;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Storage;
 using Percolator.Desktop.Common.Windowing;
@@ -51,6 +52,12 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
         services.AddSingleton<ICurrentPersonaService, CurrentPersonaService>();
 
+        // Navigation and Left Rail state services (DESK-05)
+        services.AddSingleton<IShellNavigationStateService, ShellNavigationStateService>();
+        services.AddSingleton<IRelayStateService, RelayStateService>();
+        services.AddSingleton<IInboundRequestStateService, InboundRequestStateService>();
+        services.AddTransient<TransportsSidebarViewModel>();
+
         // Outbound pending connection retry and state services (CONN-08)
         services.AddSingleton<IPeerConnectionService, DesktopPeerConnectionService>();
         services.AddSingleton<OutboundPendingRetryWorker>();
@@ -58,13 +65,16 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<OutboundPendingRetryWorker>());
         services.AddSingleton<IPeerConnectionStateService, PeerConnectionStateService>();
         services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
+        services.AddScoped<InboundConnectionWorkflow>();
+        services.AddSingleton<IInboundConnectionWorkflow, DesktopInboundConnectionWorkflow>();
 
         // Inbound contact query service singleton facade (CONN-11)
         services.AddScoped<SqlPeerContactQueryService>();
         services.AddSingleton<IPeerContactQueryService, DesktopPeerContactQueryService>();
 
         // Persona relay query service (CONN-12d)
-        services.AddScoped<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
+        services.AddScoped<SqlPersonaRelayQueryService>();
+        services.AddSingleton<IPersonaRelayQueryService, DesktopPersonaRelayQueryService>();
 
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as

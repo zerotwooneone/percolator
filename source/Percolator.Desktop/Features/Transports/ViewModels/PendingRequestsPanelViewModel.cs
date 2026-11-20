@@ -1,20 +1,17 @@
 // SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
 
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
-using Percolator.Application.Ports;
-using Percolator.Application.Profiles;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Transports.Models;
+using Percolator.Desktop.Features.Transports.Services;
 using Percolator.Desktop.ViewModels;
 using Percolator.Domain.Identities;
-using Percolator.Domain.Identities.Model;
 using R3;
 
 namespace Percolator.Desktop.Features.Transports.ViewModels;
@@ -27,38 +24,27 @@ namespace Percolator.Desktop.Features.Transports.ViewModels;
 public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
 {
     private readonly IDialogContext<PublicIdentityId> _dialogContext;
-    private readonly IPeerContactQueryService _contactQueryService;
-    private readonly IHandshakeService _handshakeService;
-    private readonly IContactRequestCoordinator _contactCoordinator;
-    private readonly IPendingHandshakeRepository _pendingHandshakeRepo;
+    private readonly IInboundRequestStateService _inboundRequestService;
     private readonly ILogger<PendingRequestsPanelViewModel> _logger;
 
-    private readonly ObservableList<InboundPendingRequestModel> _requestsList = new();
     private PublicIdentityId? _activePersonaId;
 
     public PendingRequestsPanelViewModel(
         IDialogContext<PublicIdentityId> dialogContext,
-        IPeerContactQueryService contactQueryService,
-        IHandshakeService handshakeService,
-        IContactRequestCoordinator contactCoordinator,
-        IPendingHandshakeRepository pendingHandshakeRepo,
+        IInboundRequestStateService inboundRequestService,
         ILogger<PendingRequestsPanelViewModel> logger)
     {
         _dialogContext = dialogContext ?? throw new ArgumentNullException(nameof(dialogContext));
-        _contactQueryService = contactQueryService ?? throw new ArgumentNullException(nameof(contactQueryService));
-        _handshakeService = handshakeService ?? throw new ArgumentNullException(nameof(handshakeService));
-        _contactCoordinator = contactCoordinator ?? throw new ArgumentNullException(nameof(contactCoordinator));
-        _pendingHandshakeRepo = pendingHandshakeRepo ?? throw new ArgumentNullException(nameof(pendingHandshakeRepo));
+        _inboundRequestService = inboundRequestService ?? throw new ArgumentNullException(nameof(inboundRequestService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        var view = _requestsList.CreateView(r => r);
+        var view = _inboundRequestService.Requests;
         Requests = SynchronizationContext.Current != null
             ? view.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current)
             : view.ToNotifyCollectionChanged();
-        view.AddTo(ref Bag);
         Requests.AddTo(ref Bag);
 
-        view.ObserveCountChanged(notifyCurrentCount: true)
+        _inboundRequestService.PendingCount
             .Subscribe(count => RequestCount = count)
             .AddTo(ref Bag);
 
@@ -126,20 +112,7 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
         ErrorMessage = null;
         try
         {
-            var summaries = await _contactQueryService.GetContactSummariesAsync(_activePersonaId.Value, ct).ConfigureAwait(true);
-            var pending = summaries.Where(c => c.State == ContactState.PendingApproval).ToList();
-
-            _requestsList.Clear();
-            foreach (var item in pending)
-            {
-                var hex = item.IdentityId.Value.ToString("N");
-                var preview = hex.Length >= 8 ? $"{hex[..4]}...{hex[^4..]}" : hex;
-                _requestsList.Add(new InboundPendingRequestModel(
-                    item.IdentityId,
-                    string.IsNullOrWhiteSpace(item.DisplayName) ? $"Peer {preview}" : item.DisplayName,
-                    preview,
-                    item.AddedAtUtc));
-            }
+            await _inboundRequestService.LoadRequestsForPersonaAsync(_activePersonaId.Value, ct).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -164,27 +137,7 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
         _logger.LogInformation("Accepting inbound request from peer {PeerId}", request.RequesterId);
         try
         {
-            var approveResult = await _contactCoordinator.ApproveRequestAsync(
-                _activePersonaId.Value, request.RequesterId, PeerTrustLevel.Tofu, ct).ConfigureAwait(true);
-
-            if (!approveResult.IsSuccess)
-            {
-                _logger.LogWarning("Failed to approve contact {PeerId}: {Error}", request.RequesterId, approveResult.Error.Description);
-                ErrorMessage = approveResult.Error.Description;
-                return;
-            }
-
-            var completeResult = await _handshakeService.CompletePendingHandshakeAsync(
-                _activePersonaId.Value, request.RequesterId, ct).ConfigureAwait(true);
-
-            if (!completeResult.IsSuccess)
-            {
-                _logger.LogWarning("Failed to complete pending handshake for {PeerId}: {Error}", request.RequesterId, completeResult.Error.Description);
-                ErrorMessage = completeResult.Error.Description;
-                return;
-            }
-
-            _requestsList.Remove(request);
+            await _inboundRequestService.AcceptRequestAsync(_activePersonaId.Value, request.RequesterId, ct).ConfigureAwait(true);
             StatusMessage = $"Accepted connection with {request.DisplayName}.";
         }
         catch (Exception ex)
@@ -206,18 +159,7 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
         _logger.LogInformation("Rejecting inbound request from peer {PeerId}", request.RequesterId);
         try
         {
-            await _pendingHandshakeRepo.DeletePendingHandshakeAsync(
-                _activePersonaId.Value, request.RequesterId, ct).ConfigureAwait(true);
-
-            var rejectResult = await _contactCoordinator.RejectRequestAsync(
-                _activePersonaId.Value, request.RequesterId, block: false, ct).ConfigureAwait(true);
-
-            if (!rejectResult.IsSuccess)
-            {
-                _logger.LogWarning("Failed to reject contact {PeerId}: {Error}", request.RequesterId, rejectResult.Error.Description);
-            }
-
-            _requestsList.Remove(request);
+            await _inboundRequestService.RejectRequestAsync(_activePersonaId.Value, request.RequesterId, ct).ConfigureAwait(true);
             StatusMessage = $"Dismissed request from {request.DisplayName}.";
         }
         catch (Exception ex)
@@ -239,18 +181,7 @@ public sealed partial class PendingRequestsPanelViewModel : ViewModelBase
         _logger.LogInformation("Blocking peer {PeerId} per SYS-BLOCK-WIRE-INDISTINGUISHABILITY", request.RequesterId);
         try
         {
-            await _pendingHandshakeRepo.DeletePendingHandshakeAsync(
-                _activePersonaId.Value, request.RequesterId, ct).ConfigureAwait(true);
-
-            var blockResult = await _contactCoordinator.RejectRequestAsync(
-                _activePersonaId.Value, request.RequesterId, block: true, ct).ConfigureAwait(true);
-
-            if (!blockResult.IsSuccess)
-            {
-                _logger.LogWarning("Failed to block contact {PeerId}: {Error}", request.RequesterId, blockResult.Error.Description);
-            }
-
-            _requestsList.Remove(request);
+            await _inboundRequestService.BlockRequestAsync(_activePersonaId.Value, request.RequesterId, ct).ConfigureAwait(true);
             StatusMessage = $"Blocked {request.DisplayName}. Future packets will be silently dropped.";
         }
         catch (Exception ex)

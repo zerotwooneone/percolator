@@ -9,40 +9,35 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Percolator.Application.Ingress;
-using Percolator.Application.Ports;
-using Percolator.Application.Profiles;
+using ObservableCollections;
 using Percolator.Desktop.Common.Windowing;
 using Percolator.Desktop.Features.Transports.Models;
+using Percolator.Desktop.Features.Transports.Services;
 using Percolator.Desktop.Features.Transports.ViewModels;
-using Percolator.Domain.Common;
 using Percolator.Domain.Identities;
-using Percolator.Domain.Identities.Model;
-using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Domain.Security.Model;
-using Percolator.PluginSdk;
+using R3;
 
 namespace Percolator.Desktop.Tests.Features.Transports;
 
 [TestFixture]
 public sealed class PendingRequestsPanelViewModelTests
 {
-    private FakePeerContactQueryService _fakeQueryService = null!;
-    private FakeHandshakeService _fakeHandshakeService = null!;
-    private FakeContactRequestCoordinator _fakeContactCoordinator = null!;
-    private FakePendingHandshakeRepository _fakePendingRepo = null!;
+    private FakeInboundRequestStateService _fakeInboundService = null!;
     private PublicIdentityId _ownerId;
     private PublicIdentityId _requesterId;
 
     [SetUp]
     public void SetUp()
     {
-        _fakeQueryService = new FakePeerContactQueryService();
-        _fakeHandshakeService = new FakeHandshakeService();
-        _fakeContactCoordinator = new FakeContactRequestCoordinator();
-        _fakePendingRepo = new FakePendingHandshakeRepository();
+        _fakeInboundService = new FakeInboundRequestStateService();
         _ownerId = PublicIdentityId.New();
         _requesterId = PublicIdentityId.New();
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _fakeInboundService.Dispose();
     }
 
     private PendingRequestsPanelViewModel CreateViewModel(PublicIdentityId? identityId = null)
@@ -52,10 +47,7 @@ public sealed class PendingRequestsPanelViewModelTests
 
         return new PendingRequestsPanelViewModel(
             contextMock.Object,
-            _fakeQueryService,
-            _fakeHandshakeService,
-            _fakeContactCoordinator,
-            _fakePendingRepo,
+            _fakeInboundService,
             NullLogger<PendingRequestsPanelViewModel>.Instance);
     }
 
@@ -66,39 +58,26 @@ public sealed class PendingRequestsPanelViewModelTests
         var contextMock = new Mock<IDialogContext<PublicIdentityId>>();
         contextMock.SetupGet(c => c.Data).Returns(_ownerId);
 
-        Action act0 = () => new PendingRequestsPanelViewModel(null!, _fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, logger);
-        Action act1 = () => new PendingRequestsPanelViewModel(contextMock.Object, null!, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, logger);
-        Action act2 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, null!, _fakeContactCoordinator, _fakePendingRepo, logger);
-        Action act3 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, _fakeHandshakeService, null!, _fakePendingRepo, logger);
-        Action act4 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, null!, logger);
-        Action act5 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeQueryService, _fakeHandshakeService, _fakeContactCoordinator, _fakePendingRepo, null!);
+        Action act0 = () => new PendingRequestsPanelViewModel(null!, _fakeInboundService, logger);
+        Action act1 = () => new PendingRequestsPanelViewModel(contextMock.Object, null!, logger);
+        Action act2 = () => new PendingRequestsPanelViewModel(contextMock.Object, _fakeInboundService, null!);
 
         act0.Should().Throw<ArgumentNullException>();
         act1.Should().Throw<ArgumentNullException>();
         act2.Should().Throw<ArgumentNullException>();
-        act3.Should().Throw<ArgumentNullException>();
-        act4.Should().Throw<ArgumentNullException>();
-        act5.Should().Throw<ArgumentNullException>();
     }
 
     [Test]
-    public async Task LoadRequestsAsync_PopulatesPendingRequests_FilteringPendingApprovalContacts()
+    public async Task LoadRequestsAsync_PopulatesPendingRequests_ReflectedFromStateService()
     {
+        var request = new InboundPendingRequestModel(
+            _requesterId, "Alice Pending", "abcd...1234", DateTimeOffset.UtcNow);
+        _fakeInboundService.BackingList.Add(request);
+
         using var vm = CreateViewModel();
-
-        var pendingContact = new PeerContactSummaryReadModel(
-            _requesterId, "Alice Pending", PeerTrustLevel.Untrusted, ContactState.PendingApproval, DateTimeOffset.UtcNow, false);
-
-        var activeContact = new PeerContactSummaryReadModel(
-            PublicIdentityId.New(), "Bob Active", PeerTrustLevel.Tofu, ContactState.Active, DateTimeOffset.UtcNow, true);
-
-        var rejectedContact = new PeerContactSummaryReadModel(
-            PublicIdentityId.New(), "Charlie Rejected", PeerTrustLevel.Blocked, ContactState.Rejected, DateTimeOffset.UtcNow, false);
-
-        _fakeQueryService.Summaries.AddRange(new[] { pendingContact, activeContact, rejectedContact });
-
         await vm.InitializeAsync(_ownerId);
 
+        _fakeInboundService.LoadedPersonas.Should().Contain(_ownerId);
         vm.Requests.Should().ContainSingle();
         vm.Requests.First().RequesterId.Should().Be(_requesterId);
         vm.Requests.First().DisplayName.Should().Be("Alice Pending");
@@ -108,29 +87,9 @@ public sealed class PendingRequestsPanelViewModelTests
     }
 
     [Test]
-    public async Task LoadRequestsAsync_FormatsFingerprintPreview_TruncatingHex()
-    {
-        using var vm = CreateViewModel();
-
-        var pendingContact = new PeerContactSummaryReadModel(
-            _requesterId, "Alice", PeerTrustLevel.Untrusted, ContactState.PendingApproval, DateTimeOffset.UtcNow, false);
-
-        _fakeQueryService.Summaries.Add(pendingContact);
-
-        await vm.InitializeAsync(_ownerId);
-
-        var hex = _requesterId.Value.ToString("N");
-        var expectedPreview = $"{hex[..4]}...{hex[^4..]}";
-
-        vm.Requests.Should().ContainSingle();
-        vm.Requests.First().FingerprintPreview.Should().Be(expectedPreview);
-    }
-
-    [Test]
     public async Task LoadRequestsAsync_WhenEmpty_SetsIsEmptyTrueAndHasRequestsFalse()
     {
         using var vm = CreateViewModel();
-
         await vm.InitializeAsync(_ownerId);
 
         vm.Requests.Should().BeEmpty();
@@ -140,24 +99,20 @@ public sealed class PendingRequestsPanelViewModelTests
     }
 
     [Test]
-    public async Task AcceptRequestAsync_ApprovesContact_CompletesHandshake_AndRemovesFromList()
+    public async Task AcceptRequestAsync_DelegatesToStateService_AndSetsStatusMessage()
     {
+        var request = new InboundPendingRequestModel(
+            _requesterId, "Alice", "abcd...1234", DateTimeOffset.UtcNow);
+        _fakeInboundService.BackingList.Add(request);
+
         using var vm = CreateViewModel();
-
-        var pendingContact = new PeerContactSummaryReadModel(
-            _requesterId, "Alice", PeerTrustLevel.Untrusted, ContactState.PendingApproval, DateTimeOffset.UtcNow, false);
-
-        _fakeQueryService.Summaries.Add(pendingContact);
         await vm.InitializeAsync(_ownerId);
 
         var item = vm.Requests.Single();
         await vm.AcceptRequestAsync(item);
 
-        _fakeContactCoordinator.ApprovedRequests.Should().ContainSingle();
-        _fakeContactCoordinator.ApprovedRequests[0].Should().Be((_ownerId, _requesterId, PeerTrustLevel.Tofu));
-
-        _fakeHandshakeService.CompletedHandshakes.Should().ContainSingle();
-        _fakeHandshakeService.CompletedHandshakes[0].Should().Be((_ownerId, _requesterId));
+        _fakeInboundService.Accepted.Should().ContainSingle();
+        _fakeInboundService.Accepted[0].Should().Be((_ownerId, _requesterId));
 
         vm.Requests.Should().BeEmpty();
         vm.HasRequests.Should().BeFalse();
@@ -166,44 +121,20 @@ public sealed class PendingRequestsPanelViewModelTests
     }
 
     [Test]
-    public async Task AcceptRequestAsync_WhenApproveFails_SetsErrorMessageAndRetainsRequest()
+    public async Task RejectRequestAsync_DelegatesToStateService_AndSetsStatusMessage()
     {
+        var request = new InboundPendingRequestModel(
+            _requesterId, "Bob", "abcd...1234", DateTimeOffset.UtcNow);
+        _fakeInboundService.BackingList.Add(request);
+
         using var vm = CreateViewModel();
-        _fakeContactCoordinator.ApproveResult = DomainResult.Failure(new DomainError("DATABASE_ERROR", "DB lock failed"));
-
-        var pendingContact = new PeerContactSummaryReadModel(
-            _requesterId, "Alice", PeerTrustLevel.Untrusted, ContactState.PendingApproval, DateTimeOffset.UtcNow, false);
-
-        _fakeQueryService.Summaries.Add(pendingContact);
-        await vm.InitializeAsync(_ownerId);
-
-        var item = vm.Requests.Single();
-        await vm.AcceptRequestAsync(item);
-
-        _fakeHandshakeService.CompletedHandshakes.Should().BeEmpty("handshake must not be completed if contact approval fails");
-        vm.Requests.Should().ContainSingle("request must remain queued if approval fails");
-        vm.ErrorMessage.Should().Contain("DB lock failed");
-    }
-
-    [Test]
-    public async Task RejectRequestAsync_PurgesHandshake_RejectsContactWithoutBlock_AndRemovesFromList()
-    {
-        using var vm = CreateViewModel();
-
-        var pendingContact = new PeerContactSummaryReadModel(
-            _requesterId, "Bob", PeerTrustLevel.Untrusted, ContactState.PendingApproval, DateTimeOffset.UtcNow, false);
-
-        _fakeQueryService.Summaries.Add(pendingContact);
         await vm.InitializeAsync(_ownerId);
 
         var item = vm.Requests.Single();
         await vm.RejectRequestAsync(item);
 
-        _fakePendingRepo.DeletedHandshakes.Should().ContainSingle();
-        _fakePendingRepo.DeletedHandshakes[0].Should().Be((_ownerId, _requesterId));
-
-        _fakeContactCoordinator.RejectedRequests.Should().ContainSingle();
-        _fakeContactCoordinator.RejectedRequests[0].Should().Be((_ownerId, _requesterId, false));
+        _fakeInboundService.Rejected.Should().ContainSingle();
+        _fakeInboundService.Rejected[0].Should().Be((_ownerId, _requesterId));
 
         vm.Requests.Should().BeEmpty();
         vm.HasRequests.Should().BeFalse();
@@ -211,24 +142,20 @@ public sealed class PendingRequestsPanelViewModelTests
     }
 
     [Test]
-    public async Task BlockRequestAsync_PurgesHandshake_RejectsContactWithBlock_AndRemovesFromList()
+    public async Task BlockRequestAsync_DelegatesToStateService_AndSetsStatusMessage()
     {
+        var request = new InboundPendingRequestModel(
+            _requesterId, "Eve Spammer", "abcd...1234", DateTimeOffset.UtcNow);
+        _fakeInboundService.BackingList.Add(request);
+
         using var vm = CreateViewModel();
-
-        var pendingContact = new PeerContactSummaryReadModel(
-            _requesterId, "Eve Spammer", PeerTrustLevel.Untrusted, ContactState.PendingApproval, DateTimeOffset.UtcNow, false);
-
-        _fakeQueryService.Summaries.Add(pendingContact);
         await vm.InitializeAsync(_ownerId);
 
         var item = vm.Requests.Single();
         await vm.BlockRequestAsync(item);
 
-        _fakePendingRepo.DeletedHandshakes.Should().ContainSingle();
-        _fakePendingRepo.DeletedHandshakes[0].Should().Be((_ownerId, _requesterId));
-
-        _fakeContactCoordinator.RejectedRequests.Should().ContainSingle();
-        _fakeContactCoordinator.RejectedRequests[0].Should().Be((_ownerId, _requesterId, true), "block flag must be true");
+        _fakeInboundService.Blocked.Should().ContainSingle();
+        _fakeInboundService.Blocked[0].Should().Be((_ownerId, _requesterId));
 
         vm.Requests.Should().BeEmpty();
         vm.HasRequests.Should().BeFalse();
@@ -237,89 +164,60 @@ public sealed class PendingRequestsPanelViewModelTests
     }
 }
 
-internal sealed class FakePeerContactQueryService : IPeerContactQueryService
+internal sealed class FakeInboundRequestStateService : IInboundRequestStateService
 {
-    public List<PeerContactSummaryReadModel> Summaries { get; } = new();
+    private readonly ObservableList<InboundPendingRequestModel> _list = new();
+    private readonly ISynchronizedView<InboundPendingRequestModel, InboundPendingRequestModel> _view;
+    private readonly ReactiveProperty<int> _count = new(0);
 
-    public Task<IReadOnlyList<PeerContactSummaryReadModel>> GetContactSummariesAsync(PublicIdentityId ownerId, CancellationToken ct = default)
+    public FakeInboundRequestStateService()
     {
-        return Task.FromResult<IReadOnlyList<PeerContactSummaryReadModel>>(Summaries.ToList());
+        _view = _list.CreateView(x => x);
+        _view.ObserveCountChanged(true).Subscribe(c => _count.Value = c);
     }
 
-    public Task<PeerContactDetailReadModel?> GetContactDetailAsync(PublicIdentityId ownerId, PublicIdentityId contactId, CancellationToken ct = default)
+    public ReadOnlyReactiveProperty<int> PendingCount => _count;
+    public ISynchronizedView<InboundPendingRequestModel, InboundPendingRequestModel> Requests => _view;
+    public ObservableList<InboundPendingRequestModel> BackingList => _list;
+
+    public List<PublicIdentityId> LoadedPersonas { get; } = new();
+    public List<(PublicIdentityId Persona, PublicIdentityId Requester)> Accepted { get; } = new();
+    public List<(PublicIdentityId Persona, PublicIdentityId Requester)> Rejected { get; } = new();
+    public List<(PublicIdentityId Persona, PublicIdentityId Requester)> Blocked { get; } = new();
+
+    public Task LoadRequestsForPersonaAsync(PublicIdentityId personaId, CancellationToken ct = default)
     {
-        return Task.FromResult<PeerContactDetailReadModel?>(null);
-    }
-}
-
-internal sealed class FakeHandshakeService : IHandshakeService
-{
-    public DomainResult CompleteResult { get; set; } = DomainResult.Success();
-    public List<(PublicIdentityId Recipient, PublicIdentityId Sender)> CompletedHandshakes { get; } = new();
-
-    public ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
-        PublicIdentityId ownerId,
-        DeviceId ownerDeviceId,
-        PublicIdentityId remotePeerId,
-        PreKeyBundle remoteBundle,
-        AppId? initialAppId = null,
-        ReadOnlyMemory<byte>? initialPayload = null,
-        CancellationToken ct = default) => throw new NotImplementedException();
-
-    public ValueTask<DomainResult> ReceiveInvitationAsync(InboundHandshakeEnvelope envelope, CancellationToken ct = default) => throw new NotImplementedException();
-
-    public ValueTask<DomainResult> CompletePendingHandshakeAsync(PublicIdentityId recipientId, PublicIdentityId senderId, CancellationToken ct = default)
-    {
-        CompletedHandshakes.Add((recipientId, senderId));
-        return ValueTask.FromResult(CompleteResult);
-    }
-}
-
-internal sealed class FakeContactRequestCoordinator : IContactRequestCoordinator
-{
-    public DomainResult ApproveResult { get; set; } = DomainResult.Success();
-    public DomainResult RejectResult { get; set; } = DomainResult.Success();
-
-    public List<(PublicIdentityId Owner, PublicIdentityId Peer, PeerTrustLevel Trust)> ApprovedRequests { get; } = new();
-    public List<(PublicIdentityId Owner, PublicIdentityId Peer, bool Block)> RejectedRequests { get; } = new();
-
-    public ValueTask<DomainResult<PeerContact>> HandleInboundRequestAsync(
-        PublicIdentityId ownerId,
-        PublicIdentityId remotePeerId,
-        IdentityKey peerPublicKey,
-        string proposedNickname,
-        CancellationToken ct = default) => throw new NotImplementedException();
-
-    public ValueTask<DomainResult> ApproveRequestAsync(
-        PublicIdentityId ownerId,
-        PublicIdentityId remotePeerId,
-        PeerTrustLevel initialTrust = PeerTrustLevel.Tofu,
-        CancellationToken ct = default)
-    {
-        ApprovedRequests.Add((ownerId, remotePeerId, initialTrust));
-        return ValueTask.FromResult(ApproveResult);
-    }
-
-    public ValueTask<DomainResult> RejectRequestAsync(
-        PublicIdentityId ownerId,
-        PublicIdentityId remotePeerId,
-        bool block = false,
-        CancellationToken ct = default)
-    {
-        RejectedRequests.Add((ownerId, remotePeerId, block));
-        return ValueTask.FromResult(RejectResult);
-    }
-}
-
-internal sealed class FakePendingHandshakeRepository : IPendingHandshakeRepository
-{
-    public List<(PublicIdentityId Recipient, PublicIdentityId Sender)> DeletedHandshakes { get; } = new();
-
-    public Task SavePendingHandshakeAsync(PublicIdentityId recipientId, PublicIdentityId senderId, InboundHandshakeEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
-    public Task<InboundHandshakeEnvelope?> GetPendingHandshakeAsync(PublicIdentityId recipientId, PublicIdentityId senderId, CancellationToken ct = default) => Task.FromResult<InboundHandshakeEnvelope?>(null);
-    public Task DeletePendingHandshakeAsync(PublicIdentityId recipientId, PublicIdentityId senderId, CancellationToken ct = default)
-    {
-        DeletedHandshakes.Add((recipientId, senderId));
+        LoadedPersonas.Add(personaId);
         return Task.CompletedTask;
+    }
+
+    public Task AcceptRequestAsync(PublicIdentityId personaId, PublicIdentityId requesterId, CancellationToken ct = default)
+    {
+        Accepted.Add((personaId, requesterId));
+        var item = _list.FirstOrDefault(r => r.RequesterId == requesterId);
+        if (item != null) _list.Remove(item);
+        return Task.CompletedTask;
+    }
+
+    public Task RejectRequestAsync(PublicIdentityId personaId, PublicIdentityId requesterId, CancellationToken ct = default)
+    {
+        Rejected.Add((personaId, requesterId));
+        var item = _list.FirstOrDefault(r => r.RequesterId == requesterId);
+        if (item != null) _list.Remove(item);
+        return Task.CompletedTask;
+    }
+
+    public Task BlockRequestAsync(PublicIdentityId personaId, PublicIdentityId requesterId, CancellationToken ct = default)
+    {
+        Blocked.Add((personaId, requesterId));
+        var item = _list.FirstOrDefault(r => r.RequesterId == requesterId);
+        if (item != null) _list.Remove(item);
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        _view.Dispose();
+        _count.Dispose();
     }
 }
