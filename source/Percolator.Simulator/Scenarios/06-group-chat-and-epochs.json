@@ -1,0 +1,164 @@
+{
+  "name": "06 Group Chat and Epochs",
+  "description": "Verifies group channel creation on relay with genesis ledger, invite acceptance, group broadcast streaming over gRPC with ZK presentation proofs, member eviction with epoch rotation (E -> E+1), forward secrecy, and 25-message group flood.",
+  "steps": [
+    {
+      "$type": "SpawnPersonas",
+      "Aliases": [ "Alice", "Bob", "Charlie" ]
+    },
+    {
+      "$type": "SpawnRelay",
+      "RelayAlias": "Relay-1"
+    },
+    {
+      "$type": "RegisterMailboxes",
+      "RelayAlias": "Relay-1",
+      "PersonaAliases": [ "Alice", "Bob", "Charlie" ]
+    },
+    {
+      "$type": "PublishPreKeys",
+      "RelayAlias": "Relay-1",
+      "PersonaAliases": [ "Alice", "Bob", "Charlie" ],
+      "OneTimeKeyCount": 25
+    },
+    {
+      "$type": "InitiateDirectHandshake",
+      "InitiatorAlias": "Alice",
+      "TargetAlias": "Bob"
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "OwnerAlias": "Bob",
+      "SenderAlias": "Alice"
+    },
+    {
+      "$type": "InitiateDirectHandshake",
+      "InitiatorAlias": "Alice",
+      "TargetAlias": "Charlie"
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "OwnerAlias": "Charlie",
+      "SenderAlias": "Alice"
+    },
+    {
+      "$type": "InitiateDirectHandshake",
+      "InitiatorAlias": "Bob",
+      "TargetAlias": "Charlie"
+    },
+    {
+      "$type": "ApprovePendingHandshake",
+      "OwnerAlias": "Charlie",
+      "SenderAlias": "Bob"
+    },
+    {
+      "$type": "CreateGroup",
+      "AdminAlias": "Alice",
+      "RelayAlias": "Relay-1",
+      "GroupName": "Alpha-Team",
+      "MemberAliases": [ "Bob", "Charlie" ]
+    },
+    {
+      "$type": "AcceptGroupInvite",
+      "PersonaAlias": "Bob",
+      "GroupName": "Alpha-Team"
+    },
+    {
+      "$type": "AcceptGroupInvite",
+      "PersonaAlias": "Charlie",
+      "GroupName": "Alpha-Team"
+    },
+    {
+      "$type": "SendGroupMessage",
+      "SenderAlias": "Alice",
+      "GroupName": "Alpha-Team",
+      "Text": "Welcome to Alpha-Team at Epoch 1!"
+    },
+    {
+      "$type": "SendGroupMessage",
+      "SenderAlias": "Bob",
+      "GroupName": "Alpha-Team",
+      "Text": "Hello everyone, Bob is here!"
+    },
+    {
+      "$type": "SetListeningState",
+      "alias": "Bob",
+      "isListening": false
+    },
+    {
+      "$type": "SendGroupMessage",
+      "SenderAlias": "Charlie",
+      "GroupName": "Alpha-Team",
+      "Text": "Hey team, Charlie reporting while Bob is offline!"
+    },
+    {
+      "$type": "SetListeningState",
+      "alias": "Bob",
+      "isListening": true
+    },
+    {
+      "$type": "EvictGroupMember",
+      "AdminAlias": "Alice",
+      "GroupName": "Alpha-Team",
+      "EvictedMemberAlias": "Charlie"
+    },
+    {
+      "$type": "SendGroupMessage",
+      "SenderAlias": "Alice",
+      "GroupName": "Alpha-Team",
+      "Text": "Confidential update for Epoch 2 only"
+    },
+    {
+      "$type": "FloodGroupMessages",
+      "SenderAlias": "Bob",
+      "GroupName": "Alpha-Team",
+      "Count": 25
+    }
+  ],
+  "assertions": [
+    {
+      "$type": "AssertGroupEpoch",
+      "GroupName": "Alpha-Team",
+      "ExpectedEpoch": 1
+    },
+    {
+      "$type": "AssertGroupMessageDelivered",
+      "PersonaAlias": "Bob",
+      "GroupName": "Alpha-Team",
+      "ExpectedText": "Welcome to Alpha-Team at Epoch 1!"
+    },
+    {
+      "$type": "AssertGroupMessageDelivered",
+      "PersonaAlias": "Alice",
+      "GroupName": "Alpha-Team",
+      "ExpectedText": "Hello everyone, Bob is here!"
+    },
+    {
+      "$type": "AssertGroupMessageDelivered",
+      "PersonaAlias": "Bob",
+      "GroupName": "Alpha-Team",
+      "ExpectedText": "Hey team, Charlie reporting while Bob is offline!"
+    },
+    {
+      "$type": "AssertGroupMessageDelivered",
+      "PersonaAlias": "Alice",
+      "GroupName": "Alpha-Team",
+      "ExpectedText": "Hey team, Charlie reporting while Bob is offline!"
+    },
+    {
+      "$type": "AssertGroupMessageDelivered",
+      "PersonaAlias": "Bob",
+      "GroupName": "Alpha-Team",
+      "ExpectedText": "Confidential update for Epoch 2 only"
+    },
+    {
+      "$type": "AssertMemberCannotDecrypt",
+      "PersonaAlias": "Charlie",
+      "GroupName": "Alpha-Team",
+      "ExpectedText": "Confidential update for Epoch 2 only"
+    },
+    {
+      "$type": "AssertZeroErrors"
+    }
+  ]
+}

@@ -1,0 +1,342 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:Percolator.Simulator.Features.Topology"
+             xmlns:disc="using:Percolator.Simulator.Features.DiscoverySimulation"
+             mc:Ignorable="d" d:DesignWidth="450" d:DesignHeight="550"
+             x:Class="Percolator.Simulator.Features.Topology.PersonaCardView"
+             x:DataType="vm:PersonaCardViewModel"
+             x:Name="PersonaCardRoot">
+
+    <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="14"
+            Margin="6">
+        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+            <!-- Header CTL-PER-01, 02 -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+                <Border Grid.Column="0" Width="44" Height="44" CornerRadius="6" ClipToBounds="True" Background="#333333" Margin="0,0,10,0">
+                    <Image Source="{Binding IdenticonBitmap}" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="14" />
+                    <TextBlock Text="{Binding BoundEndpoint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <ToggleButton Content="🟢" IsChecked="{Binding IsListening}" ToolTip.Tip="Toggle Ingress (Listening/Muted) (CTL-PER-02)" Padding="6,4" />
+                    <DropDownButton Content="⚙️ Settings ▼" ToolTip.Tip="Persona Settings">
+                        <DropDownButton.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <ScrollViewer MaxHeight="450">
+                                    <StackPanel Spacing="8" MinWidth="240" Margin="4">
+                                        <TextBlock Text="Protocol Capabilities" FontWeight="Bold" FontSize="11" />
+                                        <CheckBox Content="Allow Peer Discovery (CTL-PER-03)" IsChecked="{Binding AllowPeerDiscovery}" />
+                                        <CheckBox Content="Allow File Transfers (CTL-PER-04)" IsChecked="{Binding AllowFileTransfers}" />
+                                        <CheckBox Content="Send Read Receipts (CTL-PER-05)" IsChecked="{Binding SendReadReceipts}" />
+                                        <CheckBox Content="Relay-Only Routing (CTL-PER-06)" IsChecked="{Binding RelayOnlyRouting}" />
+
+                                        <Separator Margin="0,4" />
+
+                                        <TextBlock Text="Automated Bot Responses" FontWeight="Bold" FontSize="11" />
+                                        <CheckBox Content="Auto-Accept Handshakes" IsChecked="{Binding AutoAcceptHandshakes}" />
+                                        <CheckBox Content="Auto-Reply 'Pong'" IsChecked="{Binding AutoReplyPong}" />
+                                        <CheckBox Content="Auto-Replenish PreKeys" IsChecked="{Binding AutoReplenishPreKeys}" />
+                                        <CheckBox Content="Auto-Share Profile on Connect" IsChecked="{Binding AutoShareProfile}" />
+                                        <CheckBox Content="Auto-Accept Group Invites" IsChecked="{Binding AutoAcceptGroupInvites}" />
+                                        <CheckBox Content="Auto-Accept File Transfers" IsChecked="{Binding AutoAcceptFileTransfers}" />
+
+                                        <Separator Margin="0,4" />
+
+                                        <TextBlock Text="Maintenance" FontWeight="Bold" FontSize="11" />
+                                        <Button Content="🔑 Publish 25 PreKeys" Command="{Binding PublishPreKeysCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                        <Button Content="🎲 Reroll Profile (CTL-PER-01)" Command="{Binding RerollProfileCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Flyout>
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
+                </StackPanel>
+            </Grid>
+
+            <!-- Action Toolbar: 3 Compact Utility Flyout Buttons -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" Margin="0,0,0,10">
+                <!-- 1. Connect Peer Flyout -->
+                <DropDownButton Content="🔗 Connect Peer ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel DataContext="{Binding ConnectPeer}" Spacing="8" MinWidth="300" Margin="4">
+                                <TextBlock Text="Connect to Peer" FontWeight="Bold" FontSize="12" />
+
+                                <!-- Tabs: In-World vs External URL -->
+                                <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="0,4,0,0">
+                                    <TabItem Header="In-World Persona">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Select In-World Persona:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <ComboBox ItemsSource="{Binding AvailableInWorldPersonas}"
+                                                      SelectedItem="{Binding SelectedInWorldTarget}"
+                                                      HorizontalAlignment="Stretch">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding DisplayName}" />
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </TabItem>
+                                    <TabItem Header="External URL">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Paste Invitation Code / URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <TextBox Text="{Binding ExternalInvitationInput}" Watermark="percolator://invite?..." />
+                                        </StackPanel>
+                                    </TabItem>
+                                </TabControl>
+
+                                <TextBlock Text="{Binding ErrorMessage}"
+                                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                                <Button Content="🔗 Connect"
+                                        Command="{Binding ConnectCommand}"
+                                        IsEnabled="{Binding !IsConnecting}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Classes="accent" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+
+                <!-- 2. Share Invite Flyout -->
+                <DropDownButton Content="📋 Share Invite ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel DataContext="{Binding InvitationExport}" Spacing="8" MinWidth="280" Margin="4">
+                                <TextBlock Text="Share Invitation" FontWeight="Bold" FontSize="12" />
+
+                                <TextBlock Text="Host Candidate:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ComboBox ItemsSource="{Binding AvailableHostKinds}"
+                                          SelectedItem="{Binding SelectedHostKind}"
+                                          HorizontalAlignment="Stretch" />
+
+                                <StackPanel Spacing="4" IsVisible="{Binding IsCustomHostVisible}">
+                                    <TextBlock Text="Custom Host / IP:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBox Text="{Binding CustomHostInput}" Watermark="e.g. 192.168.1.50 or myhost.local" />
+                                </StackPanel>
+
+                                <TextBlock Text="Port Privacy Preset:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ComboBox ItemsSource="{Binding AvailablePortPresets}"
+                                          SelectedItem="{Binding SelectedPortPreset}"
+                                          HorizontalAlignment="Stretch" />
+
+                                <StackPanel Spacing="4" IsVisible="{Binding IsCustomPortVisible}">
+                                    <TextBlock Text="Port Range (Min - Max):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <Grid ColumnDefinitions="*,Auto,*">
+                                        <NumericUpDown Grid.Column="0" Value="{Binding CustomPortMin}" Minimum="1" Maximum="65535" FormatString="0" />
+                                        <TextBlock Grid.Column="1" Text=" - " VerticalAlignment="Center" Margin="4,0" />
+                                        <NumericUpDown Grid.Column="2" Value="{Binding CustomPortMax}" Minimum="1" Maximum="65535" FormatString="0" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <TextBlock Text="Generated URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBox Text="{Binding GeneratedInvitationUrl}" IsReadOnly="True" FontSize="10" />
+
+                                <Button Content="📋 Copy Invitation URL"
+                                        Command="{Binding CopyInvitationUrlCommand}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Classes="accent" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+
+                <!-- 3. Relay Flyout -->
+                <DropDownButton Content="📬 Relay ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel DataContext="{Binding RelayRegistration}" Spacing="8" MinWidth="300" Margin="4">
+                                <TextBlock Text="Relay Registration" FontWeight="Bold" FontSize="12" />
+
+                                <!-- Tabs: In-World vs External Relay -->
+                                <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="0,4,0,0">
+                                    <TabItem Header="In-World Relay">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Select In-World Relay:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <ComboBox ItemsSource="{Binding AvailableInWorldRelays}"
+                                                      SelectedItem="{Binding SelectedInWorldRelay}"
+                                                      HorizontalAlignment="Stretch">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding DisplayName}" />
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </TabItem>
+                                    <TabItem Header="External Relay">
+                                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                                            <TextBlock Text="Relay Endpoint (host:port):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <TextBox Text="{Binding ExternalRelayInput}" Watermark="e.g. 127.0.0.1:5100 or percolator://..." />
+                                        </StackPanel>
+                                    </TabItem>
+                                </TabControl>
+
+                                <CheckBox Content="Seed 25 PreKeys on Registration" IsChecked="{Binding SeedPreKeysToRelay}" />
+
+                                <TextBlock Text="{Binding ErrorMessage}"
+                                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                                <Button Content="📬 Register Relay"
+                                        Command="{Binding RegisterRelayCommand}"
+                                        IsEnabled="{Binding !IsRegistering}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Classes="accent" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+            </StackPanel>
+
+            <!-- Pending Banners CTL-PER-14, 15, 16 -->
+            <StackPanel Grid.Row="2" Spacing="4" Margin="0,0,0,8">
+                <!-- Pending Handshake Banner CTL-PER-14 -->
+                <Border Background="#263859" CornerRadius="6" Padding="8,6"
+                        IsVisible="{Binding HasPendingHandshake}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding PendingHandshakeText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Content="✓ Accept" Command="{Binding AcceptPendingHandshakeCommand}" Classes="accent" Padding="6,2" />
+                            <Button Content="✕ Reject" Command="{Binding RejectPendingHandshakeCommand}" Padding="6,2" />
+                            <Button Content="🚫 Block" Command="{Binding BlockPendingHandshakeCommand}" Padding="6,2" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Pending Group Invite Banner CTL-PER-15 -->
+                <Border Background="#3D2B56" CornerRadius="6" Padding="8,6"
+                        IsVisible="{Binding HasPendingGroupInvite}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding PendingGroupInviteText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Content="✓ Join Group" Command="{Binding AcceptPendingGroupInviteCommand}" Classes="accent" Padding="6,2" />
+                            <Button Content="✕ Decline" Command="{Binding DeclinePendingGroupInviteCommand}" Padding="6,2" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Pending File Offer Banner CTL-PER-16 -->
+                <Border Background="#1C3B2B" CornerRadius="6" Padding="8,6"
+                        IsVisible="{Binding HasPendingFileOffer}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding PendingFileOfferText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Content="✓ Accept Download" Command="{Binding AcceptPendingFileOfferCommand}" Classes="accent" Padding="6,2" />
+                            <Button Content="✕ Decline" Command="{Binding DeclinePendingFileOfferCommand}" Padding="6,2" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!-- Card Tabs & Content CTL-PER-17, 18, 20, 21, 22 -->
+            <Grid Grid.Row="3" RowDefinitions="Auto,*">
+                <!-- Tab Selector Strip -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
+                    <Button Content="💬 Chat"
+                            Command="{Binding SelectChatTabCommand}"
+                            Padding="8,3" FontSize="11" />
+                    <Button Content="🔍 Discovery"
+                            Command="{Binding SelectDiscoveryTabCommand}"
+                            Padding="8,3" FontSize="11" />
+                </StackPanel>
+
+                <!-- Chat Tab Transcript CTL-PER-17, 18, 20 -->
+                <Border Grid.Row="1" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="8"
+                        IsVisible="{Binding IsChatTabActive}">
+                    <Grid RowDefinitions="Auto,*">
+                        <!-- Conversation Selector Dropdown CTL-PER-17 -->
+                        <ComboBox Grid.Row="0"
+                                  ItemsSource="{Binding AvailableConversations}"
+                                  SelectedItem="{Binding SelectedConversation}"
+                                  HorizontalAlignment="Stretch"
+                                  Margin="0,0,0,6">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ConversationItemViewModel">
+                                    <TextBlock Text="{Binding DisplayTitle}" FontSize="12" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <ScrollViewer Grid.Row="1">
+                            <ItemsControl ItemsSource="{Binding ChatMessages}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:CompileBindings="False">
+                                        <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                                CornerRadius="4" Padding="6,4" Margin="0,2">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0" Text="{Binding BodyText}" FontSize="12" TextWrapping="Wrap" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,0,0,0">
+                                                    <TextBlock Text="{Binding StatusText}"
+                                                               Foreground="{Binding StatusColor}"
+                                                               ToolTip.Tip="{Binding StatusTooltip}"
+                                                               FontWeight="Bold" FontSize="12"
+                                                               VerticalAlignment="Center"
+                                                               IsVisible="{Binding IsOutgoing}" />
+                                                    <Button Content="👍" ToolTip.Tip="React (CTL-PER-20)"
+                                                            Command="{Binding #PersonaCardRoot.DataContext.ReactCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="4,2" FontSize="10" />
+                                                    <Button Content="✏️" ToolTip.Tip="Edit Message (CTL-PER-20)"
+                                                            Command="{Binding #PersonaCardRoot.DataContext.EditMessageCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding IsOutgoing}"
+                                                            Padding="4,2" FontSize="10" />
+                                                    <Button Content="🗑️" ToolTip.Tip="Delete Message (CTL-PER-20)"
+                                                            Command="{Binding #PersonaCardRoot.DataContext.DeleteMessageCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding IsOutgoing}"
+                                                            Padding="4,2" FontSize="10" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <!-- Discovery Tab Content CTL-PER-21, 22 -->
+                <Border Grid.Row="1" IsVisible="{Binding IsDiscoveryTabActive}">
+                    <disc:DiscoveryTabView DataContext="{Binding DiscoveryTab}" />
+                </Border>
+            </Grid>
+
+            <!-- Compose Bar CTL-PER-18, 19 -->
+            <Grid Grid.Row="4" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0"
+                  IsVisible="{Binding IsChatTabActive}">
+                <ComboBox Grid.Column="0" SelectedIndex="{Binding SelectedTimerIndex}" Margin="0,0,6,0">
+                    <ComboBoxItem Content="Timer: Off" />
+                    <ComboBoxItem Content="Timer: 1m" />
+                    <ComboBoxItem Content="Timer: 1h" />
+                </ComboBox>
+                <TextBox Grid.Column="1"
+                         Text="{Binding ComposeMessageText}"
+                         Watermark="Type a message (CTL-PER-18)..." />
+                <Button Grid.Column="2"
+                         Content="Send"
+                         Command="{Binding SendMessageCommand}"
+                         Classes="accent"
+                         Margin="6,0,0,0" />
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

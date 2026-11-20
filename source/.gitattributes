@@ -1,0 +1,28 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Known text files
+*.cs text diff=csharp
+*.json text
+*.xml text
+*.xaml text
+*.axaml text
+*.md text
+*.props text
+*.targets text
+*.csproj text
+*.sln text
+*.proto text
+*.ps1 text
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pfx binary
+*.dll binary
+*.exe binary
+*.db binary
+*.sqlite binary

@@ -1,0 +1,116 @@
+using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Ports;
+using Percolator.PluginSdk.Profiles;
+
+namespace Percolator.Infrastructure.Persistence;
+
+using System;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Identities.Ports;
+using Percolator.Domain.Security.Ports;
+using Percolator.Infrastructure.Common;
+using Percolator.Infrastructure.Events;
+using Percolator.Infrastructure.Maintenance;
+using Percolator.Infrastructure.Security;
+using Percolator.Infrastructure.Persistence.Queries;
+using Percolator.Infrastructure.Persistence.Repositories;
+using Percolator.Infrastructure.Transport;
+using Percolator.Infrastructure.Vault;
+using Percolator.PluginSdk;
+
+public sealed class BaselineStage2HostFactory
+{
+    private readonly VaultStorageOptions _options;
+
+    public BaselineStage2HostFactory(VaultStorageOptions options)
+    {
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+    }
+
+    public IHost BuildAuthenticatedHost(IMasterKeyHandle masterKeyHandle)
+    {
+        ArgumentNullException.ThrowIfNull(masterKeyHandle);
+
+        var builder = Host.CreateDefaultBuilder();
+        builder.ConfigureServices((_, services) =>
+        {
+            services.AddSingleton(masterKeyHandle);
+            services.AddSingleton(_options);
+            services.AddSingleton<DbConnectionInterceptor, SqlCipherPragmaInterceptor>();
+
+            // Event Bus
+            services.AddSingleton<InMemoryEventBus>();
+            services.AddSingleton<IEventBus>(sp => sp.GetRequiredService<InMemoryEventBus>());
+            services.AddSingleton<IEventPublisher>(sp => sp.GetRequiredService<InMemoryEventBus>());
+            services.AddSingleton<IEventSubscriber>(sp => sp.GetRequiredService<InMemoryEventBus>());
+
+            services.AddDbContextFactory<PercolatorDbContext>((sp, dbOptions) =>
+            {
+                var interceptor = sp.GetRequiredService<DbConnectionInterceptor>();
+                dbOptions.UseSqlite($"Data Source={_options.DatabaseFilePath};Mode=ReadWriteCreate")
+                    .AddInterceptors(interceptor);
+            });
+
+            services.AddScoped(sp =>
+            {
+                var factory = sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>();
+                return factory.CreateDbContext();
+            });
+
+            services.AddScoped<IDatabaseMigrator, SqliteDatabaseMigrator>();
+
+            // Repositories & Query Services
+            services.AddScoped<IIdentityProfileRepository, SqliteIdentityProfileRepository>();
+            services.AddScoped<ILocalIdentityKeyStore, SqliteLocalIdentityKeyStore>();
+            services.AddScoped<IPrivatePreKeyStore, SqlitePrivatePreKeyStore>();
+            services.AddScoped<IRatchetSessionRepository, SqliteRatchetSessionRepository>();
+            services.AddScoped<IGroupSenderKeyRepository, SqliteGroupSenderKeyRepository>();
+            services.AddScoped<IGroupReceiverSessionRepository, SqliteGroupReceiverSessionRepository>();
+            services.AddScoped<IGroupCredentialsRepository, SqliteGroupCredentialsRepository>();
+            services.AddScoped<IPendingHandshakeRepository, SqlitePendingHandshakeRepository>();
+
+            services.AddScoped<IOutboxRepository, SqliteOutboxRepository>();
+            services.AddScoped<IOutboxQueryService, SqlOutboxQueryService>();
+
+            services.AddScoped<IPeerContactRepository, SqlitePeerContactRepository>();
+            services.AddScoped<IPeerContactQueryService, SqlPeerContactQueryService>();
+            services.AddScoped<IChannelRepository, SqliteChannelRepository>();
+
+            services.AddScoped(sp => new SqliteRelayPreKeyRepository(sp.GetRequiredService<IDbContextFactory<PercolatorDbContext>>()));
+            services.AddScoped<IRelayPreKeyRepository>(sp => sp.GetRequiredService<SqliteRelayPreKeyRepository>());
+            services.AddScoped(sp => new SqliteRelayProfileRepository(sp.GetRequiredService<PercolatorDbContext>()));
+            services.AddScoped<IRelayProfileRepository>(sp => sp.GetRequiredService<SqliteRelayProfileRepository>());
+            services.AddScoped(sp => new SqliteRelayLedgerRepository(sp.GetRequiredService<PercolatorDbContext>()));
+            services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
+            services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
+            services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
+            services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
+            services.AddScoped<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
+            services.AddScoped<IRelayDirectory, RelayDirectoryService>();
+            services.AddScoped<IPersonaRelayQueryService, SqlPersonaRelayQueryService>();
+
+            // Platform singletons required by the two services above.
+            services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
+            services.AddSingleton<CryptographyOptions>();
+            services.AddSingleton<ICryptoEngine, SignalCryptoEngine>();
+            services.AddSingleton<PeerGrpcChannelFactoryOptions>();
+            services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
+
+            // Background Maintenance Pruners
+            services.AddSingleton(TimeProvider.System);
+            services.AddHostedService<OutboxRetentionPruner>();
+            services.AddHostedService<RelayPreKeyDirectoryPruner>();
+            services.AddHostedService<RelayProfileSlotPruner>();
+        });
+
+        return builder.Build();
+    }
+}

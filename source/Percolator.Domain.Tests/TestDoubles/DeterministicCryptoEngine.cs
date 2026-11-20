@@ -1,0 +1,128 @@
+using System.Security.Cryptography;
+using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Security.ValueObjects;
+
+namespace Percolator.Domain.Tests.TestDoubles;
+
+public sealed class DeterministicCryptoEngine : ICryptoEngine
+{
+    private byte _keyPairCounter = 1;
+    public bool SignaturesAlwaysValid { get; set; } = true;
+
+    public (ChainKey NextChainKey, MessageKey DerivedMessageKey) StepRatchet(ChainKey currentChainKey)
+    {
+        Span<byte> nextChainBytes = stackalloc byte[32];
+        Span<byte> messageKeyBytes = stackalloc byte[32];
+
+        Span<byte> buffer = stackalloc byte[33];
+        currentChainKey.Span.CopyTo(buffer);
+
+        buffer[32] = 0x01;
+        SHA256.HashData(buffer, nextChainBytes);
+
+        buffer[32] = 0x02;
+        SHA256.HashData(buffer, messageKeyBytes);
+
+        return (ChainKey.FromSpan(nextChainBytes), MessageKey.FromSpan(messageKeyBytes));
+    }
+
+    public (ChainKey NextRootKey, ChainKey DerivedChainKey) KdfRk(ChainKey currentRootKey, SharedSecret dhSecret)
+    {
+        Span<byte> nextRootBytes = stackalloc byte[32];
+        Span<byte> chainKeyBytes = stackalloc byte[32];
+
+        Span<byte> buffer = stackalloc byte[65];
+        currentRootKey.Span.CopyTo(buffer);
+        dhSecret.Span.CopyTo(buffer[32..]);
+
+        buffer[64] = 0x10;
+        SHA256.HashData(buffer, nextRootBytes);
+
+        buffer[64] = 0x20;
+        SHA256.HashData(buffer, chainKeyBytes);
+
+        return (ChainKey.FromSpan(nextRootBytes), ChainKey.FromSpan(chainKeyBytes));
+    }
+
+    public (EphemeralPrivateKey PrivateKey, DhPublicKey PublicKey) GenerateEphemeralKeyPair()
+    {
+        byte val = _keyPairCounter++;
+        Span<byte> priv = stackalloc byte[32];
+        Span<byte> pub = stackalloc byte[32];
+        priv.Fill(val);
+        pub.Fill((byte)(val + 100));
+        return (EphemeralPrivateKey.FromSpan(priv), DhPublicKey.FromSpan(pub));
+    }
+
+    public SharedSecret ComputeDiffieHellman(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)
+    {
+        Span<byte> hash = stackalloc byte[32];
+        byte privVal = privateKey.Length > 0 ? privateKey[0] : (byte)0;
+        byte pubVal = publicKey.Length > 0 ? (publicKey[0] >= 100 ? (byte)(publicKey[0] - 100) : publicKey[0]) : (byte)0;
+        byte valA = Math.Min(privVal, pubVal);
+        byte valB = Math.Max(privVal, pubVal);
+        Span<byte> combined = stackalloc byte[2];
+        combined[0] = valA;
+        combined[1] = valB;
+        SHA256.HashData(combined, hash);
+        return SharedSecret.FromSpan(hash);
+    }
+
+    public SharedSecret DeriveX3dhMasterSecret(
+        ReadOnlySpan<byte> dh1,
+        ReadOnlySpan<byte> dh2,
+        ReadOnlySpan<byte> dh3,
+        ReadOnlySpan<byte> dh4 = default)
+    {
+        int totalLength = dh1.Length + dh2.Length + dh3.Length + (dh4.IsEmpty ? 0 : dh4.Length);
+        Span<byte> buffer = stackalloc byte[totalLength];
+        dh1.CopyTo(buffer);
+        dh2.CopyTo(buffer[dh1.Length..]);
+        dh3.CopyTo(buffer[(dh1.Length + dh2.Length)..]);
+        if (!dh4.IsEmpty)
+        {
+            dh4.CopyTo(buffer[(dh1.Length + dh2.Length + dh3.Length)..]);
+        }
+
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(buffer, hash);
+        return SharedSecret.FromSpan(hash);
+    }
+
+    public byte[] EncryptAesGcm(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> associatedData)
+    {
+        var result = new byte[plaintext.Length + nonce.Length];
+        nonce.CopyTo(result);
+        plaintext.CopyTo(result.AsSpan(nonce.Length));
+        return result;
+    }
+
+    public byte[] DecryptAesGcm(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> ciphertext, ReadOnlySpan<byte> associatedData)
+    {
+        if (ciphertext.Length < nonce.Length) return [];
+        return ciphertext[nonce.Length..].ToArray();
+    }
+
+    public bool VerifyEd25519Signature(IdentityKey publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
+    {
+        return SignaturesAlwaysValid;
+    }
+
+    public byte[] SignEd25519(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> message)
+    {
+        var sig = new byte[64];
+        if (message.Length > 0)
+        {
+            SHA256.HashData(message, sig.AsSpan(0, 32));
+        }
+        return sig;
+    }
+
+    public byte[] HkdfSha256(ReadOnlySpan<byte> ikm, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> info, int outputLength)
+    {
+        var output = new byte[outputLength];
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, output, salt, info);
+        return output;
+    }
+}

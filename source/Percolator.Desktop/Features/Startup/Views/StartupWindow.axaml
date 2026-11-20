@@ -1,0 +1,21 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Startup.ViewModels"
+        x:Class="Percolator.Desktop.Features.Startup.Views.StartupWindow"
+        x:DataType="vm:StartupHostViewModel"
+        Title="Percolator"
+        Width="480" Height="600"
+        MinWidth="480" MinHeight="600"
+        MaxWidth="480" MaxHeight="600"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+
+    <!-- Single unified frame hosting Screen 1 (Vault Setup/Unlock) and Screen 2
+         (Identity Gate) with a dynamic crossfade transition between states. -->
+    <TransitioningContentControl Content="{Binding CurrentViewModel}">
+        <TransitioningContentControl.PageTransition>
+            <CrossFade Duration="0:0:0.25" />
+        </TransitioningContentControl.PageTransition>
+    </TransitioningContentControl>
+</Window>

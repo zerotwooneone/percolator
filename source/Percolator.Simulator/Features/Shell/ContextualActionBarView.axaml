@@ -1,0 +1,62 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.Shell"
+             x:Class="Percolator.Simulator.Features.Shell.ContextualActionBarView"
+             x:DataType="vm:ContextualActionBarViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="12,6">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+            <!-- Selected Directional Pair: 1️⃣ Initiator -> 2️⃣ Target -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Border Background="#2B579A" CornerRadius="4" Padding="6,2">
+                    <TextBlock Text="1️⃣ Initiator:" FontSize="11" FontWeight="Bold" Foreground="White" />
+                </Border>
+                <TextBlock Text="{Binding InitiatorText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+
+                <!-- BTN-ACT-01: Swap Roles -->
+                <Button Content="⇄ Swap Roles"
+                        Command="{Binding SwapRolesCommand}"
+                        Padding="6,3" Margin="4,0"
+                        ToolTip.Tip="Swap 1️⃣ Initiator and 2️⃣ Target roles" />
+
+                <Border Background="#107C41" CornerRadius="4" Padding="6,2">
+                    <TextBlock Text="2️⃣ Target:" FontSize="11" FontWeight="Bold" Foreground="White" />
+                </Border>
+                <TextBlock Text="{Binding TargetText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- Directional Actions BTN-ACT-02..07 -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+                <!-- BTN-ACT-02 -->
+                <Button Content="⚡ Direct Handshake (1️⃣ ➔ 2️⃣)"
+                        Command="{Binding DirectHandshakeCommand}"
+                        Classes="accent"
+                        IsEnabled="{Binding HasPairSelected}" />
+
+                <!-- BTN-ACT-03 -->
+                <Button Content="📡 Relayed Handshake"
+                        Command="{Binding RelayedHandshakeCommand}"
+                        IsEnabled="{Binding HasPairSelected}" />
+
+                <!-- BTN-ACT-04 -->
+                <Button Content="📁 Send File Preset ▼"
+                        Command="{Binding SendFilePresetCommand}" />
+
+                <!-- BTN-ACT-05 -->
+                <Button Content="📬 Bulk Register Mailboxes"
+                        Command="{Binding BulkRegisterMailboxesCommand}" />
+
+                <!-- BTN-ACT-06 -->
+                <Button Content="🔑 Bulk Publish PreKeys"
+                        Command="{Binding BulkPublishPreKeysCommand}" />
+
+                <!-- BTN-ACT-07 -->
+                <Button Content="👥 Create Group on Relay..."
+                        Command="{Binding CreateGroupOnRelayCommand}" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

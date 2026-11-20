@@ -1,0 +1,61 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Percolator.Simulator.Features.Shell"
+             x:Class="Percolator.Simulator.Features.Shell.TopGlobalToolbarView"
+             x:DataType="vm:TopGlobalToolbarViewModel">
+
+    <Border Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="12,8">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+            <!-- App Brand & Title -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock Text="☕" FontSize="20" VerticalAlignment="Center" />
+                <TextBlock Text="Percolator Simulator" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
+                <Border Background="{DynamicResource AccentFillColorDefaultBrush}"
+                        CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                    <TextBlock Text="QA SANDBOX" FontSize="10" FontWeight="Bold" Foreground="White" />
+                </Border>
+            </StackPanel>
+
+            <!-- Global Spawn & Topology Actions -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                <!-- BTN-TOP-01 -->
+                <Button Content="+ Add Person"
+                        Command="{Binding AddPersonCommand}"
+                        Classes="accent" />
+
+                <!-- BTN-TOP-02 -->
+                <Button Content="+ Bulk Add People ▼"
+                        Command="{Binding BulkAddPeopleCommand}" />
+
+                <!-- BTN-TOP-03 -->
+                <Button Content="+ Add Relay"
+                        Command="{Binding AddRelayCommand}" />
+
+                <Separator Width="1" Height="20" Margin="4,0" />
+
+                <!-- Virtual Clock Buttons BTN-TOP-04, 05, 06 -->
+                <Button Content="🕒 +1 Min"
+                        Command="{Binding AdvanceOneMinuteCommand}"
+                        ToolTip.Tip="Advance virtual time by 1 minute" />
+
+                <Button Content="🕒 +1 Hour"
+                        Command="{Binding AdvanceOneHourCommand}"
+                        ToolTip.Tip="Advance virtual time by 1 hour" />
+
+                <Button Content="🕒 +24 Hours"
+                        Command="{Binding AdvanceTwentyFourHoursCommand}"
+                        ToolTip.Tip="Advance virtual time by 24 hours (Discovery Epoch)" />
+            </StackPanel>
+
+            <!-- BTN-TOP-07: Reset World -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                <Button Content="🔄 Reset World"
+                        Command="{Binding ResetWorldCommand}"
+                        Classes="danger" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

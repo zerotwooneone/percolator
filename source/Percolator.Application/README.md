@@ -1,77 +1,65 @@
 # Percolator.Application
 
-This project is the **Application Layer** of the Percolator system. It is responsible for orchestrating the domain models and infrastructure services to execute the application's use cases.
+`Percolator.Application` represents the **Application (Use Case & Orchestration) Layer** of the Onion Architecture. It serves as the central coordination engine and microkernel of the Percolator node, translating domain business rules and cryptographic primitives into end-to-end communication workflows while shielding the core domain from external infrastructure concerns.
 
-## Guiding Principles
+Dependencies in this layer point strictly inward toward `Percolator.Domain` and across to the plugin contracts defined in `Percolator.PluginSdk`. It maintains zero direct dependencies on concrete infrastructure implementations, database drivers, wire serialization schemas, network sockets, or user interfaces.
 
-- **Orchestration, Not Logic**: The primary role of this layer is to orchestrate. It coordinates the domain objects from `Percolator.Cryptography`, `Percolator.Identity`, etc., to perform tasks. It should contain minimal business logic itself; all business rules are delegated to the domain models.
-- **Use Case Driven**: The services defined here (e.g., `DirectSessionManager`) represent the concrete use cases and features of the application.
-- **Thin Services**: Application services should be kept "thin," acting as a facade over the rich domain models.
-
-## Security Posture
-
-This application layer is a hardened security boundary designed to protect the underlying domain logic. It implements several key security controls:
-
-- **Secure Session Establishment**: Session establishment is coordinated through application services that enforce a strict security model for session creation. The system generates a new, random, and unique `PeerId` for every incoming session request, preventing session collision and hijacking attacks where a malicious client could attempt to control its identifier.
-- **Resilience to Race Conditions**: The `DirectSessionManager` implements a per-conversation locking mechanism (`SemaphoreSlim`) to serialize message processing. This prevents race conditions where concurrent messages could corrupt the Double Ratchet state, ensuring session integrity and preventing denial-of-service attacks.
-- **Input Validation**: All incoming requests are rigorously validated before being passed to domain services. This includes enforcing rate limits to protect against resource exhaustion attacks.
-
-## Key Responsibilities
-
-1.  **Use Case Orchestration**: This project contains application services that orchestrate domain models to execute use cases such as session establishment, message routing, and peer discovery. These services coordinate the X3DH handshake, establish secure sessions, and manage message processing.
-
-2.  **Session and Message Management**: It manages the lifecycle of cryptographic sessions (`DirectSessionManager`) and handles the routing and processing of decrypted messages.
-
-3.  **Dependency Injection**: This layer is responsible for wiring up all the application's components—services, repositories, and domain models—in the dependency injection container.
-
-## Boundaries
-
-- **Entry Point**: It serves as the main entry point for external requests into the system's core logic.
-- **Dependencies**: It depends on the various Domain Libraries (`Percolator.Cryptography`, `Percolator.Identity`, etc.) and the `Percolator.Contracts` project. It is the central hub that connects all other pieces of the system.
-
-## Platform Dependencies
-
-### Windows Only
-
-This library has a hard dependency on the Windows operating system. This is due to the `CredentialService` (located in the `Percolator.Identity` project) which uses the **Windows Data Protection API (DPAPI)** via `System.Security.Cryptography.ProtectedData` to securely encrypt and store the password for the identity certificate.
-
-This design decision was made to avoid storing sensitive credentials in plaintext or hardcoded in the source code. Future work may involve abstracting this service to support other platforms (e.g., using macOS Keychain or Linux Secret Service).
-
-## Error Handling and Exception Prevention
-
-This application layer serves as a security boundary. It is responsible for validating data and performing sanity checks **before** passing requests to the domain layers (`Percolator.Cryptography`, `Percolator.Identity`). This includes enforcing rate limits on incoming requests.
-
-The domain layers operate on a "fail forward" policy and will throw exceptions on any data that violates their contracts. The application layer's primary error handling duty is to prevent these exceptions from occurring under normal conditions by rigorously validating all inputs. This ensures that domain-level exceptions represent true, unexpected security or logic violations, not routine validation failures. The per-conversation lock in `DirectSessionManager` is a key part of this strategy, preventing state corruption from concurrent requests.
-
-### Session Reset Handling: Archive and Replace
-
-When a peer initiates a new secure session handshake for a conversation that already exists (e.g., after a device reinstall or state loss), the system must handle the reset gracefully to balance security and user experience. This system follows the "Archive and Replace" model:
-
-1.  **Archive Existing Conversation**: The current `DirectConversation` is marked as `Archived`. Its associated cryptographic session is destroyed, rendering its message history securely unreadable going forward. The message history itself is preserved in a read-only state for the local user's reference.
-2.  **Create New Conversation**: A new `DirectConversation` is created with a new, unique `ConversationId`.
-3.  **Establish New Session**: A new cryptographic session (e.g., Double Ratchet) is established and linked exclusively to the new conversation.
-
-This approach ensures that forward secrecy is maintained by cleanly separating cryptographic sessions while preventing data loss for the user.
-
-### Development Guidelines
-
-- **Strongly-Typed IDs**: To enhance type safety and clarify intent, raw `Guid` primitives must not be used for identifiers in public APIs. Instead, wrap them in strongly-typed DDD value objects with intention-revealing names (e.g., `PeerId`, `ConversationId`). This prevents accidental misuse of identifiers and makes the domain language more explicit.
-- **Test-Driven Development**: All new features and refactoring should follow the Red-Green-Refactor cycle of Test-Driven Development (TDD). Write a failing test first (Red), then write the simplest code to make it pass (Green), and finally, refactor the code to improve its design while keeping the tests passing. This ensures that all logic is covered by tests and promotes a high-quality, maintainable codebase.
+For formal layer boundaries, outbound port definitions, and technical design decisions (such as outbox delivery guarantees and per-channel concurrency gating), see the project [Design Document](Design.md).
 
 ---
 
-## Peer Identification and `PeerId`
+## 1. Architectural Invariants
 
-In Percolator's peer-to-peer model, identity is handled with a simple and secure approach that cleanly separates local application identifiers from cryptographic identifiers.
+### 1.1 Inward Dependency Rule
+All dependencies flow inward. The application layer references only the domain and plugin abstraction contracts. Technical capabilities—such as durable database storage, wire-format serialization, network streaming, and operating system services—are consumed strictly through outward-facing ports.
 
-- **`PeerId` is a Local-Only Identifier**: A `PeerId` is a non-cryptographic identifier (e.g., a GUID) used to uniquely reference a peer *within the local application instance only*. It allows the application to maintain a stable reference to a contact, even if their underlying cryptographic keys change.
-    - **Crucially, a `PeerId` MUST NEVER be transmitted to other peers or computed from cryptographic material.**
+### 1.2 Application Payload Opacity
+The application layer acts as an application-agnostic microkernel substrate. It is responsible for authenticating and decrypting transport envelopes, but treats application payloads as opaque byte buffers tagged with a compact application identifier (`AppId`). The core pipeline never inspects, parses, or mutates the internal structure of plugin payloads.
 
-- **`identity_agreement_key` is the Public Lookup Key**: A peer's public identity is defined by their cryptographic keys. When initiating a session with a peer for the first time, the public `identity_agreement_key` from their `PreKeyBundle` is the canonical value used to look them up. This key is the foundation of their cryptographic identity.
+### 1.3 Always Outbox First
+To guarantee at-least-once delivery across process crashes and network partitions, all outbound payloads are persisted to transactional storage before network transmission is attempted. Active network streams are utilized as a fast-path optimization, with pending work safely queued for background delivery workers when streams are unavailable or backpressured.
 
-This clear separation ensures that local application logic (managing a contact list) is decoupled from the security-critical operations of session establishment, which are based purely on cryptography.
+### 1.4 CQRS Separation (Domain Mutation vs. Read-Only Queries)
+Workflows are cleanly partitioned by their data access intent:
+- **Write Operations (Commands & State Transitions):** Enforce domain invariants and state mutations through domain aggregates, persisting state changes via aggregate repositories.
+- **Read Operations (Queries & UI Projections):** Read-only views project flat, lightweight read models directly from indexed persistence through specialized query ports, bypassing heavy domain aggregates.
+
+### 1.5 Strict Concurrency Isolation
+Sequential cryptographic state machines (such as ratchets and key derivation chains) are susceptible to desynchronization and corruption under concurrent access. The application layer enforces scoped concurrency synchronization across pipeline operations, guaranteeing mutually exclusive access per channel or session while allowing unrelated channels to proceed concurrently.
+
+### 1.6 Ephemeral Replay Filtering & Resource Protection
+Incoming handshake requests are evaluated against sliding-window ephemeral key caches. Duplicate or replayed invitations are rejected before initiating expensive cryptographic scalar operations or consuming one-time pre-key material.
+
+### 1.7 Memory Hygiene & Plaintext Zeroization
+All transient buffers holding decrypted plaintexts or sensitive key material are cleared and zeroized immediately after dispatching to application plugins or persistent stores.
+
+### 1.8 Cryptographic Logging Guardrails
+Logging and diagnostics strictly enforce privacy guardrails. Log sinks, traces, and exception messages must never record sensitive cryptographic keys, ratchet states, seeds, or decrypted plaintexts. Only sanitized operational metadata is permissible.
+
+### 1.9 Temporal Determinism
+System clocks are never accessed directly. All pipelines, timeouts, retries, and expiration policies obtain current time through inverted time abstractions (`IDateTimeProvider`).
 
 ---
 
-*   **`CredentialService`**: (Note: This service is located in the `Percolator.Identity` project). It manages the secure storage and retrieval of the user's cryptographic identity, using Windows DPAPI with additional entropy for protection.
-*   **`DirectSessionManager`**: Manages the lifecycle of direct peer-to-peer conversations. It uses `SemaphoreSlim` to enforce per-conversation locking, preventing race conditions during message processing.
+## 2. Scope & Layer Boundaries
+
+The application layer coordinates the execution of application use cases, governs ingress and egress data pipelines, routes payloads to application plugins, and maintains delivery persistence guarantees. For the complete specification of in-scope orchestration versus out-of-scope domain/infrastructure concerns, see [Design.md](Design.md#1-purpose-and-layer-boundary).
+
+In brief:
+- **In Scope**: Use-case orchestration, ingress/egress ratchet advancing, microkernel plugin routing, X3DH handshake coordination, contact consent & greeting staging, group sender key fanout, delivery workers & retry policies, and outbound architectural port definitions.
+- **Out of Scope**: Cryptographic math algorithms, domain invariants, wire protocol schema compilation, network sockets, SQLite/SQLCipher database drivers, specific application plugin logic, and UI presentation.
+
+---
+
+## 3. Error Handling Philosophy
+
+- **Typed Results for Expected Conditions:** Operations that may encounter valid domain or operational rejections (such as unknown application identifiers, unapproved contacts, replayed invitations, or missing sessions) return typed result objects with explicit error codes rather than throwing exceptions.
+- **Exceptions Reserved for Defects:** Exceptions are reserved strictly for unrecoverable system faults, severe I/O failures, or invalid argument contracts in internal components.
+
+---
+
+## 4. Testing Philosophy
+
+Because the application layer is decoupled from concrete I/O mechanisms:
+- All unit and use-case tests execute deterministically in memory without spinning up real network sockets, web servers, or physical database files.
+- Concurrency locks, replay filters, outbox repositories, and transport dispatchers are backed by clean interfaces with lightweight test doubles, ensuring fast, reproducible test execution.

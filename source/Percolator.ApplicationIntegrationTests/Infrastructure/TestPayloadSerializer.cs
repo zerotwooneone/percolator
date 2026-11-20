@@ -1,0 +1,240 @@
+using System.Buffers;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
+using Percolator.Apps.Discovery.Features.PrivateRendezvous;
+using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Infrastructure.Serialization;
+using Percolator.PluginSdk;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+
+namespace Percolator.Application2IntegrationTests.Infrastructure;
+
+public sealed class TestPayloadSerializer : IPayloadSerializer
+{
+    private static readonly JsonSerializerOptions Options = CreateOptions();
+    private readonly ProtobufPayloadSerializer _protobufSerializer = new();
+
+    private static JsonSerializerOptions CreateOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(new GuidIdJsonConverter<PublicIdentityId>());
+        options.Converters.Add(new GuidIdJsonConverter<ChannelId>());
+        options.Converters.Add(new GuidIdJsonConverter<PayloadId>());
+        options.Converters.Add(new InvitationIdJsonConverter());
+        options.Converters.Add(new BlobIdJsonConverter());
+        options.Converters.Add(new DiscoveryResultLimitJsonConverter());
+        options.Converters.Add(new BlindedLocatorJsonConverter());
+        options.Converters.Add(new EncryptedRendezvousRouteJsonConverter());
+        options.Converters.Add(new GuidIdJsonConverter<BlindedRoutingToken>());
+        options.Converters.Add(new DeliveryTokenJsonConverter());
+        return options;
+    }
+
+    public void Serialize<T>(T payload, IBufferWriter<byte> writer)
+    {
+        var bytes = Serialize(payload);
+        writer.Write(bytes.Span);
+    }
+
+    public ReadOnlyMemory<byte> Serialize<T>(T payload)
+    {
+        if (typeof(T) == typeof(TransferManifest) ||
+            typeof(T) == typeof(FileTransferOfferPayload) ||
+            typeof(T) == typeof(FileTransferAcceptPayload) ||
+            typeof(T) == typeof(FileTransferCancelPayload))
+        {
+            return _protobufSerializer.Serialize(payload);
+        }
+        return JsonSerializer.SerializeToUtf8Bytes(payload, Options);
+    }
+
+    public DomainResult<T> Deserialize<T>(ReadOnlyMemory<byte> data)
+    {
+        if (typeof(T) == typeof(TransferManifest) ||
+            typeof(T) == typeof(FileTransferOfferPayload) ||
+            typeof(T) == typeof(FileTransferAcceptPayload) ||
+            typeof(T) == typeof(FileTransferCancelPayload))
+        {
+            return _protobufSerializer.Deserialize<T>(data);
+        }
+        try
+        {
+            var result = JsonSerializer.Deserialize<T>(data.Span, Options);
+            if (result is null)
+            {
+                return DomainResult<T>.Failure(new DomainError("DESERIALIZATION_FAILED", "Payload deserialized to null."));
+            }
+
+            return DomainResult<T>.Success(result);
+        }
+        catch (Exception ex)
+        {
+            return DomainResult<T>.Failure(new DomainError("DESERIALIZATION_FAILED", ex.Message));
+        }
+    }
+
+    private sealed class GuidIdJsonConverter<T> : JsonConverter<T> where T : struct, IParsable<T>
+    {
+        public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var str = reader.GetString();
+                if (str is not null && T.TryParse(str, null, out var parsed))
+                {
+                    return parsed;
+                }
+            }
+            else if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                using var doc = JsonDocument.ParseValue(ref reader);
+                if (doc.RootElement.TryGetProperty("value", out var val) || doc.RootElement.TryGetProperty("Value", out val))
+                {
+                    var str = val.GetString();
+                    if (str is not null && T.TryParse(str, null, out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+
+            return default;
+        }
+
+        public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.ToString());
+        }
+    }
+
+    private sealed class InvitationIdJsonConverter : JsonConverter<InvitationId>
+    {
+        public override InvitationId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var str = reader.GetString();
+                if (!string.IsNullOrEmpty(str))
+                {
+                    return new InvitationId(str);
+                }
+            }
+            else if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                using var doc = JsonDocument.ParseValue(ref reader);
+                if (doc.RootElement.TryGetProperty("value", out var val) || doc.RootElement.TryGetProperty("Value", out val))
+                {
+                    var str = val.GetString();
+                    if (!string.IsNullOrEmpty(str))
+                    {
+                        return new InvitationId(str);
+                    }
+                }
+            }
+
+            return default;
+        }
+
+        public override void Write(Utf8JsonWriter writer, InvitationId value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.Value);
+        }
+    }
+
+    private sealed class BlobIdJsonConverter : JsonConverter<BlobId>
+    {
+        public override BlobId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var str = reader.GetString();
+                if (!string.IsNullOrEmpty(str))
+                {
+                    return new BlobId(str);
+                }
+            }
+            else if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                using var doc = JsonDocument.ParseValue(ref reader);
+                if (doc.RootElement.TryGetProperty("hexDigest", out var val) ||
+                    doc.RootElement.TryGetProperty("HexDigest", out val))
+                {
+                    var str = val.GetString();
+                    if (!string.IsNullOrEmpty(str))
+                    {
+                        return new BlobId(str);
+                    }
+                }
+            }
+
+            return default;
+        }
+
+        public override void Write(Utf8JsonWriter writer, BlobId value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.HexDigest);
+        }
+    }
+
+    private sealed class DiscoveryResultLimitJsonConverter : JsonConverter<DiscoveryResultLimit>
+    {
+        public override DiscoveryResultLimit Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Number)
+            {
+                return new DiscoveryResultLimit(reader.GetInt32());
+            }
+            return DiscoveryResultLimit.Default;
+        }
+
+        public override void Write(Utf8JsonWriter writer, DiscoveryResultLimit value, JsonSerializerOptions options)
+        {
+            writer.WriteNumberValue(value.Value);
+        }
+    }
+
+    private sealed class BlindedLocatorJsonConverter : JsonConverter<BlindedLocator>
+    {
+        public override BlindedLocator Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            string? hex = reader.GetString();
+            return BlindedLocator.Create(hex ?? string.Empty).Value;
+        }
+
+        public override void Write(Utf8JsonWriter writer, BlindedLocator value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.Value);
+        }
+    }
+
+    private sealed class EncryptedRendezvousRouteJsonConverter : JsonConverter<EncryptedRendezvousRoute>
+    {
+        public override EncryptedRendezvousRoute Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            EncryptedRendezvousRoute.FromBytes(reader.GetBytesFromBase64()).Value;
+
+        public override void Write(Utf8JsonWriter writer, EncryptedRendezvousRoute value, JsonSerializerOptions options) =>
+            writer.WriteBase64StringValue(value.Span);
+    }
+
+    private sealed class DeliveryTokenJsonConverter : JsonConverter<DeliveryToken>
+    {
+        public override DeliveryToken? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var hex = reader.GetString();
+            return hex is null ? null : DeliveryToken.FromSpan(Convert.FromHexString(hex));
+        }
+
+        public override void Write(Utf8JsonWriter writer, DeliveryToken value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(Convert.ToHexString(value.Memory.Span));
+    }
+}

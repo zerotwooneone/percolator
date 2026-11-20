@@ -1,0 +1,63 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Simulator.Features.Shell"
+        xmlns:shell="using:Percolator.Simulator.Features.Shell"
+        xmlns:scenarios="using:Percolator.Simulator.Features.Scenarios"
+        xmlns:logging="using:Percolator.Simulator.Features.Logging"
+        x:Class="Percolator.Simulator.Features.Shell.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Percolator Simulator (QA Sandbox)"
+        Width="1400" Height="900"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+        <!-- Zone 0: Platform Mismatch Warning Banner -->
+        <Border Grid.Row="0"
+                Background="#B71C1C"
+                Padding="16,8"
+                IsVisible="{Binding IsPlatformMismatchWarningVisible}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="⚠️" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding PlatformMismatchWarningMessage}" 
+                           FontWeight="SemiBold" Foreground="White" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button Grid.Column="2" Content="Dismiss" Padding="8,2" Command="{Binding DismissPlatformWarningCommand}" Background="#D32F2F" Foreground="White" />
+            </Grid>
+        </Border>
+
+        <!-- Zone 1: Top Global Toolbar -->
+        <shell:TopGlobalToolbarView Grid.Row="1" DataContext="{Binding Toolbar}" />
+
+        <!-- Zone 2: Contextual Action Bar -->
+        <shell:ContextualActionBarView Grid.Row="2" DataContext="{Binding ActionBar}" />
+
+        <!-- Zones 3, 4, 5A: Main Working Area (Left Roster, Center Workbench, Right Flight Recorder) -->
+        <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto">
+            <!-- Zone 3: Left Roster Tree -->
+            <shell:RosterTreeView Grid.Column="0" DataContext="{Binding Roster}" />
+
+            <!-- Zone 4: Center Workbench -->
+            <shell:WorkbenchView Grid.Column="1" DataContext="{Binding Workbench}" />
+
+            <!-- Zone 5A: Right Flight Recorder Drawer -->
+            <scenarios:FlightRecorderView Grid.Column="2" DataContext="{Binding FlightRecorder}" />
+        </Grid>
+
+        <!-- Status Toast Banner -->
+        <Border Grid.Row="4"
+                Background="#2B579A"
+                Padding="12,6"
+                IsVisible="{Binding IsStatusToastOpen}">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="ℹ️" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StatusToastTitle}" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StatusToastMessage}" Foreground="White" VerticalAlignment="Center" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="✕" Padding="6,2" Command="{Binding DismissToastCommand}" />
+            </Grid>
+        </Border>
+
+        <!-- Zone 5B: Bottom Log Dock -->
+        <logging:LogDockView Grid.Row="5" DataContext="{Binding LogDock}" />
+    </Grid>
+</Window>

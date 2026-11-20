@@ -194,7 +194,7 @@ if (cleanupCertFiles)
             Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CLEANUP] Failed to delete {certFile}: {ex.Message}");
         }
     }
-    
+
     // Try to remove the directory if it's empty
     try
     {
@@ -216,77 +216,79 @@ else
 
 Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INIT] Application shut down successfully.");
 
-
-public class PingPongServiceImpl(int listenPort) : PingPongService.PingPongServiceBase
+namespace TofuTlsGrpcTest
 {
-    public override Task<PongResponse> SendPing(PingRequest request, ServerCallContext context)
+    public class PingPongServiceImpl(int listenPort) : PingPongService.PingPongServiceBase
     {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Ping received from '{request.SenderName}', sending Pong");
-        return Task.FromResult(new PongResponse { Counter = request.Counter, Message = $"Pong from server on {listenPort}" });
+        public override Task<PongResponse> SendPing(PingRequest request, ServerCallContext context)
+        {
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Ping received from '{request.SenderName}', sending Pong");
+            return Task.FromResult(new PongResponse { Counter = request.Counter, Message = $"Pong from server on {listenPort}" });
+        }
     }
-}
 
 // NOTE: Simulate the shared library constant for testing
-public static class Oids
-{
-    public const string ServerAuthentication = "1.3.6.1.5.5.7.3.1";
-    // PeerIdentityKey OID no longer needed - Identity Key is the TLS public key
-}
-
-public class GrpcServerManager
-{
-    private WebApplication? _app;
-
-    public async Task StartAsync(int port, X509Certificate2 cert)
+    public static class Oids
     {
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Dynamically building gRPC WebApplication for port {port}...");
-        var builder = WebApplication.CreateBuilder();
-
-        builder.WebHost.ConfigureKestrel(options =>
-        {
-            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Configuring Kestrel to listen on localhost port {port}...");
-            options.ListenLocalhost(port, listenOptions =>
-            {
-                listenOptions.Protocols = HttpProtocols.Http2;
-                // Use our custom ECDSA certificate with TLS 1.3
-                listenOptions.UseHttps(cert, httpsOptions =>
-                {
-                    httpsOptions.SslProtocols = System.Security.Authentication.SslProtocols.Tls13;
-                });
-                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Kestrel configured for HTTP/2 + TLS 1.3 (ECDSA CERT) on localhost:{port}");
-            });
-
-            // Log connection events
-            options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
-        });
-
-        builder.Services.AddGrpc();
-        builder.Services.AddSingleton<PingPongServiceImpl>(_ => new PingPongServiceImpl(port));
-
-        _app = builder.Build();
-        _app.MapGrpcService<PingPongServiceImpl>();
-
-        Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Starting gRPC server on port {port}...");
-        try
-        {
-            await _app.StartAsync();
-            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] gRPC Server started successfully. Listening on https://localhost:{port}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] FATAL: Failed to start gRPC server: {ex.Message}");
-            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] FATAL Stack: {ex.StackTrace}");
-            throw;
-        }
+        public const string ServerAuthentication = "1.3.6.1.5.5.7.3.1";
+        // PeerIdentityKey OID no longer needed - Identity Key is the TLS public key
     }
 
-    public async Task StopAsync()
+    public class GrpcServerManager
     {
-        if (_app != null)
+        private WebApplication? _app;
+
+        public async Task StartAsync(int port, X509Certificate2 cert)
         {
-            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Stopping gRPC Server...");
-            await _app.StopAsync();
-            await _app.DisposeAsync();
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Dynamically building gRPC WebApplication for port {port}...");
+            var builder = WebApplication.CreateBuilder();
+
+            builder.WebHost.ConfigureKestrel(options =>
+            {
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Configuring Kestrel to listen on localhost port {port}...");
+                options.ListenLocalhost(port, listenOptions =>
+                {
+                    listenOptions.Protocols = HttpProtocols.Http2;
+                    // Use our custom ECDSA certificate with TLS 1.3
+                    listenOptions.UseHttps(cert, httpsOptions =>
+                    {
+                        httpsOptions.SslProtocols = System.Security.Authentication.SslProtocols.Tls13;
+                    });
+                    Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [SERVER] Kestrel configured for HTTP/2 + TLS 1.3 (ECDSA CERT) on localhost:{port}");
+                });
+
+                // Log connection events
+                options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
+            });
+
+            builder.Services.AddGrpc();
+            builder.Services.AddSingleton<PingPongServiceImpl>(_ => new PingPongServiceImpl(port));
+
+            _app = builder.Build();
+            _app.MapGrpcService<PingPongServiceImpl>();
+
+            Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Starting gRPC server on port {port}...");
+            try
+            {
+                await _app.StartAsync();
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] gRPC Server started successfully. Listening on https://localhost:{port}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] FATAL: Failed to start gRPC server: {ex.Message}");
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] FATAL Stack: {ex.StackTrace}");
+                throw;
+            }
+        }
+
+        public async Task StopAsync()
+        {
+            if (_app != null)
+            {
+                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MANAGER] Stopping gRPC Server...");
+                await _app.StopAsync();
+                await _app.DisposeAsync();
+            }
         }
     }
 }

@@ -1,869 +1,610 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Percolator.Dht;
-using Percolator.Infrastructure.Identity;
-using Percolator.Infrastructure.Cryptography;
-
 namespace Percolator.Infrastructure.Persistence;
-
+using System;
+using System.Linq;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Percolator.Infrastructure.Persistence.Entities;
 public class PercolatorDbContext : DbContext
 {
-    public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options) : base(options)
+    public PercolatorDbContext(DbContextOptions<PercolatorDbContext> options)
+        : base(options)
     {
     }
-
-    public DbSet<PeerIdentityDbo> PeerIdentities { get; set; } = null!;
-    public DbSet<Identity.PeerIdentityKeyDbo> PeerIdentityKeys { get; set; } = null!;
-    public DbSet<PeerVerificationDbo> PeerVerifications { get; set; } = null!;
-    public DbSet<PreKeyBundleDbo> PreKeyBundles { get; set; } = null!;
-    public DbSet<SignedPreKeyDbo> SignedPreKeys { get; set; } = null!;
-    public DbSet<OneTimePreKeyDbo> OneTimePreKeys { get; set; } = null!;
-    public DbSet<PeerPublicSigningKeyDbo> PeerPublicSigningKeys { get; set; } = null!;
-    public DbSet<DhtNode> DhtNodes { get; set; } = null!;
-    
-    public DbSet<DirectSessionDbo> DirectSessions { get; set; } = null!;
-    public DbSet<RatchetKeyIndexDbo> RatchetKeyIndex { get; set; } = null!;
-    public DbSet<ConversationDbo> Conversations { get; set; } = null!;
-    public DbSet<MessageDbo> Messages { get; set; } = null!;
-    public DbSet<ConversationParticipantDbo> ConversationParticipants { get; set; } = null!;
-    public DbSet<DirectSessionConversationDbo> DirectSessionConversations { get; set; } = null!;
-    public DbSet<MessageQueueItemDbo> MessageQueueItems { get; set; } = null!;
-    public DbSet<SelfIdentityDbo> SelfIdentities { get; set; } = null!;
-    public DbSet<SelfIdentityKnownPeerDbo> SelfIdentityKnownPeers { get; set; } = null!;
-    public DbSet<SelfIdentityKeysDbo> SelfIdentityKeys { get; set; } = null!;
-    public DbSet<SelfPreKeySignedDbo> SelfPreKeySigned { get; set; } = null!;
-    public DbSet<SelfOneTimePreKeyDbo> SelfOneTimePreKeys { get; set; } = null!;
-    public DbSet<ReadReceiptDbo> ReadReceipts { get; set; } = null!;
-    public DbSet<PreHandshakeSessionDbo> PreHandshakeSessions { get; set; } = null!;
-    public DbSet<PendingSessionDbo> PendingSessions { get; set; } = null!;
-    public DbSet<SentInvitationDbo> SentInvitations { get; set; } = null!;
-    public DbSet<SessionDbo> Sessions { get; set; } = null!;
-    // New Network domain persistence (PeerRoutingProfile)
-    public DbSet<PeerRoutingProfileDbo> PeerRoutingProfiles { get; set; } = null!;
-    public DbSet<GrpcEndPointRoutingDbo> PeerRoutingGrpcEndPoints { get; set; } = null!;
-    public DbSet<DomainEventOutboxDbo> DomainEventOutbox { get; set; } = null!;
-    public DbSet<AnonymousRelayEgressJobDbo> AnonymousRelayEgressJobs { get; set; } = null!;
-    public DbSet<AuthenticatedPeerEgressJobDbo> AuthenticatedPeerEgressJobs { get; set; } = null!;
-    public DbSet<RelayLinkDbo> PeerRoutingRelays { get; set; } = null!;
-    public DbSet<PeerRouteCandidateDbo> PeerRouteCandidates { get; set; } = null!;
-    public DbSet<DiscoveredPeerDbo> DiscoveredPeers { get; set; } = null!;
-    public DbSet<DiscoveredPeerEndpointDbo> DiscoveredPeerEndpoints { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo> GroupMembers { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo> GroupStates { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo> PendingGroupInvitations { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo> SenderKeyRecords { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Chat.Persistence.DeliveryCertificateDbo> DeliveryCertificates { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Network.RelayLedger.RelayGroupLedgerDbo> RelayGroupLedgers { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Network.Egress.RelayEgressJobDbo> RelayEgressJobs { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Cryptography.GroupLedger.GroupCredentialsDbo> GroupCredentials { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Cryptography.GroupLedger.SenderKeyRatchetDbo> SenderKeyRatchets { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Cryptography.GroupLedger.UnknownMessageCacheDbo> UnknownMessageCaches { get; set; } = null!;
-    public DbSet<Percolator.Infrastructure.Cryptography.GroupLedger.SkippedMessageKeyDbo> SkippedMessageKeys { get; set; } = null!;
-
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<DateTimeOffsetToTicksConverter>();
+        configurationBuilder.Properties<DateTimeOffset?>().HaveConversion<NullableDateTimeOffsetToTicksConverter>();
+    }
+    public DbSet<IdentityProfileEntity> IdentityProfiles => Set<IdentityProfileEntity>();
+    public DbSet<LocalDeviceEntity> LocalDevices => Set<LocalDeviceEntity>();
+    public DbSet<VaultIdentityKeyEntity> VaultIdentityKeys => Set<VaultIdentityKeyEntity>();
+    public DbSet<VaultSignedPreKeyEntity> VaultSignedPreKeys => Set<VaultSignedPreKeyEntity>();
+    public DbSet<VaultOneTimePreKeyEntity> VaultOneTimePreKeys => Set<VaultOneTimePreKeyEntity>();
+    public DbSet<VaultRatchetSessionEntity> VaultRatchetSessions => Set<VaultRatchetSessionEntity>();
+    public DbSet<VaultGroupSenderKeyEntity> VaultGroupSenderKeys => Set<VaultGroupSenderKeyEntity>();
+    public DbSet<VaultGroupReceiverSessionEntity> VaultGroupReceiverSessions => Set<VaultGroupReceiverSessionEntity>();
+    public DbSet<VaultGroupCredentialsEntity> VaultGroupCredentials => Set<VaultGroupCredentialsEntity>();
+    public DbSet<VaultPendingHandshakeEntity> VaultPendingHandshakes => Set<VaultPendingHandshakeEntity>();
+    public DbSet<OpsOutboxJobEntity> OpsOutboxJobs => Set<OpsOutboxJobEntity>();
+    public DbSet<OpsPendingIngressEnvelopeEntity> OpsPendingIngressEnvelopes => Set<OpsPendingIngressEnvelopeEntity>();
+    public DbSet<PeerContactEntity> PeerContacts => Set<PeerContactEntity>();
+    public DbSet<PeerContactDeviceEntity> PeerContactDevices => Set<PeerContactDeviceEntity>();
+    public DbSet<ChatChannelEntity> ChatChannels => Set<ChatChannelEntity>();
+    public DbSet<ChatChannelMemberEntity> ChatChannelMembers => Set<ChatChannelMemberEntity>();
+    public DbSet<ChatChannelPayloadEntity> ChatChannelPayloads => Set<ChatChannelPayloadEntity>();
+    public DbSet<RelayPreKeyEntity> RelayPreKeys => Set<RelayPreKeyEntity>();
+    public DbSet<RelayProfileSlotEntity> RelayProfileSlots => Set<RelayProfileSlotEntity>();
+    public DbSet<RelayLedgerEpochEntity> RelayLedgerEpochs => Set<RelayLedgerEpochEntity>();
+    public DbSet<RelayLedgerRoutingTokenEntity> RelayLedgerRoutingTokens => Set<RelayLedgerRoutingTokenEntity>();
+    public DbSet<PeerProfileEntity> PeerProfiles => Set<PeerProfileEntity>();
+    public DbSet<PeerProfileSnapshotEntity> PeerProfileSnapshots => Set<PeerProfileSnapshotEntity>();
+    public DbSet<PeerMailboxRoutingEntity> PeerMailboxRouting => Set<PeerMailboxRoutingEntity>();
+    // Chunk 4.1 Chat Messaging Entities
+    public DbSet<ChatMessageEntity> ChatMessages => Set<ChatMessageEntity>();
+    public DbSet<ChatReactionEntity> ChatReactions => Set<ChatReactionEntity>();
+    public DbSet<ChatMessageMentionEntity> ChatMessageMentions => Set<ChatMessageMentionEntity>();
+    public DbSet<ChatAttachmentEntity> ChatAttachments => Set<ChatAttachmentEntity>();
+    public DbSet<ChatGroupInvitationEntity> ChatGroupInvitations => Set<ChatGroupInvitationEntity>();
+    public DbSet<ChatUnknownGroupMessageEntity> ChatUnknownGroupMessages => Set<ChatUnknownGroupMessageEntity>();
+    // Chunk 4.2 Discovery & Rendezvous Entities
+    public DbSet<RelayPeerDirectoryEntity> RelayPeerDirectory => Set<RelayPeerDirectoryEntity>();
+    public DbSet<RelayRendezvousEntryEntity> RelayRendezvousEntries => Set<RelayRendezvousEntryEntity>();
+    public DbSet<RelayRegistrationEntity> RelayRegistrations => Set<RelayRegistrationEntity>();
+    public DbSet<RelayMailboxBindingEntity> RelayMailboxBindings => Set<RelayMailboxBindingEntity>();
+    public DbSet<RelayMailboxCapabilityEntity> RelayMailboxCapabilities => Set<RelayMailboxCapabilityEntity>();
+    public DbSet<RelayMailboxAuthorizedTokenEntity> RelayMailboxAuthorizedTokens => Set<RelayMailboxAuthorizedTokenEntity>();
+    public DbSet<RelayQueuedEnvelopeEntity> RelayQueuedEnvelopes => Set<RelayQueuedEnvelopeEntity>();
+    // Chunk 4.4 File Transfer Entities
+    public DbSet<TransferSessionEntity> TransferSessions => Set<TransferSessionEntity>();
+    public DbSet<ManifestFileEntity> ManifestFiles => Set<ManifestFileEntity>();
+    public DbSet<TransferBitfieldEntity> TransferBitfields => Set<TransferBitfieldEntity>();
+    public DbSet<SwarmEndpointEntity> SwarmEndpoints => Set<SwarmEndpointEntity>();
+    public DbSet<FilterPolicyEntity> FilterPolicies => Set<FilterPolicyEntity>();
+    public DbSet<IdentitySettingsEntity> IdentitySettings => Set<IdentitySettingsEntity>();
+    public DbSet<AppSettingEntity> AppSettings => Set<AppSettingEntity>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Ensure EF does not try to map legacy domain type 'Peer'
-        modelBuilder.Ignore<global::Percolator.Identity.Peer>();
-
-        // PeerIdentities (authoritative peer catalog for identity aggregate)
-        modelBuilder.Entity<PeerIdentityDbo>(entity =>
+        base.OnModelCreating(modelBuilder);
+        var byteArrayComparer = new ValueComparer<byte[]>(
+            (c1, c2) => c1 == null ? c2 == null : c2 != null && c1.SequenceEqual(c2),
+            c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+            c => c == null ? Array.Empty<byte>() : c.ToArray());
+        // 1. Identity Profiles
+        modelBuilder.Entity<IdentityProfileEntity>(entity =>
         {
-            entity.ToTable("PeerIdentities");
-            entity.HasKey(e => e.PeerId);
-            entity.Property(e => e.PeerId)
-                .ValueGeneratedOnAdd();
-            entity.Property(e => e.PublicIdentityId)
-                .IsRequired();
-            entity.HasIndex(e => e.PublicIdentityId).IsUnique(); // unique index for wire-level identity lookups
-            entity.Property(e => e.Name).IsRequired();
-            entity.Property(e => e.Version).IsRequired();
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.UpdatedAtUtc).IsRequired();
-            entity.HasIndex(e => e.Name).IsUnique();
-            entity.HasMany(e => e.Keys)
-                .WithOne(k => k.Peer)
-                .HasForeignKey(k => k.PeerId)
-                .IsRequired()
-                .OnDelete(DeleteBehavior.Cascade);
-            entity.HasMany(e => e.Verifications)
-                .WithOne()
-                .HasForeignKey(v => v.PeerId)
-                .IsRequired()
+            entity.ToTable("identity_profiles");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DisplayName).HasMaxLength(64).IsRequired();
+        });
+        // 2. Local Devices
+        modelBuilder.Entity<LocalDeviceEntity>(entity =>
+        {
+            entity.ToTable("local_devices");
+            entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId });
+            entity.Property(e => e.DevicePublicKey).HasColumnType("BLOB");
+            entity.Property(e => e.LinkProofSignature).HasColumnType("BLOB");
+            entity.HasOne<IdentityProfileEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.OwnerIdentityId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
-        // Sessions (SecureSession persistence)
-        modelBuilder.Entity<SessionDbo>(entity =>
+        // 3. Vault Identity Keys
+        modelBuilder.Entity<VaultIdentityKeyEntity>(entity =>
         {
-            entity.ToTable("Sessions");
-            entity.HasKey(e => new { e.SessionId, e.SelfIdentityId });
-            entity.Property(e => e.SessionId).IsRequired();
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.RemotePeerId).IsRequired();
-            entity.Property(e => e.ProtocolVersion).IsRequired();
-            entity.Property(e => e.RootKey).IsRequired();
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.LastUsedAtUtc).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
-            entity.HasOne<SelfIdentityDbo>()
+            entity.ToTable("vault_identity_keys");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PublicKey).HasColumnType("BLOB");
+            entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
+            entity.Property(e => e.ProfileKey).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+        });
+        // 4. Vault Signed Prekeys
+        modelBuilder.Entity<VaultSignedPreKeyEntity>(entity =>
+        {
+            entity.ToTable("vault_signed_prekeys");
+            entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId, e.KeyId });
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.DeviceId, e.IsCurrent });
+            entity.Property(e => e.PublicKey).HasColumnType("BLOB");
+            entity.Property(e => e.Signature).HasColumnType("BLOB");
+            entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
+            entity.HasOne<VaultIdentityKeyEntity>()
                 .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
+                .HasForeignKey(e => e.OwnerIdentityId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
-
-        modelBuilder.Entity<Identity.PeerIdentityKeyDbo>(entity =>
+        // 5. Vault OneTime Prekeys
+        modelBuilder.Entity<VaultOneTimePreKeyEntity>(entity =>
         {
-            entity.ToTable("PeerIdentityKeys");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId).IsRequired();
-            entity.Property(e => e.PublicKeySpki).IsRequired();
-            entity.Property(e => e.Fingerprint).IsRequired();
-            entity.Property(e => e.NotBeforeUtc).IsRequired();
-            entity.Property(e => e.ExpiresAtUtc).IsRequired();
-            entity.HasIndex(e => e.PeerId);
-            entity.HasIndex(e => e.Fingerprint).IsUnique();
-        });
-
-        modelBuilder.Entity<PeerVerificationDbo>(entity =>
-        {
-            entity.ToTable("PeerVerifications");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId)
-                .IsRequired();
-            entity.Property(e => e.Fingerprint).IsRequired();
-            entity.Property(e => e.Method).IsRequired();
-            entity.Property(e => e.VerifiedAtUtc).IsRequired();
-            entity.HasIndex(e => new { e.PeerId, e.Fingerprint });
-            entity.HasIndex(e => e.Fingerprint);
-        });
-
-        // SelfPreKeySigned
-        modelBuilder.Entity<SelfPreKeySignedDbo>(entity =>
-        {
-            entity.ToTable("SelfPreKeySigned");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.SelfIdentityId)
-                .IsRequired();
-            entity.Property(e => e.SignedPreKeyId).IsRequired();
-            entity.Property(e => e.SignedPreKeyPrivate).IsRequired();
-            entity.Property(e => e.SignedPreKeyPublicSpki).IsRequired();
-            entity.Property(e => e.PreKeySignature).IsRequired();
-            entity.Property(e => e.ExpiresUtc).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.SignedPreKeyId }).IsUnique();
-            entity.HasOne<SelfIdentityDbo>()
+            entity.ToTable("vault_onetime_prekeys");
+            entity.HasKey(e => new { e.OwnerIdentityId, e.DeviceId, e.KeyId });
+            entity.Property(e => e.PublicKey).HasColumnType("BLOB");
+            entity.Property(e => e.PrivateKey).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.DeviceId, e.IsConsumed })
+                .HasDatabaseName("ix_vault_opk_unconsumed");
+            entity.HasOne<VaultIdentityKeyEntity>()
                 .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
+                .HasForeignKey(e => e.OwnerIdentityId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
-
-        // SelfOneTimePreKey
-        modelBuilder.Entity<SelfOneTimePreKeyDbo>(entity =>
+        // 6. Vault Ratchet Sessions
+        modelBuilder.Entity<VaultRatchetSessionEntity>(entity =>
         {
-            entity.ToTable("SelfOneTimePreKeys");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.SelfIdentityId)
-                .IsRequired();
-            entity.Property(e => e.OneTimePreKeyId).IsRequired();
-            entity.Property(e => e.OneTimePreKeyPrivate).IsRequired();
-            entity.Property(e => e.OneTimePreKeyPublicSpki).IsRequired();
-            entity.Property(e => e.ReservedForRequestCorrelationId);
-            entity.Property(e => e.ReservedUntilUtc);
-            entity.HasIndex(e => new { e.SelfIdentityId, e.OneTimePreKeyId }).IsUnique();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.ReservedForRequestCorrelationId })
+            entity.ToTable("vault_ratchet_sessions");
+            entity.HasKey(e => e.SessionId);
+            entity.Property(e => e.LocalEphemeralPub).HasColumnType("BLOB");
+            entity.Property(e => e.RemoteEphemeralPub).HasColumnType("BLOB");
+            entity.Property(e => e.RootKey).HasColumnType("BLOB");
+            entity.Property(e => e.SendChainKey).HasColumnType("BLOB");
+            entity.Property(e => e.RecvChainKey).HasColumnType("BLOB");
+            entity.Property(e => e.LocalEphemeralPriv).HasColumnType("BLOB");
+            entity.Property(e => e.RatchetStateBlob).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.OwnerDeviceId, e.RemotePeerId, e.RemoteDeviceId })
                 .IsUnique()
-                .HasFilter("\"ReservedForRequestCorrelationId\" IS NOT NULL");
-            entity.HasOne<SelfIdentityDbo>()
+                .HasDatabaseName("ix_vault_ratchet_route");
+        });
+        // 7. Vault Group Sender Keys
+        modelBuilder.Entity<VaultGroupSenderKeyEntity>(entity =>
+        {
+            entity.ToTable("vault_group_sender_keys");
+            entity.HasKey(e => new { e.ChannelId, e.AuthorIdentityId, e.AuthorDeviceId });
+            entity.Property(e => e.AuthorSigningPub).HasColumnType("BLOB");
+            entity.Property(e => e.ChainKey).HasColumnType("BLOB");
+            entity.Property(e => e.SigningPriv).HasColumnType("BLOB");
+        });
+        // 8. Vault Group Receiver Sessions
+        modelBuilder.Entity<VaultGroupReceiverSessionEntity>(entity =>
+        {
+            entity.ToTable("vault_group_receiver_sessions");
+            entity.HasKey(e => new { e.ChannelId, e.AuthorIdentityId, e.AuthorDeviceId });
+            entity.Property(e => e.AuthorSigningPub).HasColumnType("BLOB");
+            entity.Property(e => e.ChainKey).HasColumnType("BLOB");
+            entity.Property(e => e.SkippedKeysBlob).HasColumnType("BLOB");
+        });
+        // 9. Vault Group Credentials
+        modelBuilder.Entity<VaultGroupCredentialsEntity>(entity =>
+        {
+            entity.ToTable("vault_group_credentials");
+            entity.HasKey(e => e.ChannelId);
+            entity.Property(e => e.AuthCredentialMac).HasColumnType("BLOB");
+            entity.Property(e => e.MasterKey).HasColumnType("BLOB");
+            entity.Property(e => e.LocalBlobKey).HasColumnType("BLOB");
+            entity.Property(e => e.CurrentEpoch).HasDefaultValue(0u);
+        });
+        // 10. Vault Pending Handshakes
+        modelBuilder.Entity<VaultPendingHandshakeEntity>(entity =>
+        {
+            entity.ToTable("vault_pending_handshakes");
+            entity.HasKey(e => new { e.RecipientIdentityId, e.SenderIdentityId });
+            entity.Property(e => e.EnvelopePayload).HasColumnType("BLOB");
+        });
+        // 11. Ops Outbox Jobs
+        modelBuilder.Entity<OpsOutboxJobEntity>(entity =>
+        {
+            entity.ToTable("ops_outbox_jobs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Payload).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.Status, e.NextAttemptAtUtc, e.SequenceNumber })
+                .HasDatabaseName("ix_ops_outbox_due");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.Status, e.SequenceNumber })
+                .HasDatabaseName("ix_ops_outbox_owner");
+            entity.HasIndex(e => new { e.Status, e.CreatedAtUtc })
+                .HasDatabaseName("ix_ops_outbox_retention");
+        });
+        // 12. Ops Pending Ingress — persist-then-ack mailbox drain spool
+        modelBuilder.Entity<OpsPendingIngressEnvelopeEntity>(entity =>
+        {
+            entity.ToTable("ops_pending_ingress");
+            entity.HasKey(e => e.SequenceNumber);
+            entity.Property(e => e.QueueId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB");
+            entity.Property(e => e.Ciphertext).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.QueueId })
+                .IsUnique()
+                .HasDatabaseName("ix_ops_pending_ingress_dedup");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.SequenceNumber })
+                .HasDatabaseName("ix_ops_pending_ingress_owner_order");
+        });
+        // 13. Peer Contacts
+        modelBuilder.Entity<PeerContactEntity>(entity =>
+        {
+            entity.ToTable("peer_contacts");
+            entity.HasKey(e => new { e.OwnerIdentityId, e.RemotePeerId });
+            entity.Property(e => e.Nickname).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.PrimaryPublicKey).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.OwnerIdentityId, e.Nickname })
+                .HasDatabaseName("ix_peer_contact_nickname");
+        });
+        // 15. Peer Contact Devices
+        modelBuilder.Entity<PeerContactDeviceEntity>(entity =>
+        {
+            entity.ToTable("peer_contact_devices");
+            entity.HasKey(e => new { e.OwnerIdentityId, e.RemotePeerId, e.DeviceId });
+            entity.HasOne<PeerContactEntity>()
                 .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // PreHandshakeSessions
-        modelBuilder.Entity<PreHandshakeSessionDbo>(entity =>
-        {
-            entity.ToTable("PreHandshakeSessions");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.LocalRequestId).IsRequired();
-            entity.Property(e => e.RecipientPublicKeyHash);
-            entity.Property(e => e.InitialRootKey).IsRequired();
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.ExpiresAtUtc);
-            entity.Property(e => e.RemoteIdentityKeySpki).IsRequired();
-            entity.Property(e => e.RemoteIdentityKeySpkiHash);
-
-            entity.HasIndex(e => e.SelfIdentityId);
-            entity.HasIndex(e => new { e.SelfIdentityId, e.ExpiresAtUtc });
-            entity.HasIndex(e => new { e.SelfIdentityId, e.RecipientPublicKeyHash });
-            entity.HasIndex(e => new { e.SelfIdentityId, e.LocalRequestId }).IsUnique();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.RemoteIdentityKeySpkiHash, e.CreatedAtUtc });
-        });
-
-        // SelfIdentity
-        modelBuilder.Entity<SelfIdentityDbo>(entity =>
-        {
-            entity.ToTable("SelfIdentity");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id)
-                .ValueGeneratedOnAdd();
-            entity.Property(e => e.PublicIdentityId)
-                .IsRequired();
-            entity.Property(e => e.Name).IsRequired();
-            entity.Property(e => e.LastUsedUtc)
-                  .IsRequired()
-                  .HasConversion(
-                      v => v.ToUnixTimeMilliseconds(),
-                      v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.Property(e => e.ListeningPort)
-                .IsRequired();
-            entity.Property(e => e.DeviceId)
-                .IsRequired();
-            entity.HasIndex(e => e.Name).IsUnique();
-            entity.HasIndex(e => e.PublicIdentityId); // non-unique
-            entity.HasIndex(e => e.LastUsedUtc);
-            entity.HasIndex(e => e.ActiveIdentityKeyFingerprint); // index for fast fingerprint lookup
-        });
-
-        // SelfIdentityKeys (one-to-one with SelfIdentity)
-        modelBuilder.Entity<SelfIdentityKeysDbo>(entity =>
-        {
-            entity.ToTable("SelfIdentityKeys");
-            entity.HasKey(e => e.SelfIdentityId);
-            entity.Property(e => e.SelfIdentityId).ValueGeneratedNever();
-            entity.Property(e => e.IdentitySigningKey).IsRequired();
-            entity.Property(e => e.SignedPreKey).IsRequired();
-
-            entity.HasOne<SelfIdentityDbo>()
-                .WithOne(i => i.Keys)
-                .HasForeignKey<SelfIdentityKeysDbo>(k => k.SelfIdentityId)
+                .HasForeignKey(e => new { e.OwnerIdentityId, e.RemotePeerId })
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
-        // SelfIdentityKnownPeer
-        modelBuilder.Entity<SelfIdentityKnownPeerDbo>(entity =>
+        // 16. Chat Channels
+        modelBuilder.Entity<ChatChannelEntity>(entity =>
         {
-            entity.ToTable("SelfIdentityKnownPeer");
+            entity.ToTable("chat_channels");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.PeerId).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.PeerId }).IsUnique();
-            entity.HasOne<SelfIdentityDbo>()
+            entity.Property(e => e.Name).HasMaxLength(128).IsRequired();
+            entity.HasIndex(e => e.LastActivityUtc)
+                .HasDatabaseName("ix_chat_channel_activity");
+            entity.HasIndex(e => new { e.Type, e.OwnerIdentityId, e.RemotePeerId })
+                .HasDatabaseName("ix_chat_channel_direct");
+        });
+        // 17. Chat Channel Members
+        modelBuilder.Entity<ChatChannelMemberEntity>(entity =>
+        {
+            entity.ToTable("chat_channel_members");
+            entity.HasKey(e => new { e.ChannelId, e.MemberIdentityId });
+            entity.HasOne<ChatChannelEntity>()
                 .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // DirectSession
-        modelBuilder.Entity<DirectSessionDbo>(entity =>
-        {
-            entity.ToTable("DirectSession");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id)
-                .ValueGeneratedOnAdd();
-            entity.Property(e => e.RemotePeerId)
-                .IsRequired();
-            entity.Property(e => e.SessionId)
-                .IsRequired();
-            entity.Property(e => e.SelfIdentityId)
-                .IsRequired();
-            // Non-unique helper indexes for common lookups
-            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
-            entity.HasIndex(e => new { e.SelfIdentityId, e.SessionId });
-            // TEMP: remove FK to PeerConnections during Network domain cutover; keep logical reference only
-            entity.HasOne<SelfIdentityDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        modelBuilder.Entity<PreKeyBundleDbo>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PublicKey).IsRequired();
-            entity.Property(e => e.PeerId)
-                .IsRequired();
-
-            // FK to authoritative peer identity catalog
-            entity.HasOne<PeerIdentityDbo>()
-                .WithMany()
-                .HasForeignKey(d => d.PeerId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        modelBuilder.Entity<PeerPublicSigningKeyDbo>(entity =>
-        {
-            entity.ToTable("PeerPublicSigningKeys");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId).IsRequired();
-            entity.Property(e => e.PublicKey).IsRequired();
-            entity.Property(e => e.ActiveAtUtc).IsRequired();
-            // ExpiredAtUtc nullable
-
-            entity.HasIndex(e => e.PeerId);
-            entity.HasIndex(e => new { e.PeerId, e.ActiveAtUtc });
-            entity.HasIndex(e => new { e.PeerId, e.ExpiredAtUtc });
-        });
-
-        // GroupMembers (group membership and roles)
-        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupMemberDbo>(entity =>
-        {
-            entity.ToTable("GroupMembers");
-            entity.HasKey(e => new { e.ConversationId, e.PublicIdentityId });
-            entity.Property(e => e.ConversationId)
-                .IsRequired();
-            entity.Property(e => e.PublicIdentityId)
-                .IsRequired();
-            entity.Property(e => e.PeerId)
-                .IsRequired(false);
-            entity.Property(e => e.SelfId).IsRequired(false);
-            entity.Property(e => e.Role).IsRequired();
-            entity.Property(e => e.ProfileKey).IsRequired();
-            entity.Property(e => e.JoinedAtUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.Property(e => e.RemovedAtUtc)
-                .IsRequired(false)
-                .HasConversion(
-                    v => v.HasValue ? v.Value.ToUnixTimeMilliseconds() : (long?)null,
-                    v => v.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(v.Value) : (DateTimeOffset?)null);
-            entity.HasIndex(e => e.ConversationId);
-            entity.HasOne<ConversationDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // GroupStates (group metadata: epoch, name)
-        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.GroupStateDbo>(entity =>
-        {
-            entity.ToTable("GroupStates");
-            entity.HasKey(e => e.ConversationId);
-            entity.Property(e => e.ConversationId)
-                .IsRequired();
-            entity.Property(e => e.Epoch).IsRequired();
-            entity.Property(e => e.Name).IsRequired(false);
-            entity.Property(e => e.AvatarId).IsRequired(false);
-            entity.Property(e => e.CreatedAtUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.Property(e => e.UpdatedAtUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.HasOne<ConversationDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // PendingGroupInvitations (pending group invites received from remote peers)
-        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.PendingGroupInvitationDbo>(entity =>
-        {
-            entity.ToTable("PendingGroupInvitations");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.InviterPeerId).IsRequired();
-            entity.Property(e => e.CreatorIdentityKey).IsRequired();
-            entity.Property(e => e.InitialMembersJson).IsRequired();
-            entity.Property(e => e.GroupName).IsRequired(false);
-            entity.Property(e => e.ReceivedAtUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.Property(e => e.Status).IsRequired();
-            entity.HasIndex(e => e.ConversationId);
-        });
-
-        // SenderKeyRecords (Signal Protocol Sender Key state persistence)
-        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.SenderKeyRecordDbo>(entity =>
-        {
-            entity.ToTable("SenderKeyRecords");
-            entity.HasKey(e => new { e.ConversationId, e.SenderPeerId, e.DeviceId });
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.SenderPeerId).IsRequired();
-            entity.Property(e => e.DeviceId).IsRequired();
-            entity.Property(e => e.RecordBytes).IsRequired();
-        });
-
-        modelBuilder.Entity<SignedPreKeyDbo>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PublicKey).IsRequired();
-            entity.Property(e => e.Signature).IsRequired();
-
-            entity.HasOne(d => d.PreKeyBundle)
-                .WithMany(p => p.SignedPreKeys)
-                .HasForeignKey(d => d.PreKeyBundleId)
-                .IsRequired();
-        });
-
-        modelBuilder.Entity<OneTimePreKeyDbo>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PublicKey).IsRequired();
-
-            entity.HasOne(d => d.PreKeyBundle)
-                .WithMany(p => p.OneTimePreKeys)
-                .HasForeignKey(d => d.PreKeyBundleId)
-                .IsRequired();
-        });
-
-        modelBuilder.Entity<DhtNode>(builder =>
-        {
-            builder.HasKey(e => e.Id);
-            builder.Property(e => e.Id)
-                .HasConversion(new ValueConverter<NodeId, byte[]>(v => v.ToArray(), v => NodeId.FromBytes(v)));
-
-            builder.Property(e => e.EndPoint)
-                .HasConversion(new DnsEndPointValueConverter());
-        });
-
-        
-
-        // DirectSessionConversation mapping
-        modelBuilder.Entity<DirectSessionConversationDbo>(entity =>
-        {
-            entity.ToTable("DirectSessionConversations");
-            entity.HasKey(e => new { e.SelfIdentityId, e.DirectSessionId });
-            entity.Property(e => e.SelfIdentityId)
-                .IsRequired();
-            entity.Property(e => e.DirectSessionId).IsRequired();
-            entity.Property(e => e.ConversationId)
-                .IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.ConversationId }).IsUnique();
-        });
-
-        // PendingSessions (Cryptography domain persistence)
-        modelBuilder.Entity<PendingSessionDbo>(entity =>
-        {
-            entity.ToTable("PendingSessions");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.RemotePeerId).IsRequired();
-            entity.Property(e => e.ProtocolVersion).IsRequired();
-            entity.Property(e => e.Invitation).IsRequired();
-            entity.Property(e => e.RequestCorrelationId);
-            entity.Property(e => e.IsRelayed).IsRequired();
-            entity.Property(e => e.InviterIdentityKey);
-            entity.Property(e => e.CallbackEndpointHost);
-            entity.Property(e => e.CallbackEndpointPort);
-            entity.Property(e => e.State).IsRequired();
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId });
-        });
-
-        // SentInvitations (Cryptography domain persistence)
-        modelBuilder.Entity<SentInvitationDbo>(entity =>
-        {
-            entity.ToTable("SentInvitations");
-            entity.HasKey(e => new { e.SelfIdentityId, e.RequestCorrelationId });
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.RequestCorrelationId).IsRequired();
-            entity.Property(e => e.SignedPreKeyId).IsRequired();
-            entity.Property(e => e.OneTimePreKeyId);
-            entity.Property(e => e.TargetPeerId);
-            entity.Property(e => e.TargetDisplayName);
-            entity.Property(e => e.TargetEndpointHost);
-            entity.Property(e => e.TargetEndpointPort);
-            entity.Property(e => e.InviteRouteKind).IsRequired();
-            entity.Property(e => e.InviteRelayHostPeerId);
-            entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.ExpiresAtUtc).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.ExpiresAtUtc });
-            entity.HasOne<SelfIdentityDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // RatchetKeyIndex: fast lookup from (SelfIdentityId, RatchetPublicKey) -> DirectSessionId
-        modelBuilder.Entity<RatchetKeyIndexDbo>(entity =>
-        {
-            entity.ToTable("RatchetKeyIndex");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.DirectSessionId).IsRequired();
-            entity.Property(e => e.RatchetPublicKey).IsRequired();
-            entity.Property(e => e.UpdatedAtUtc).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.RatchetPublicKey }).IsUnique();
-        });
-
-        // Conversations
-        modelBuilder.Entity<ConversationDbo>(entity =>
-        {
-            entity.ToTable("Conversations");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id)
-                .ValueGeneratedNever();
-            entity.Property(e => e.SelfIdentityId)
-                .IsRequired();
-            entity.Property(e => e.Kind).IsRequired();
-            entity.Property(e => e.CreatedAt).IsRequired();
-            entity.Property(e => e.UpdatedAt).IsRequired();
-            entity.HasIndex(e => e.Kind);
-            entity.HasOne<SelfIdentityDbo>()
-                .WithMany()
-                .HasForeignKey(e => e.SelfIdentityId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-
-            entity.HasMany(e => e.Messages)
-                .WithOne(m => m.Conversation)
-                .HasForeignKey(m => m.ConversationId)
-                .IsRequired()
+                .HasForeignKey(e => e.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasMany(e => e.Participants)
-                .WithOne(p => p.Conversation)
-                .HasForeignKey(p => p.ConversationId)
-                .IsRequired()
+            entity.HasIndex(e => e.MemberIdentityId)
+                .HasDatabaseName("ix_chat_member_identity");
+        });
+        // 18. Chat Channel Payloads
+        modelBuilder.Entity<ChatChannelPayloadEntity>(entity =>
+        {
+            entity.ToTable("chat_channel_payloads");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EncryptedPayload).HasColumnType("BLOB");
+            entity.HasOne<ChatChannelEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.ChannelId, e.SentAtUtc })
+                .HasDatabaseName("ix_chat_payload_chronological");
+        });
+        // 19. Relay Prekeys
+        modelBuilder.Entity<RelayPreKeyEntity>(entity =>
+        {
+            entity.ToTable("relay_prekeys");
+            entity.HasKey(e => new { e.RoutingToken, e.DeviceId });
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.IdentityKey).HasColumnType("BLOB");
+            entity.Property(e => e.SignedPreKey).HasColumnType("BLOB");
+            entity.Property(e => e.SignedPreKeySignature).HasColumnType("BLOB");
+            entity.Property(e => e.OneTimePreKeysJson).IsRequired();
+            entity.HasIndex(e => e.UpdatedAtUtc)
+                .HasDatabaseName("ix_relay_prekeys_updated");
+        });
+        // 20. Relay Profile Slots
+        modelBuilder.Entity<RelayProfileSlotEntity>(entity =>
+        {
+            entity.ToTable("relay_profile_slots");
+            entity.HasKey(e => e.BlindedLocator);
+            entity.Property(e => e.BlindedLocator).HasColumnType("BLOB");
+            entity.Property(e => e.WriteTokenHash).HasColumnType("BLOB");
+            entity.Property(e => e.Ciphertext).HasColumnType("BLOB");
+            entity.Property(e => e.Nonce).HasColumnType("BLOB");
+            entity.HasIndex(e => e.ExpiresAtUtc)
+                .HasDatabaseName("ix_relay_profile_expiry");
+        });
+        // 21. Relay Ledger Epochs
+        modelBuilder.Entity<RelayLedgerEpochEntity>(entity =>
+        {
+            entity.ToTable("relay_ledger_epochs");
+            entity.HasKey(e => e.ChannelId);
+            entity.Property(e => e.EncryptedRosterBlob).HasColumnType("BLOB");
+            entity.Property(e => e.ZkPublicParams).HasColumnType("BLOB");
+            entity.HasIndex(e => e.RelayIdentityId)
+                .HasDatabaseName("ix_relay_ledger_relay");
+        });
+        // 22. Relay Ledger Routing Tokens
+        modelBuilder.Entity<RelayLedgerRoutingTokenEntity>(entity =>
+        {
+            entity.ToTable("relay_ledger_routing_tokens");
+            entity.HasKey(e => new { e.ChannelId, e.RoutingToken });
+            entity.HasOne<RelayLedgerEpochEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.ChannelId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
-
-        // Messages
-        modelBuilder.Entity<MessageDbo>(entity =>
+        // 23. Peer Profiles
+        modelBuilder.Entity<PeerProfileEntity>(entity =>
         {
-            entity.ToTable("Messages");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId)
-                .IsRequired();
-            entity.Property(e => e.PublicMessageId)
-                .IsRequired();
-            entity.Property(e => e.SenderSelfId);
-            entity.Property(e => e.Body).IsRequired();
-            entity.Property(e => e.SentAt).IsRequired();
-            entity.HasIndex(e => new { e.ConversationId, e.SentAt });
-            entity.HasIndex(e => new { e.ConversationId, MessageGuid = e.PublicMessageId }).IsUnique();
-        });
-
-        // ConversationParticipants (composite key)
-        modelBuilder.Entity<ConversationParticipantDbo>(entity =>
-        {
-            entity.ToTable("ConversationParticipants");
-            entity.HasKey(e => new { e.ConversationId, e.ParticipantId });
-            entity.Property(e => e.ConversationId)
-                .IsRequired();
-            entity.Property(e => e.ParticipantId)
-                .IsRequired();
-        });
-
-        // ReadReceipts
-        modelBuilder.Entity<ReadReceiptDbo>(entity =>
-        {
-            entity.ToTable("ReadReceipts");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId)
-                .IsRequired();
-            entity.Property(e => e.MessageGuid).IsRequired();
-            entity.Property(e => e.ReaderId).IsRequired();
-            entity.Property(e => e.SentAt).IsRequired();
-            entity.HasIndex(e => new { e.ConversationId, e.MessageGuid, e.ReaderId }).IsUnique();
-            entity.HasOne(e => e.Conversation)
-                .WithMany()
-                .HasForeignKey(e => e.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
-        });
-
-        // MessageQueue
-        modelBuilder.Entity<MessageQueueItemDbo>(entity =>
-        {
-            entity.ToTable("MessageQueue");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.AckId).IsRequired();
-            entity.Property(e => e.RecipientPublicIdentityId).IsRequired();
-            entity.Property(e => e.Blob).IsRequired();
-            entity.Property(e => e.EnqueuedAtUtc).IsRequired();
-            entity.HasIndex(e => e.EnqueuedAtUtc);
-            entity.HasIndex(e => e.RecipientPublicIdentityId);
-            entity.HasIndex(e => new { e.RecipientPublicIdentityId, e.EnqueuedAtUtc });
-            entity.HasIndex(e => e.AckId).IsUnique();
-        });
-
-        // PeerRoutingProfile (new Network domain schema)
-        modelBuilder.Entity<PeerRoutingProfileDbo>(entity =>
-        {
-            entity.ToTable("PeerRoutingProfiles");
+            entity.ToTable("peer_profiles");
             entity.HasKey(e => e.PeerId);
-            entity.Property(e => e.PeerId).ValueGeneratedNever();
-            entity.Property(e => e.DirectMessagePublicKey);
-            entity.Property(e => e.ReachabilityStatus).IsRequired();
-            entity.Property(e => e.ReachabilityLastChangeUtc);
+            entity.Property(e => e.DisplayName).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.StatusBio).HasMaxLength(512);
         });
-
-        modelBuilder.Entity<GrpcEndPointRoutingDbo>(entity =>
+        // 24. Peer Profile Snapshots
+        modelBuilder.Entity<PeerProfileSnapshotEntity>(entity =>
         {
-            entity.ToTable("PeerRoutingGrpcEndPoints");
+            entity.ToTable("peer_profile_snapshots");
+            entity.HasKey(e => new { e.PeerId, e.SourceEndpoint });
+            entity.Property(e => e.BlindedLocator).HasColumnType("BLOB");
+            entity.Property(e => e.MetadataJson).IsRequired();
+            entity.HasIndex(e => new { e.PeerId, e.LastObservedAtUtc })
+                .HasDatabaseName("ix_peer_snapshot_recency");
+        });
+        // 25. Peer Mailbox Routing
+        modelBuilder.Entity<PeerMailboxRoutingEntity>(entity =>
+        {
+            entity.ToTable("peer_mailbox_routing");
+            entity.HasKey(e => new { e.PeerId, e.RelayEndpoint });
+            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB");
+            entity.HasIndex(e => new { e.PeerId, e.LastObservedAtUtc })
+                .HasDatabaseName("ix_peer_mailbox_observed");
+        });
+        // 26. Chat Messages
+        modelBuilder.Entity<ChatMessageEntity>(entity =>
+        {
+            entity.ToTable("chat_messages");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId).IsRequired();
-            entity.Property(e => e.Host).IsRequired();
-            entity.Property(e => e.Port).IsRequired();
-            entity.Property(e => e.LastSeenUtc).IsRequired();
-            entity.HasIndex(e => new { e.PeerId, e.Host, e.Port }).IsUnique();
-            entity.HasOne<PeerRoutingProfileDbo>()
+            entity.Property(e => e.AuthorId).HasColumnType("BLOB");
+            entity.Property(e => e.ReplyAuthorId).HasColumnType("BLOB");
+            entity.Property(e => e.DeletedBy).HasColumnType("BLOB");
+            entity.Property(e => e.LinkPreviewThumbnailSha256).HasColumnType("BLOB");
+            entity.Property(e => e.LinkPreviewThumbnailKey).HasColumnType("BLOB");
+            entity.Property(e => e.LinkPreviewThumbnailNonce).HasColumnType("BLOB");
+            entity.Property(e => e.TimestampUnixMs).HasConversion<long>();
+            entity.Property(e => e.ExpiresAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.DeliveredAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.ReadAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.EditedAtUnixMs).HasConversion<long?>();
+            entity.Property(e => e.DeletedAtUnixMs).HasConversion<long?>();
+            entity.HasIndex(e => new { e.ChannelId, e.TimestampUnixMs })
+                .HasDatabaseName("ix_chat_timeline");
+            entity.HasIndex(e => e.ExpiresAtUnixMs)
+                .HasDatabaseName("ix_chat_expiry");
+        });
+        // 27. Chat Message Mentions
+        modelBuilder.Entity<ChatMessageMentionEntity>(entity =>
+        {
+            entity.ToTable("chat_message_mentions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.IdentityId).HasColumnType("BLOB");
+            entity.HasIndex(e => e.IdentityId).HasDatabaseName("ix_chat_mention_identity");
+            entity.HasOne<ChatMessageEntity>()
                 .WithMany()
-                .HasForeignKey(e => e.PeerId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
-
-        modelBuilder.Entity<RelayLinkDbo>(entity =>
+        // 28. Chat Reactions
+        modelBuilder.Entity<ChatReactionEntity>(entity =>
         {
-            entity.ToTable("PeerRoutingRelays");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.PeerId).IsRequired();
-            entity.Property(e => e.RelayPeerId).IsRequired();
-            entity.Property(e => e.LastSeenUtc).IsRequired();
-            entity.HasIndex(e => new { e.PeerId, e.RelayPeerId }).IsUnique();
-            entity.HasOne<PeerRoutingProfileDbo>()
+            entity.ToTable("chat_reactions");
+            entity.HasKey(e => new { e.MessageId, e.ReactorId, e.Emoji });
+            entity.Property(e => e.ReactorId).HasColumnType("BLOB");
+            entity.Property(e => e.Emoji).HasMaxLength(32).IsRequired();
+            entity.HasOne<ChatMessageEntity>()
                 .WithMany()
-                .HasForeignKey(e => e.PeerId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
-
-        modelBuilder.Entity<PeerRouteCandidateDbo>(entity =>
+        // 29. Chat Attachments
+        modelBuilder.Entity<ChatAttachmentEntity>(entity =>
         {
-            entity.ToTable("PeerRouteCandidates");
+            entity.ToTable("chat_attachments");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.SelfIdentityId).IsRequired();
-            entity.Property(e => e.RemotePeerId).IsRequired();
-            entity.Property(e => e.RouteKind).IsRequired();
-            entity.Property(e => e.EndpointHost);
-            entity.Property(e => e.EndpointPort);
-            entity.Property(e => e.RelayHostPeerId);
-            entity.Property(e => e.ObservedAtUtc).IsRequired();
-            entity.Property(e => e.LastAttemptAtUtc);
-            entity.Property(e => e.LastSuccessAtUtc);
-            entity.Property(e => e.AttemptCount).IsRequired();
-            entity.Property(e => e.LastError);
-            entity.Property(e => e.Source).IsRequired();
-            entity.HasIndex(e => new { e.SelfIdentityId, e.RemotePeerId, e.RouteKind, e.EndpointHost, e.EndpointPort, e.RelayHostPeerId }).IsUnique();
-        });
-
-
-        modelBuilder.Entity<DiscoveredPeerDbo>(entity =>
-        {
-            entity.ToTable("DiscoveredPeers");
-            entity.HasKey(e => e.DiscoveryKey);
-            entity.Property(e => e.DiscoveryKey).IsRequired();
-            entity.Property(e => e.PublicKeyHash);
-            entity.Property(e => e.FirstSeenUtc).IsRequired();
-            entity.Property(e => e.LastSeenUtc).IsRequired();
-            entity.Property(e => e.Source).IsRequired();
-            entity.Property(e => e.Confidence).IsRequired();
-            entity.Property(e => e.BoundPeerId);
-            entity.HasIndex(e => e.PublicKeyHash);
-        });
-
-        modelBuilder.Entity<DiscoveredPeerEndpointDbo>(entity =>
-        {
-            entity.ToTable("DiscoveredPeerEndpoints");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.DiscoveryKey).IsRequired();
-            entity.Property(e => e.Host).IsRequired();
-            entity.Property(e => e.Port).IsRequired();
-            entity.Property(e => e.FirstSeenUtc).IsRequired();
-            entity.Property(e => e.LastSeenUtc).IsRequired();
-            entity.HasIndex(e => new { e.DiscoveryKey, e.Host, e.Port }).IsUnique();
-            entity.HasOne<DiscoveredPeerDbo>()
+            entity.Property(e => e.BlobSha256).HasColumnType("BLOB");
+            entity.Property(e => e.BaseNonce).HasColumnType("BLOB");
+            entity.Property(e => e.EncryptionKey).HasColumnType("BLOB");
+            entity.Property(e => e.Waveform).HasColumnType("BLOB");
+            entity.Property(e => e.InlineBytes).HasColumnType("BLOB");
+            entity.HasOne<ChatMessageEntity>()
                 .WithMany()
-                .HasForeignKey(e => e.DiscoveryKey)
-                .OnDelete(DeleteBehavior.Cascade)
-                .IsRequired();
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
-
-        // DomainEventOutbox (Outbox pattern for domain event processing)
-        modelBuilder.Entity<DomainEventOutboxDbo>(entity =>
+        // 30. Chat Group Invitations
+        modelBuilder.Entity<ChatGroupInvitationEntity>(entity =>
         {
-            entity.ToTable("DomainEventOutbox");
+            entity.ToTable("chat_group_invitations");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.EventType).IsRequired();
-            entity.Property(e => e.PayloadJson).IsRequired();
-            entity.Property(e => e.DestinationPeerId).IsRequired();
-            entity.Property(e => e.ProcessedAtUtc);
-            entity.HasIndex(e => e.ProcessedAtUtc);
+            entity.Property(e => e.InviterId).HasColumnType("BLOB");
+            entity.Property(e => e.GroupName).IsRequired();
+            entity.Property(e => e.InitialMembersBytes).HasColumnType("BLOB");
         });
-
-        // AnonymousRelayEgressJobs (Network egress for anonymous Relay messages)
-        modelBuilder.Entity<AnonymousRelayEgressJobDbo>(entity =>
+        // 31. Chat Unknown Group Messages
+        modelBuilder.Entity<ChatUnknownGroupMessageEntity>(entity =>
         {
-            entity.ToTable("AnonymousRelayEgressJobs");
-            entity.HasKey(e => e.JobId);
-            entity.Property(e => e.JobId).ValueGeneratedOnAdd();
-            entity.Property(e => e.RelayPeerId).IsRequired();
-            entity.Property(e => e.PayloadBytes).IsRequired();
-            entity.Property(e => e.AttemptCount).IsRequired();
-            entity.Property(e => e.NextAttemptUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.Property(e => e.IsSent).IsRequired();
-            entity.Property(e => e.IsPermanentlyFailed).IsRequired();
-            entity.HasIndex(e => e.NextAttemptUtc);
-            entity.HasIndex(e => e.IsSent);
-            entity.HasIndex(e => e.IsPermanentlyFailed);
-        });
-
-        // AuthenticatedPeerEgressJobs (Network egress for authenticated peer messages)
-        modelBuilder.Entity<AuthenticatedPeerEgressJobDbo>(entity =>
-        {
-            entity.ToTable("AuthenticatedPeerEgressJobs");
-            entity.HasKey(e => e.JobId);
-            entity.Property(e => e.JobId).ValueGeneratedOnAdd();
-            entity.Property(e => e.DestinationPeerId).IsRequired();
-            entity.Property(e => e.RoutePreference).IsRequired();
-            entity.Property(e => e.PayloadBytes).IsRequired();
-            entity.Property(e => e.AttemptCount).IsRequired();
-            entity.Property(e => e.NextAttemptUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.Property(e => e.IsSent).IsRequired();
-            entity.Property(e => e.IsPermanentlyFailed).IsRequired();
-            entity.HasIndex(e => e.NextAttemptUtc);
-            entity.HasIndex(e => e.IsSent);
-            entity.HasIndex(e => e.IsPermanentlyFailed);
-        });
-
-        // DeliveryCertificates (Persistent storage for Sealed Sender delivery certificates)
-        modelBuilder.Entity<Percolator.Infrastructure.Chat.Persistence.DeliveryCertificateDbo>(entity =>
-        {
-            entity.ToTable("DeliveryCertificates");
+            entity.ToTable("chat_unknown_group_messages");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-
-            // Unique index on (SelfId, RelayPeerId) to enforce one cert per self/relay pair
-            entity.HasIndex(e => new { e.SelfId, e.RelayPeerId }).IsUnique();
-
-            // Value converters for DDD types
-            entity.Property(e => e.SelfId)
-                .IsRequired();
-
-            entity.Property(e => e.RelayPeerId)
-                .IsRequired();
-
-            entity.Property(e => e.Payload)
-                .HasConversion(
-                    v => v.ToArray(),
-                    v => Percolator.Chat.GroupLedger.DeliveryCertificatePayloadBytes.FromBytes(v));
-
-            entity.Property(e => e.Signature)
-                .HasConversion(
-                    v => v.ToArray(),
-                    v => Percolator.Chat.GroupLedger.SignatureBytes.FromBytes(v));
-
-            entity.Property(e => e.ExpiresAtUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            entity.Property(e => e.AuthorId).HasColumnType("BLOB");
+            entity.Property(e => e.EncryptedPayload).HasColumnType("BLOB");
+            entity.Property(e => e.ReceivedAtUnixMs).HasConversion<long>();
+            entity.Property(e => e.ExpiresAtUnixMs).HasConversion<long>();
+            entity.HasIndex(e => e.ExpiresAtUnixMs)
+                .HasDatabaseName("ix_unknown_group_expiry");
+            entity.HasIndex(e => e.ReceivedAtUnixMs)
+                .HasDatabaseName("ix_unknown_group_received");
         });
-
-        // RelayGroupLedgerDbo (Relay Server Persistence)
-        modelBuilder.Entity<Percolator.Infrastructure.Network.RelayLedger.RelayGroupLedgerDbo>(entity =>
+        // 32. Relay Peer Directory (Chunk 4.2)
+        modelBuilder.Entity<RelayPeerDirectoryEntity>(entity =>
         {
-            entity.ToTable("RelayGroupLedgers");
-            entity.HasKey(e => e.ConversationId);
-            entity.Property(e => e.ConversationId).ValueGeneratedNever();
-            entity.Property(e => e.Epoch).IsRequired();
-            entity.Property(e => e.EncryptedEntriesBlob).IsRequired();
+            entity.ToTable("relay_peer_directory");
+            entity.HasKey(e => e.PeerId);
+            entity.Property(e => e.PeerId).HasColumnType("BLOB");
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasIndex(e => e.LastUpdatedAtUtc)
+                .HasDatabaseName("ix_peer_directory_updated");
         });
-
-        // RelayEgressJobDbo (Egress Outbox Persistence)
-        modelBuilder.Entity<Percolator.Infrastructure.Network.Egress.RelayEgressJobDbo>(entity =>
+        // 33. Relay Rendezvous Entries (Chunk 4.2)
+        modelBuilder.Entity<RelayRendezvousEntryEntity>(entity =>
         {
-            entity.ToTable("RelayEgressJobs");
-            entity.HasKey(e => e.JobId);
-            entity.Property(e => e.JobId).ValueGeneratedOnAdd();
-            entity.Property(e => e.DestinationPeerId).IsRequired();
-            entity.Property(e => e.PayloadBytes).IsRequired();
-            entity.Property(e => e.AttemptCount).IsRequired();
-            entity.Property(e => e.NextAttemptUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.HasIndex(e => e.NextAttemptUtc);
+            entity.ToTable("relay_rendezvous_entries");
+            entity.HasKey(e => e.BlindedLocator);
+            entity.Property(e => e.BlindedLocator).HasColumnType("BLOB");
+            entity.Property(e => e.EncryptedRoute).HasColumnType("BLOB");
+            entity.HasIndex(e => e.PublishedAtUtc)
+                .HasDatabaseName("ix_rendezvous_published");
         });
-
-        // GroupCredentialsDbo (Client Persistence - Cryptography Domain)
-        modelBuilder.Entity<Percolator.Infrastructure.Cryptography.GroupLedger.GroupCredentialsDbo>(entity =>
+        // 34. File Transfer Sessions (Chunk 4.4)
+        modelBuilder.Entity<TransferSessionEntity>(entity =>
         {
-            entity.ToTable("GroupCredentials");
-            entity.HasKey(e => e.ConversationId);
-            entity.Property(e => e.ConversationId).ValueGeneratedNever();
-            entity.Property(e => e.GroupMasterKey).IsRequired();
-            entity.Property(e => e.AuthCredentialMac).IsRequired();
+            entity.ToTable("ft_transfer_sessions");
+            entity.HasKey(e => e.TransferId);
+            entity.Property(e => e.LocalIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.InitiatorId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.MerkleRoot).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.ConcatenatedLeaves).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.BaseNonce).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.TransferKey).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
-
-        // SenderKeyRatchetDbo (Client Persistence - Cryptography Domain)
-        modelBuilder.Entity<Percolator.Infrastructure.Cryptography.GroupLedger.SenderKeyRatchetDbo>(entity =>
+        // 35. File Transfer Manifest Files (Chunk 4.4)
+        modelBuilder.Entity<ManifestFileEntity>(entity =>
         {
-            entity.ToTable("SenderKeyRatchets");
-            entity.HasKey(e => new { e.ConversationId, e.SenderKeyId });
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.SenderKeyId).IsRequired();
-            entity.Property(e => e.AuthorPublicIdentityId).IsRequired();
-            entity.Property(e => e.ChainKey).IsRequired();
-            entity.Property(e => e.SignatureKey).IsRequired();
+            entity.ToTable("ft_manifest_files");
+            entity.HasKey(e => new { e.TransferId, e.FileIndex });
+            entity.HasOne<TransferSessionEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.TransferId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
-
-        // UnknownMessageCacheDbo (Client Persistence - Cryptography Domain)
-        modelBuilder.Entity<Percolator.Infrastructure.Cryptography.GroupLedger.UnknownMessageCacheDbo>(entity =>
+        // 36. File Transfer Bitfields (Chunk 4.4)
+        modelBuilder.Entity<TransferBitfieldEntity>(entity =>
         {
-            entity.ToTable("UnknownMessageCaches");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.MissingKeyId).IsRequired();
-            entity.Property(e => e.Ciphertext).IsRequired();
-            entity.Property(e => e.ReceivedAtUtc)
-                .IsRequired()
-                .HasConversion(
-                    v => v.ToUnixTimeMilliseconds(),
-                    v => DateTimeOffset.FromUnixTimeMilliseconds(v));
-            entity.HasIndex(e => e.ConversationId);
+            entity.ToTable("ft_transfer_bitfields");
+            entity.HasKey(e => e.TransferId);
+            entity.Property(e => e.BitfieldBytes).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<TransferSessionEntity>()
+                .WithOne()
+                .HasForeignKey<TransferBitfieldEntity>(e => e.TransferId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
-
-        // SkippedMessageKeyDbo (Client Persistence - Cryptography Domain)
-        modelBuilder.Entity<Percolator.Infrastructure.Cryptography.GroupLedger.SkippedMessageKeyDbo>(entity =>
+        // 37. Swarm Endpoints (Chunk 4.4)
+        modelBuilder.Entity<SwarmEndpointEntity>(entity =>
         {
-            entity.ToTable("SkippedMessageKeys");
-            entity.HasKey(e => new { e.ConversationId, e.SenderKeyId, e.MessageIndex });
-            entity.Property(e => e.ConversationId).IsRequired();
-            entity.Property(e => e.SenderKeyId).IsRequired();
-            entity.Property(e => e.MessageIndex).IsRequired();
-            entity.Property(e => e.MessageKey).IsRequired();
+            entity.ToTable("ft_swarm_endpoints");
+            entity.HasKey(e => new { e.RendezvousId, e.PeerId });
+            entity.Property(e => e.RendezvousId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.PeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasIndex(e => e.LastSeenUtc).HasDatabaseName("ix_swarm_endpoints_expiry");
         });
+        // 38. File Transfer Filter Policies (Chunk 4.4)
+        modelBuilder.Entity<FilterPolicyEntity>(entity =>
+        {
+            entity.ToTable("ft_filter_policies");
+            entity.HasKey(e => e.OwnerId);
+            entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        // 39. Relay Registrations (Phase 3)
+        modelBuilder.Entity<RelayRegistrationEntity>(entity =>
+        {
+            entity.ToTable("relay_registrations");
+            entity.HasKey(e => e.RelayIdentityId);
+            entity.Property(e => e.Endpoint).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.PinnedCertificateSha256).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        modelBuilder.Entity<RelayMailboxBindingEntity>(entity =>
+        {
+            entity.ToTable("relay_mailbox_bindings");
+            entity.HasKey(e => new { e.RelayIdentityId, e.OwnerIdentityId });
+            entity.HasIndex(e => e.OwnerIdentityId);
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DrainToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.PreviousDrainToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.Status).HasDefaultValue(1);
+            entity.HasOne<RelayRegistrationEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.RelayIdentityId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 40. Relay Mailbox Capabilities (Phase 3)
+        modelBuilder.Entity<RelayMailboxCapabilityEntity>(entity =>
+        {
+            entity.ToTable("relay_mailbox_capabilities");
+            entity.HasKey(e => e.RoutingToken);
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DrainToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+        });
+        modelBuilder.Entity<RelayMailboxAuthorizedTokenEntity>(entity =>
+        {
+            entity.ToTable("relay_mailbox_authorized_tokens");
+            entity.HasKey(e => new { e.RoutingToken, e.Ordinal });
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<RelayMailboxCapabilityEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.RoutingToken)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<RelayQueuedEnvelopeEntity>(entity =>
+        {
+            entity.ToTable("relay_queued_envelopes");
+            entity.HasKey(e => e.QueueId);
+            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.EnvelopePayload).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasIndex(e => new { e.RoutingToken, e.Ordinal }).IsUnique();
+            entity.HasOne<RelayMailboxCapabilityEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.RoutingToken)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 41. Identity Settings (vault-stored launch preferences, personas + relay hosts)
+        modelBuilder.Entity<IdentitySettingsEntity>(entity =>
+        {
+            entity.ToTable("identity_settings");
+            entity.HasKey(e => e.IdentityId);
+            entity.Property(e => e.IdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        // 42. App Settings (vault-global key/value)
+        modelBuilder.Entity<AppSettingEntity>(entity =>
+        {
+            entity.ToTable("app_settings");
+            entity.HasKey(e => e.SettingKey);
+            entity.Property(e => e.SettingValue).IsRequired();
+        });
+        // Apply snake_case naming convention to all columns
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
+    }
+    private static string ToSnakeCase(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        var sb = new StringBuilder(input.Length + 4);
+        for (int i = 0; i < input.Length; i++)
+        {
+            char c = input[i];
+            if (char.IsUpper(c))
+            {
+                if (i > 0)
+                {
+                    sb.Append('_');
+                }
+                sb.Append(char.ToLowerInvariant(c));
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
     }
 }
-
-
-
+public sealed class DateTimeOffsetToTicksConverter : ValueConverter<DateTimeOffset, long>
+{
+    public DateTimeOffsetToTicksConverter()
+        : base(
+            d => d.UtcTicks,
+            ticks => new DateTimeOffset(ticks, TimeSpan.Zero))
+    {
+    }
+}
+public sealed class NullableDateTimeOffsetToTicksConverter : ValueConverter<DateTimeOffset?, long?>
+{
+    public NullableDateTimeOffsetToTicksConverter()
+        : base(
+            d => d.HasValue ? d.Value.UtcTicks : null,
+            ticks => ticks.HasValue ? new DateTimeOffset(ticks.Value, TimeSpan.Zero) : null)
+    {
+    }
+}

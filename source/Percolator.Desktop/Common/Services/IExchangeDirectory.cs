@@ -1,0 +1,93 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/ViewModel.spec.md before modifying this file.
+
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Percolator.Desktop.Features.Startup.Models;
+using Percolator.Domain.Common;
+using Percolator.Domain.Identities.ValueObjects;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+
+namespace Percolator.Desktop.Common.Services;
+
+/// <summary>
+/// Presentation-facing exchange (relay) facade ([VM-004], [VM-006]): ViewModels stay free of
+/// session internals. Implementations resolve from the authenticated session container, so
+/// all link/unlink state lands in the encrypted vault — the gate performs zero wire traffic
+/// ([DEP-DESKTOP-PRE-ACTIVATION-STEALTH]).
+/// </summary>
+public interface IExchangeDirectory
+{
+    /// <summary>Lists exchanges merged with their linked personas and saved port preferences.</summary>
+    Task<IReadOnlyList<ExchangeDirectoryEntry>> ListAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a self-hosted exchange: relay-host identity profile + registration in the vault,
+    /// with the optionally pre-linked personas. The tile appears offline — nothing listens yet.
+    /// </summary>
+    Task<ExchangeDirectoryEntry> CreateSelfHostedAsync(
+        PublicIdentityId relayIdentityId,
+        string displayName,
+        int preferredPort,
+        IReadOnlyList<PublicIdentityId> initialLinkedPersonaIds,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Registers a remote exchange (vault-local row only — no connection is opened).
+    /// The tile appears offline; launch semantics come from the personas linked to it.
+    /// </summary>
+    Task<ExchangeDirectoryEntry> RegisterRemoteAsync(
+        PublicIdentityId relayIdentityId,
+        string endpoint,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Edits a self-hosted exchange's profile (display name + preferred port). Remote
+    /// exchanges have no editable profile — their name is their endpoint.
+    /// </summary>
+    Task<DomainResult> UpdateSelfHostedProfileAsync(
+        PublicIdentityId relayIdentityId,
+        string displayName,
+        int preferredPort,
+        CancellationToken ct = default);
+
+    /// <summary>Links a persona to an exchange — a pure vault-local row write.</summary>
+    Task<DomainResult> LinkPersonaAsync(
+        PublicIdentityId relayIdentityId,
+        PublicIdentityId personaId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// "Stop using this exchange" — a pure vault-local row delete. When
+    /// <paramref name="purgeQueuedEnvelopes"/> is set and the exchange is self-hosted, the
+    /// relay-side queue lives in this same vault and is drained locally first.
+    /// <para>
+    /// The exchange's own <c>identity_settings</c> row (preferred port) deliberately survives
+    /// the unlink — it persists for the life of the relay registration so re-linking keeps
+    /// the launch preference (STOR-04). When a delete-exchange feature lands, it must call
+    /// <c>IDesktopSettingsRepository.DeleteAsync</c> inside the same operation.
+    /// </para>
+    /// </summary>
+    Task<DomainResult> UnlinkPersonaAsync(
+        PublicIdentityId relayIdentityId,
+        PublicIdentityId personaId,
+        bool purgeQueuedEnvelopes,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Starts the session's relay-facing transport endpoints (mapRelayEndpoints) for a selected
+    /// self-hosted exchange. Returns the bound port, or <c>null</c> when the transport was
+    /// already running.
+    /// </summary>
+    Task<int?> StartSelfHostedEndpointAsync(
+        ExchangeLaunchDescriptor exchange,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Provisions mailboxes (registration + pre-key publication) for each persona against every
+    /// exchange it is linked to. Aggregates failures rather than aborting the launch.
+    /// </summary>
+    Task<DomainResult> ProvisionLinkedMailboxesAsync(
+        IEnumerable<PublicIdentityId> personaIds,
+        CancellationToken ct = default);
+}
