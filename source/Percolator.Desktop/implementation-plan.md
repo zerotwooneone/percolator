@@ -164,9 +164,14 @@ flowchart TD
 
     subgraph Phase 2: Transports, Navigation & Messaging (Discord Model)
         C5["[DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1) (Completed)"]
-        C6["[DESK-06] Direct P2P & Relayed Conversation Directory with Outbound Pending (Flows B & C Phase 2)"]
-        C7["[DESK-07] Real-Time Messaging Experience, Volatile Drafts & Disappearing Messages (Apps.Chat)"]
-        C7A["[DESK-07-A] Inbound Handshake Domain/Application Event Pipeline & Simulator Decoupling"]
+        C6["[DESK-06] Direct P2P & Relayed Conversation Directory with Outbound Pending (Flows B & C Phase 2) (Completed)"]
+        C7["[DESK-07] Real-Time Messaging Experience, Volatile Drafts & Disappearing Messages (Apps.Chat) (Completed)"]
+        C7A["[DESK-07-A] Event Bus Promotion, SourceGen Fix, Outbox/Direct-Ingress Parity & CQRS Read Model"]
+        C7B["[DESK-07-B] Inbound Handshake Consent, Inbound DirectChannel Creation & Decorator Removal"]
+        C7C["[DESK-07-C] Bidirectional Handshake Finalization, Return-Route Carrying & Unified Outbound Workflow"]
+        C7D["[DESK-07-D] Shared Group Creation, Relay ACK, Invitation Lifecycle & Live Group Stream Worker"]
+        C7E["[DESK-07-E] Real-Time Chat/Profile Event Pipeline, Live Desktop Transcript & Simulator De-Duplication"]
+        C7F["[DESK-07-F] Remaining Simulator Business-Logic Cleanup & Cross-Peer E2E Verification"]
         C8["[DESK-08] Right-Anchored Profile & Connection Inspector Drawer"]
     end
 
@@ -178,7 +183,7 @@ flowchart TD
         C13["[DESK-13] Headless UI & Comprehensive Verification Test Suite"]
     end
 
-    C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C7A --> C8 --> C9 --> C10 --> C11 --> C12 --> C13
+    C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C7A --> C7B --> C7C --> C7D --> C7E --> C7F --> C8 --> C9 --> C10 --> C11 --> C12 --> C13
 ```
 
 ---
@@ -303,105 +308,552 @@ flowchart TD
 
 ---
 
-### [DESK-07-A] Inbound Handshake Domain/Application Event Pipeline & Simulator Decoupling
-* **QMS Traceability**: `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`), `DEP-DESKTOP-CRYPTO-BOUNDARY` (allocates `SYS-CRYPTO-BOUNDARY-ISOLATION`)
-* **Detailed Design**: `DEC-PULL-BASED-CONSENT-STAGING`, `INV-APP-EVENT-BUS-DECOUPLING`, `INV-RECORD-EVENT-ENFORCEMENT`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`
-* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[VM-014]`, `[R3-004]`, `[R3-005]`, `[R3-006]`, `[UISS-001]`, `[UISS-002]`
+### [DESK-07-A] Event Bus Promotion, SourceGen Fix, Outbox/Direct-Ingress Parity & CQRS Read Model
+* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE`, `DEP-DESKTOP-CRYPTO-BOUNDARY` (allocates `SYS-CRYPTO-BOUNDARY-ISOLATION`), `DEP-DESKTOP-DIRECT-TRANSPORT-INGRESS`
+* **Detailed Design**: `INV-APP-EVENT-BUS-DECOUPLING`, `INV-RECORD-EVENT-ENFORCEMENT`, `DEC-SQLITE-WAL-PRAGMAS`, `INV-DESKTOP-STATEFUL-PROJECTIONS`
+* **Governing Specs**: `[UISS-001]` to `[UISS-006]`, `[VM-003]`, `[VM-006]`, `anti-shortcut-discipline` Rules 1, 8, 9, 11, 16
 * **Target Deliverables**:
-  * Create: `Percolator.Domain/Identities/Events/InboundContactRequestReceivedDomainEvent.cs`
-    * Record: `public sealed record InboundContactRequestReceivedDomainEvent(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId, IdentityKey PrimaryPublicKey, DateTimeOffset OccurredOnUtc) : IDomainEvent` with `public Guid EventId { get; } = Guid.NewGuid();`
-  * Create: `Percolator.Domain/Identities/Events/ContactRequestApprovedDomainEvent.cs`
-    * Record: `public sealed record ContactRequestApprovedDomainEvent(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId, PeerTrustLevel TrustLevel, DateTimeOffset OccurredOnUtc) : IDomainEvent` with `public Guid EventId { get; } = Guid.NewGuid();`
-  * Create: `Percolator.Domain/Identities/Events/ContactRequestRejectedDomainEvent.cs`
-    * Record: `public sealed record ContactRequestRejectedDomainEvent(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId, bool IsBlocked, DateTimeOffset OccurredOnUtc) : IDomainEvent` with `public Guid EventId { get; } = Guid.NewGuid();`
-  * Modify: `Percolator.Domain/Identities/Model/PeerContact.cs`
-    * `CreateInboundRequest(...)`: Append `contact.AddDomainEvent(new InboundContactRequestReceivedDomainEvent(ownerIdentityId, remotePeerId, primaryPublicKey, timeProvider.UtcNow));` before returning success.
-    * `Approve(...)`: Update signature to `public DomainResult Approve(PeerTrustLevel initialTrust = PeerTrustLevel.Tofu, IDateTimeProvider? timeProvider = null)`. Append `AddDomainEvent(new ContactRequestApprovedDomainEvent(OwnerIdentityId, RemotePeerId, TrustLevel, timeProvider?.UtcNow ?? DateTimeOffset.UtcNow));` on transition to `ContactState.Active`.
-    * `Reject(...)`: Update signature to `public DomainResult Reject(bool block = false, IDateTimeProvider? timeProvider = null)`. Append `AddDomainEvent(new ContactRequestRejectedDomainEvent(OwnerIdentityId, RemotePeerId, block, timeProvider?.UtcNow ?? DateTimeOffset.UtcNow));` on transition to `ContactState.Rejected`.
-  * Create: `Percolator.Application/Profiles/Events/InboundContactRequestReceivedEvent.cs`
-    * Explicit Property Types (prevents primitive Value Object unboxing to naked Guids):
-      ```csharp
-      namespace Percolator.Application.Profiles.Events;
-      [Percolator.SourceGenerators.MapFromDomainEvent(typeof(Percolator.Domain.Identities.Events.InboundContactRequestReceivedDomainEvent))]
-      public sealed partial record InboundContactRequestReceivedEvent : Percolator.Application.Ports.IApplicationEvent
-      {
-          public Percolator.Domain.Identities.PublicIdentityId OwnerIdentityId { get; init; }
-          public Percolator.Domain.Identities.PublicIdentityId RemotePeerId { get; init; }
-          public Percolator.Domain.Identities.ValueObjects.IdentityKey PrimaryPublicKey { get; init; }
-      }
+  * **1. Promote Event Bus Ports to `Percolator.PluginSdk` (enables `Percolator.Apps.Chat`, `Apps.Discovery`, `Apps.FileTransfer`, and `Percolator.Application` to share one event bus without circular references)**:
+    * Move & re-namespace to `Percolator.PluginSdk.Events`:
+      * `Percolator.PluginSdk/Events/IApplicationEvent.cs` (`Guid EventId { get; }`, `DateTimeOffset OccurredOnUtc { get; }`)
+      * `Percolator.PluginSdk/Events/IEventPublisher.cs` (`ValueTask PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default) where TEvent : IApplicationEvent;`)
+      * `Percolator.PluginSdk/Events/IEventSubscriber.cs` (`IDisposable Subscribe<TEvent>(Func<TEvent, CancellationToken, ValueTask> handler) where TEvent : IApplicationEvent;`, `IDisposable RegisterFaultHandler(Action<EventDispatchError> handler);`)
+      * `Percolator.PluginSdk/Events/IEventBus.cs` (`IEventBus : IEventPublisher, IEventSubscriber`)
+      * `Percolator.PluginSdk/Events/EventDispatchError.cs`
+    * Delete old copies from `Percolator.Application/Ports/` and update `using Percolator.Application.Ports;` → `using Percolator.PluginSdk.Events;` across `Percolator.Application`, `Percolator.Infrastructure`, `Percolator.Desktop`, `Percolator.Simulator`, and test projects.
+    * Modify: `Percolator.Apps.Chat/Percolator.Apps.Chat.csproj` — add Analyzer reference:
+      ```xml
+      <ProjectReference Include="..\Percolator.SourceGenerators\Percolator.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
       ```
-  * Create: `Percolator.Application/Profiles/Events/ContactRequestApprovedEvent.cs`
-    * Explicit Property Types:
+  * **2. Fix `Percolator.SourceGenerators/DomainEventMapperGenerator.cs` Compile-Breaking Namespace Bug**:
+    * Lines 333 and 337 currently emit stale `Percolator.Application2.Ports`.
+    * Change emitted namespace to `Percolator.PluginSdk.Events` (or per-assembly internal/public extension in the consuming assembly's root namespace) and return type to `global::Percolator.PluginSdk.Events.IApplicationEvent?`.
+    * Add unit test in `Percolator.SourceGenerators.Tests` asserting generated `DomainEventMapperExtensions.g.cs` compiles cleanly against `Percolator.PluginSdk.Events.IApplicationEvent` with zero `Application2` references and preserves strongly-typed `[GuidId]` Value Objects when properties are explicitly declared on the partial record.
+  * **3. Create Shared Reactive Event Bus Helper for Simulator**:
+    * Create: `Percolator.Simulator/Features/Shell/SimulatorEventBusExtensions.cs` implementing `public static Observable<TEvent> ObserveEvent<TEvent>(this IEventSubscriber subscriber) where TEvent : IApplicationEvent` using `Observable.Create<TEvent>` + `subscriber.Subscribe<TEvent>((evt, _) => { observer.OnNext(evt); return ValueTask.CompletedTask; })` (mirrors `Percolator.Desktop/Common/EventBusExtensions.cs`).
+  * **4. Centralize Deterministic Direct Channel ID in Domain**:
+    * Modify: `Percolator.Domain/Channels/ValueObjects/ChannelId.cs` — add static factory:
       ```csharp
-      namespace Percolator.Application.Profiles.Events;
-      [Percolator.SourceGenerators.MapFromDomainEvent(typeof(Percolator.Domain.Identities.Events.ContactRequestApprovedDomainEvent))]
-      public sealed partial record ContactRequestApprovedEvent : Percolator.Application.Ports.IApplicationEvent
-      {
-          public Percolator.Domain.Identities.PublicIdentityId OwnerIdentityId { get; init; }
-          public Percolator.Domain.Identities.PublicIdentityId RemotePeerId { get; init; }
-          public Percolator.Domain.Identities.Model.PeerTrustLevel TrustLevel { get; init; }
-      }
+      public static ChannelId DeterministicForDirect(PublicIdentityId a, PublicIdentityId b)
       ```
-  * Create: `Percolator.Application/Profiles/Events/ContactRequestRejectedEvent.cs`
-    * Explicit Property Types:
+      using sorted 16-byte big-endian/GUID comparison + `SHA256.HashData` first 16 bytes (`ChannelId.FromBytes(hash[..16])`).
+    * Modify: `Percolator.Application/Services/PeerConnectionService.cs` — delete private `DeriveDirectChannelId`, call `ChannelId.DeterministicForDirect(_localIdentityId, targetPeerId)`.
+    * Modify: `Percolator.Simulator/Features/DirectChat/DirectHandshakeOrchestrator.cs` — delete `internal static class ChannelIdUtility`; replace all Simulator call sites with `ChannelId.DeterministicForDirect(...)`.
+  * **5. Add Production `OutboxDispatchHost` & Eliminate Simulator Outbox-Flushing Decorator**:
+    * Modify: `Percolator.Application/Delivery/Events/OutboxJobEnqueuedEvent.cs` — implement `IApplicationEvent` (add `public Guid EventId { get; } = Guid.NewGuid();`, keep `JobId`, `OwnerIdentityId`, `OccurredOnUtc`).
+    * Modify: `Percolator.Infrastructure/Persistence/Repositories/SqliteOutboxRepository.cs` — inject non-nullable `IEventPublisher eventPublisher`; when inserting a new `OutboxStatus.Pending` job, after `await _dbContext.SaveChangesAsync(ct);`, publish `await _eventPublisher.PublishAsync(new OutboxJobEnqueuedEvent(job.Id, job.OwnerIdentityId, job.CreatedAtUtc), ct);`.
+    * Create: `Percolator.Infrastructure/Transport/Workers/OutboxDispatchHost.cs` (`sealed class OutboxDispatchHost : BackgroundService`):
+      * Constructor: `(IServiceScopeFactory scopeFactory, IEventSubscriber eventSubscriber, OutboxDispatchHostOptions options, ILogger<OutboxDispatchHost> logger)` (all non-nullable).
+      * Maintains a `Channel<bool>` (bounded capacity 1, `DropWrite`) signaled on `OutboxJobEnqueuedEvent` via `IEventSubscriber.Subscribe<OutboxJobEnqueuedEvent>(...)`.
+      * Loop awaits either wake signal or `options.PollInterval` (default `TimeSpan.FromSeconds(1)`), opens an `IServiceScope`, resolves `OutboxWorker`, and loops `await worker.ProcessBatchAsync(options.BatchSize, stoppingToken)` while `processed > 0`.
+    * Modify: `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs` (`AddTransportInfrastructure`):
+      * Register `services.AddScoped<OutboxWorker>();`, `services.AddSingleton<OutboxDispatchHostOptions>();`, `services.AddHostedService<OutboxDispatchHost>();`.
+    * Delete: `Percolator.Simulator/Features/Topology/SimulatorOutboxFlushingIngressPipelineDecorator.cs`.
+    * Modify: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` — remove `SimulatorOutboxFlushingIngressPipelineDecorator` registration and manual `services.AddScoped<OutboxWorker>()` override (inherits production `IInboundIngressPipeline` + `OutboxDispatchHost`).
+  * **6. Fix Multi-Persona Direct P2P Ingress in `UnauthenticatedDeliveryEndpoint`**:
+    * Modify: `Percolator.Infrastructure/Transport/Endpoints/UnauthenticatedDeliveryEndpoint.cs`:
+      * Replace optional `PublicIdentityId? localRecipientId = null` with non-nullable `IActiveIdentitySet activeIdentities` in the primary persona-host constructor (preserve `ForRelay(...)` factory for standalone relay hosts).
+      * In `DeliverDirect(...)`: iterate `activeIdentities.Snapshot()`; attempt `_unwrapper.UnwrapDirect(request.EncryptedPackage.Memory, candidateId)` until one succeeds (returning `Failure` only if all active local identities fail unwrap).
+    * Modify: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` — delete line `services.AddScoped(typeof(PublicIdentityId?), _ => PublicIdentityId);` (persona is already registered in `IActiveIdentitySet`).
+    * Update `UnauthenticatedDeliveryEndpointTests` to supply `IActiveIdentitySet`.
+  * **7. Upgrade Channel Schema & CQRS `SqlConversationListQueryService` (Stop Dropping 0-Message Channels)**:
+    * Create: `Percolator.Domain/Channels/Model/DirectChannelStatus.cs`: `public enum DirectChannelStatus { Active = 0, PendingAcceptance = 1 }`.
+    * Modify: `Percolator.Domain/Channels/Model/DirectChannel.cs` — add `public DirectChannelStatus Status { get; private set; }` and `public RelayEndpoint? RelayEndpoint { get; private set; }` (update `Create` and `Rehydrate`; `Status` defaults to `Active` only where explicitly specified).
+    * Modify: `Percolator.Domain/Channels/Model/GroupChannel.cs` — add `public RelayEndpoint? RelayEndpoint { get; private set; }` (update `CreateGenesis` and `Rehydrate`).
+    * Modify: `Percolator.Infrastructure/Persistence/Entities/ChannelEntities.cs` (`ChatChannelEntity`) — add `public int Status { get; set; }` (default `0`) and `public string? RelayEndpoint { get; set; }`.
+    * Add EF Core migration `AddChannelStatusAndRelayEndpoint` under `Percolator.Infrastructure/Persistence/Migrations/`.
+    * Modify: `Percolator.Infrastructure/Persistence/Repositories/SqliteChannelRepository.cs` — persist and rehydrate `Status` and `RelayEndpoint`.
+    * Modify: `Percolator.Apps.Chat/Features/Messaging/ConversationSummaryReadModel.cs` — expand flat CQRS DTO:
       ```csharp
-      namespace Percolator.Application.Profiles.Events;
-      [Percolator.SourceGenerators.MapFromDomainEvent(typeof(Percolator.Domain.Identities.Events.ContactRequestRejectedDomainEvent))]
-      public sealed partial record ContactRequestRejectedEvent : Percolator.Application.Ports.IApplicationEvent
-      {
-          public Percolator.Domain.Identities.PublicIdentityId OwnerIdentityId { get; init; }
-          public Percolator.Domain.Identities.PublicIdentityId RemotePeerId { get; init; }
-          public bool IsBlocked { get; init; }
-      }
+      public enum ConversationChannelKind { Direct = 0, Group = 1 }
+
+      public sealed record ConversationSummaryReadModel(
+          ChannelId ChannelId,
+          ConversationChannelKind Kind,
+          PublicIdentityId? RemotePeerId,
+          string Title,
+          string LastMessageSnippet,
+          ulong LastActivityTimestampUnixMs,
+          int UnreadCount,
+          PublicIdentityId? LastAuthorId,
+          bool IsPendingAcceptance,
+          string? RelayEndpoint,
+          PublicIdentityId? RelayIdentityId);
       ```
-  * Modify: `Percolator.Application/Profiles/ContactRequestCoordinator.cs`
-    * Constructor: Add non-nullable `IEventPublisher eventPublisher` parameter (`_eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));`).
-    * `HandleInboundRequestAsync(...)`: After `await _contactRepo.SaveAsync(contact, ct);`, iterate `contact.DomainEvents`, map `InboundContactRequestReceivedDomainEvent` to `InboundContactRequestReceivedEvent.FromDomain(e)`, publish via `await _eventPublisher.PublishAsync(appEvent, ct);`, then `contact.ClearDomainEvents();`. (Note: Existing contacts in `PendingApproval` state exit early without raising events, preserving idempotency).
-    * `ApproveRequestAsync(...)`: Pass `_timeProvider` to `contact.Approve(initialTrust, _timeProvider)`. After `await _contactRepo.SaveAsync(contact, ct);`, iterate `contact.DomainEvents`, map `ContactRequestApprovedDomainEvent` to `ContactRequestApprovedEvent.FromDomain(e)`, publish via `await _eventPublisher.PublishAsync(appEvent, ct);`, then `contact.ClearDomainEvents();`.
-    * `RejectRequestAsync(...)`: Pass `_timeProvider` to `contact.Reject(block, _timeProvider)`. After `await _contactRepo.SaveAsync(contact, ct);`, iterate `contact.DomainEvents`, map `ContactRequestRejectedDomainEvent` to `ContactRequestRejectedEvent.FromDomain(e)`, publish via `await _eventPublisher.PublishAsync(appEvent, ct);`, then `contact.ClearDomainEvents();`.
-  * Update Affected Application & Integration Tests for `ContactRequestCoordinator` ctor change:
-    * `Percolator.Application.Tests/Handshake/HandshakeServiceTests.cs` (supply mock `IEventPublisher` or `InMemoryEventBus`)
-    * `Percolator.Application.Tests/Ingress/AppHostPipelineTests.cs` (supply mock `IEventPublisher`)
-    * `Percolator.Application.Tests/Profiles/ProfileAndContactTests.cs` (supply mock `IEventPublisher` and verify published events)
-    * `Percolator.ApplicationIntegrationTests/Builders/TestIdentityNode.cs` (supply host `IEventPublisher`)
-  * Modify: `Percolator.Desktop/Features/Transports/Services/InboundRequestStateService.cs`
-    * Constructor: Add non-nullable `IEventSubscriber eventSubscriber` parameter (`_eventSubscriber = eventSubscriber ?? throw new ArgumentNullException(nameof(eventSubscriber));`).
-    * Event Subscriptions:
-      * `eventSubscriber.Subscribe<InboundContactRequestReceivedEvent>(evt => { if (evt.OwnerIdentityId == _activePersonaId) _ = LoadRequestsForPersonaAsync(evt.OwnerIdentityId); }).AddTo(ref _bag);`
-      * `eventSubscriber.Subscribe<ContactRequestApprovedEvent>(evt => { if (evt.OwnerIdentityId == _activePersonaId) _ = LoadRequestsForPersonaAsync(evt.OwnerIdentityId); }).AddTo(ref _bag);`
-      * `eventSubscriber.Subscribe<ContactRequestRejectedEvent>(evt => { if (evt.OwnerIdentityId == _activePersonaId) _ = LoadRequestsForPersonaAsync(evt.OwnerIdentityId); }).AddTo(ref _bag);`
-  * Update: `Percolator.Desktop.Tests/Features/Transports/InboundRequestStateServiceTests.cs`
-    * Update `CreateService()` to supply mock `IEventSubscriber`.
-    * Update `Constructor_WithNullDependencies_ThrowsArgumentNullException` to include permutation check for null `IEventSubscriber`.
-    * Add unit tests verifying `InboundContactRequestReceivedEvent` and `ContactRequestApprovedEvent` trigger `LoadRequestsForPersonaAsync`.
-  * Delete: `Percolator.Simulator/Features/Topology/SimulatorNotifyingHandshakeDecorator.cs`
-  * Modify: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs`
-    * Remove registration and constructor use of `SimulatorNotifyingHandshakeDecorator`. Register `services.AddScoped<IHandshakeService, HandshakeService>();` directly.
-  * Modify: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs`
-    * Remove `_stateBus.Signals.Where(s => s.Category == SignalCategory.PendingHandshakeChanged)` listener for direct handshakes.
-    * When `_host != null`, resolve `IEventSubscriber` from `_hostScope.ServiceProvider`.
-    * Subscribe to `InboundContactRequestReceivedEvent` and `ContactRequestApprovedEvent` filtered by `evt.OwnerIdentityId == _host.PublicIdentityId`, invoking `RefreshPendingHandshakes()`, and registering via `.AddTo(ref Disposables)`.
-  * Modify: `Percolator.Simulator/Features/Scenarios/ScenarioRunnerService.cs`
-    * Replace `_stateBus.Signals.Where(s => s.NodeId == target.Id && s.Category == SignalCategory.PendingHandshakeChanged)` in lines 558, 632, 1582 with reactive event subscription on the target host's event subscriber: `target.Services.GetRequiredService<IEventSubscriber>().ObserveEvent<InboundContactRequestReceivedEvent>().Where(e => e.OwnerIdentityId == target.PublicIdentityId).FirstAsync(cancellationToken: ct)`.
-  * Create: `Percolator.Simulator.Tests/Topology/PersonaCardViewModelTests.cs`
-    * Verify that publishing `InboundContactRequestReceivedEvent` on the host event bus sets `HasPendingHandshake = true` and updates `PendingHandshakeText`.
-    * Verify that publishing `ContactRequestApprovedEvent` clears `HasPendingHandshake = false` and empties `PendingHandshakeText`.
+    * Modify: `Percolator.Infrastructure/Persistence/Repositories/SqlConversationListQueryService.cs`:
+      * **REMOVE** `if (latest == null) { continue; }` (lines 87–90). Channels with zero messages MUST be returned with `LastMessageSnippet = string.Empty` and `LastActivityTimestampUnixMs = (ulong)channel.LastActivityUtc.ToUnixTimeMilliseconds()`.
+      * For `Type == 0` (Direct): resolve `RemotePeerId = channel.OwnerIdentityId == currentUserGuid ? channel.RemotePeerId : channel.OwnerIdentityId`; resolve display title from `PeerContacts` (explicit nickname ≠ peer GUID) → `PeerProfiles.DisplayName` → truncated peer ID; resolve `RelayEndpoint` from `channel.RelayEndpoint` or `PeerMailboxRouting.RelayEndpoint` and join `RelayRegistrations` to populate `RelayIdentityId`.
+      * For `Type == 1` (Group): resolve `Title = channel.Name`, `RemotePeerId = null`, join `channel.RelayEndpoint` against `RelayRegistrations` to populate `RelayIdentityId`.
 * **CQRS Query & Anti-Shortcut Boundaries**:
-  * **Mandatory CQRS Read Port**: UI components (`InboundRequestStateService` and `PersonaCardViewModel`) MUST query pending requests strictly through `IPeerContactQueryService` (`[VM-006]`). Direct injection or invocation of write-side repositories (`IPeerContactRepository`, `IPendingHandshakeRepository`) in UI/ViewModel layers is prohibited.
-  * **Non-Nullable Required Dependencies**: All injected services (`IEventPublisher`, `IEventSubscriber`, `IPeerContactQueryService`) must be non-nullable, injected via constructor, and guarded with `ArgumentNullException.ThrowIfNull` (Anti-Shortcut Rule 1).
-  * **Strict Hexagonal Event Translation**: Domain emits `IDomainEvent`; Application maps via source-generated `[MapFromDomainEvent]` to `IApplicationEvent` records; Application publishes via `IEventPublisher`; UI subscribes via `IEventSubscriber`. The domain layer MUST NOT reference application pub/sub, and the UI layer MUST NOT subscribe directly to domain events.
-  * **Deterministic Subscription Teardown**: All event bus subscriptions must be explicitly attached to `_bag` (`DisposableBag`) or `Disposables` (`CompositeDisposable`) to eliminate memory leaks on persona deactivation/disposal.
+  * Zero `= null` defaults on required dependencies (`IEventPublisher`, `IEventSubscriber`, `IActiveIdentitySet`, `IDbContextFactory<PercolatorDbContext>`).
+  * `SqlConversationListQueryService` remains Singleton using `IDbContextFactory<PercolatorDbContext>` (`AsNoTracking()`, zero write-repo usage).
+  * `OutboxDispatchHost` never uses `while (!ct.IsCancellationRequested)` tight spin loops (blocks on `ChannelReader.WaitToReadAsync` + timed delay).
 * **Acceptance Criteria**:
-  * Direct and relayed inbound handshake envelopes processed by `HandshakeService.ReceiveInvitationAsync` persist to `IPendingHandshakeRepository` and `IPeerContactRepository`, raising `InboundContactRequestReceivedDomainEvent` and publishing `InboundContactRequestReceivedEvent`.
-  * Desktop `InboundRequestStateService` reacts dynamically to `InboundContactRequestReceivedEvent` for the active persona, updating `PendingCount` and `Requests` collection without manual reload or persona toggle.
-  * Simulator `PersonaCardViewModel` reacts directly to `InboundContactRequestReceivedEvent` from the host's event bus, displaying the pending handshake notification banner and Accept/Reject buttons in real time.
-  * Handshake completion/approval removes the pending request and clears the notification banner across both Desktop and Simulator via `ContactRequestApprovedEvent`.
-  * `SimulatorNotifyingHandshakeDecorator` is deleted; no side-channel simulator state bus signals are used for handshake notification.
+  * Solution compiles cleanly with `[MapFromDomainEvent]` usable in both `Percolator.Application` and `Percolator.Apps.Chat`.
+  * Enqueuing an `OutboxJob` in Desktop triggers `OutboxDispatchHost` immediately without manual `FlushOutboxAsync`.
+  * Direct P2P gRPC delivery (`DeliverDirect`) succeeds against a Desktop host using `IActiveIdentitySet`.
+  * `SqlConversationListQueryService.GetConversationsAsync` returns newly created 0-message Direct and Group channels with accurate `Kind`, `RemotePeerId`, `RelayIdentityId`, and `IsPendingAcceptance`.
 * **Verification Gate**:
-  * `dotnet test Percolator.Domain.Tests/Percolator.Domain.Tests.csproj --filter "FullyQualifiedName~PeerContact"`
-  * `dotnet test Percolator.Application.Tests/Percolator.Application.Tests.csproj --filter "FullyQualifiedName~ContactRequestCoordinator|FullyQualifiedName~HandshakeService"`
-  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~InboundRequestStateService"`
+  * `dotnet test Percolator.SourceGenerators.Tests/Percolator.SourceGenerators.Tests.csproj`
+  * `dotnet test Percolator.Infrastructure.Tests/Percolator.Infrastructure.Tests.csproj --filter "FullyQualifiedName~SqlConversationListQueryService|FullyQualifiedName~OutboxDispatchHost|FullyQualifiedName~UnauthenticatedDeliveryEndpoint"`
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj`
+
+---
+
+### [DESK-07-B] Inbound Handshake Consent Pipeline, Inbound DirectChannel Creation & Decorator Removal
+* **QMS Traceability**: `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`), `DEP-DESKTOP-PEER-BLOCK-UI-SILENCE` (allocates `SYS-PEER-BLOCK-SILENT-DROP`), `DEP-DESKTOP-CRYPTO-BOUNDARY`
+* **Detailed Design**: `DEC-PULL-BASED-CONSENT-STAGING`, `INV-APP-EVENT-BUS-DECOUPLING`, `INV-RECORD-EVENT-ENFORCEMENT`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`
+* **Governing Specs**: `[UISS-001]` to `[UISS-005]`, `[VM-003]`, `[VM-006]`, `[R3-004]`, `[R3-005]`, `[R3-006]`, `anti-shortcut-discipline` Rules 1, 3, 6, 8, 10
+* **Target Deliverables**:
+  * **1. Domain Events & Aggregate Methods**:
+    * Create: `Percolator.Domain/Identities/Events/InboundContactRequestReceivedDomainEvent.cs`
+      ```csharp
+      public sealed record InboundContactRequestReceivedDomainEvent(
+          PublicIdentityId OwnerIdentityId,
+          PublicIdentityId RemotePeerId,
+          IdentityKey PrimaryPublicKey,
+          DateTimeOffset OccurredOnUtc) : IDomainEvent
+      {
+          public Guid EventId { get; } = Guid.NewGuid();
+      }
+      ```
+    * Create: `Percolator.Domain/Identities/Events/ContactRequestApprovedDomainEvent.cs`
+      ```csharp
+      public sealed record ContactRequestApprovedDomainEvent(
+          PublicIdentityId OwnerIdentityId,
+          PublicIdentityId RemotePeerId,
+          PeerTrustLevel TrustLevel,
+          DateTimeOffset OccurredOnUtc) : IDomainEvent
+      {
+          public Guid EventId { get; } = Guid.NewGuid();
+      }
+      ```
+    * Create: `Percolator.Domain/Identities/Events/ContactRequestRejectedDomainEvent.cs`
+      ```csharp
+      public sealed record ContactRequestRejectedDomainEvent(
+          PublicIdentityId OwnerIdentityId,
+          PublicIdentityId RemotePeerId,
+          bool IsBlocked,
+          DateTimeOffset OccurredOnUtc) : IDomainEvent
+      {
+          public Guid EventId { get; } = Guid.NewGuid();
+      }
+      ```
+    * Create: `Percolator.Domain/Channels/Events/DirectChannelCreatedDomainEvent.cs`
+      ```csharp
+      public sealed record DirectChannelCreatedDomainEvent(
+          ChannelId ChannelId,
+          PublicIdentityId OwnerIdentityId,
+          PublicIdentityId RemotePeerId,
+          DirectChannelStatus Status,
+          RelayEndpoint? RelayEndpoint,
+          DateTimeOffset OccurredOnUtc) : IDomainEvent
+      {
+          public Guid EventId { get; } = Guid.NewGuid();
+      }
+      ```
+    * Modify: `Percolator.Domain/Identities/Model/PeerContact.cs`:
+      * `CreateInboundRequest(...)`: emit `InboundContactRequestReceivedDomainEvent` before returning `Success`.
+      * `ReopenInboundRequest(IdentityKey primaryPublicKey, string? proposedNickname, IDateTimeProvider timeProvider)`: if `TrustLevel == PeerTrustLevel.Blocked` fail with `CONTACT_BLOCKED`; if `State == ContactState.Rejected`, transition `State = ContactState.PendingApproval`, update `PrimaryPublicKey` & `Nickname`, emit `InboundContactRequestReceivedDomainEvent`. (Eliminates Simulator's raw `PercolatorDbContext.PeerContacts.Remove` hack.)
+      * `Approve(PeerTrustLevel initialTrust, IDateTimeProvider timeProvider)` (**non-nullable `IDateTimeProvider`**, zero default `null`): emit `ContactRequestApprovedDomainEvent` on transition to `ContactState.Active`.
+      * `Reject(bool block, IDateTimeProvider timeProvider)` (**non-nullable `IDateTimeProvider`**, zero default `null`): emit `ContactRequestRejectedDomainEvent` on transition to `ContactState.Rejected`.
+      * Update all existing call sites in `Percolator.Domain.Tests`, `Percolator.Application`, and `Percolator.Application.Tests` to pass `IDateTimeProvider`.
+    * Modify: `Percolator.Domain/Channels/Model/DirectChannel.cs`:
+      * `Create(ChannelId id, PublicIdentityId ownerIdentityId, PublicIdentityId remotePeerId, IDateTimeProvider timeProvider, DirectChannelStatus status = DirectChannelStatus.Active, RelayEndpoint? relayEndpoint = null)`: append `channel.AddDomainEvent(new DirectChannelCreatedDomainEvent(id, ownerIdentityId, remotePeerId, status, relayEndpoint, timeProvider.UtcNow));`.
+  * **2. Source-Generated `[MapFromDomainEvent]` Application Events**:
+    * Create in `Percolator.Application/Profiles/Events/`:
+      * `InboundContactRequestReceivedEvent.cs` (`[MapFromDomainEvent(typeof(InboundContactRequestReceivedDomainEvent))]`, explicit `PublicIdentityId OwnerIdentityId`, `PublicIdentityId RemotePeerId`, `IdentityKey PrimaryPublicKey` properties to preserve VO types).
+      * `ContactRequestApprovedEvent.cs` (`[MapFromDomainEvent(typeof(ContactRequestApprovedDomainEvent))]`, explicit `PublicIdentityId OwnerIdentityId`, `PublicIdentityId RemotePeerId`, `PeerTrustLevel TrustLevel`).
+      * `ContactRequestRejectedEvent.cs` (`[MapFromDomainEvent(typeof(ContactRequestRejectedDomainEvent))]`, explicit `PublicIdentityId OwnerIdentityId`, `PublicIdentityId RemotePeerId`, `bool IsBlocked`).
+    * Create in `Percolator.Application/Channels/Events/`:
+      * `DirectChannelCreatedEvent.cs` (`[MapFromDomainEvent(typeof(DirectChannelCreatedDomainEvent))]`, explicit `ChannelId ChannelId`, `PublicIdentityId OwnerIdentityId`, `PublicIdentityId RemotePeerId`, `DirectChannelStatus Status`, `RelayEndpoint? RelayEndpoint`).
+  * **3. Application Layer Workflows**:
+    * Modify: `Percolator.Application/Profiles/ContactRequestCoordinator.cs`:
+      * Constructor: add non-nullable `IEventPublisher eventPublisher` (`ArgumentNullException.ThrowIfNull`).
+      * `HandleInboundRequestAsync`: if `existing` is in `ContactState.Rejected` (and not blocked), call `existing.ReopenInboundRequest(peerPublicKey, proposedNickname, _timeProvider)`, save, and publish `InboundContactRequestReceivedEvent`. For newly created contacts, save then publish `InboundContactRequestReceivedEvent` and call `contact.ClearDomainEvents()`. Existing `PendingApproval` contacts return early (idempotent).
+      * `ApproveRequestAsync` / `RejectRequestAsync`: pass `_timeProvider` to `contact.Approve`/`contact.Reject`; after `_contactRepo.SaveAsync(contact, ct)`, map & publish domain events via `_eventPublisher.PublishAsync(...)`, then `contact.ClearDomainEvents()`.
+    * Modify: `Percolator.Application/Connections/InboundConnectionWorkflow.cs`:
+      * Constructor: add non-nullable `IChannelRepository channelRepo`, `IPeerMailboxRoutingRepository routingRepo`, `IDateTimeProvider timeProvider`, `IEventPublisher eventPublisher`.
+      * `AcceptRequestAsync(personaId, requesterId, ct)`:
+        1. Call `_contactCoordinator.ApproveRequestAsync(personaId, requesterId, PeerTrustLevel.Tofu, ct)`.
+        2. Call `_handshakeService.CompletePendingHandshakeAsync(personaId, requesterId, ct)`.
+        3. Ensure `DirectChannel` exists: `var channelId = ChannelId.DeterministicForDirect(personaId, requesterId);`. If `await _channelRepo.GetDirectByIdAsync(channelId, ct)` is `null`, resolve `RelayEndpoint?` from `await _routingRepo.GetByPeerIdAsync(requesterId, ct)` (if relayed), call `DirectChannel.Create(channelId, personaId, requesterId, _timeProvider, DirectChannelStatus.Active, relayEndpoint)`, call `await _channelRepo.SaveDirectAsync(channel, ct)`, map & publish `DirectChannelCreatedEvent`, and call `channel.ClearDomainEvents()`.
+    * Update Affected Application & Integration Tests:
+      * `Percolator.Application.Tests/Handshake/HandshakeServiceTests.cs`
+      * `Percolator.Application.Tests/Ingress/AppHostPipelineTests.cs`
+      * `Percolator.Application.Tests/Profiles/ProfileAndContactTests.cs`
+      * `Percolator.ApplicationIntegrationTests/Builders/TestIdentityNode.cs`
+  * **4. Desktop Reactive State Services**:
+    * Modify: `Percolator.Desktop/Features/Transports/Services/InboundRequestStateService.cs`:
+      * Constructor: add non-nullable `IEventSubscriber eventSubscriber`.
+      * Subscribe using exact `Func<TEvent, CancellationToken, ValueTask>` delegate (anchored via `.AddTo(ref _bag)`):
+        ```csharp
+        _eventSubscriber.Subscribe<InboundContactRequestReceivedEvent>((evt, ct) =>
+        {
+            if (evt.OwnerIdentityId == _activePersonaId) _ = LoadRequestsForPersonaAsync(evt.OwnerIdentityId);
+            return ValueTask.CompletedTask;
+        }).AddTo(ref _bag);
+        ```
+        Repeat for `ContactRequestApprovedEvent` and `ContactRequestRejectedEvent`.
+    * Modify: `Percolator.Desktop/Features/Chats/Services/ConversationStateService.cs`:
+      * Constructor: add non-nullable `IEventSubscriber eventSubscriber`.
+      * Subscribe to `DirectChannelCreatedEvent` (filtered by `evt.OwnerIdentityId == _activePersonaId`) → invoke `LoadConversationsForPersonaAsync(evt.OwnerIdentityId)`.
+      * Fix `LoadConversationsForPersonaAsync`:
+        * Map `ConversationSummaryReadModel` directly: use `conv.ChannelId`, `conv.RemotePeerId ?? conv.ChannelId` (never `conv.LastAuthorId ?? personaId`!), `conv.RelayIdentityId != null ? ConversationRouteType.Relayed : ConversationRouteType.DirectP2P`, `conv.RelayIdentityId`, `conv.IsPendingAcceptance`.
+        * **DELETE** the synthetic `ChannelId.New()` fallback loop (lines 153–169) that fabricated fake channel IDs from `IPeerContactQueryService`.
+  * **5. Simulator Decorator Deletion & Thin Delegation**:
+    * Delete: `Percolator.Simulator/Features/Topology/SimulatorNotifyingHandshakeDecorator.cs`.
+    * Modify: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` — remove `SimulatorNotifyingHandshakeDecorator` registration; register `services.AddScoped<IHandshakeService, HandshakeService>();` and `services.AddScoped<IInboundConnectionWorkflow, InboundConnectionWorkflow>();`.
+    * Modify: `Percolator.Simulator/Features/DirectChat/DirectHandshakeOrchestrator.cs`:
+      * `AcceptHandshakeAsync`: delegate core protocol work to `scope.ServiceProvider.GetRequiredService<IInboundConnectionWorkflow>().AcceptRequestAsync(target.PublicIdentityId, senderId, ct)`. Delete inline `DirectChannel.Create` (lines 196–202) and manual `_stateBus.Publish(PendingHandshakeChanged)` (lines 267–271).
+      * `RejectHandshakeAsync`: delegate to `IInboundConnectionWorkflow.RejectRequestAsync` / `BlockRequestAsync`. Delete raw `PercolatorDbContext.PeerContacts.Remove` hack (lines 314–332) and manual `_stateBus.Publish(PendingHandshakeChanged)`.
+    * Modify: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs`:
+      * Resolve `IEventSubscriber` from `_hostScope.ServiceProvider`.
+      * Subscribe (anchored to `ref Disposables`) to `InboundContactRequestReceivedEvent`, `ContactRequestApprovedEvent`, `ContactRequestRejectedEvent` → `RefreshPendingHandshakes()`, and `DirectChannelCreatedEvent` → `RefreshConversations()`.
+      * Remove `_stateBus.Signals` subscription for `SignalCategory.PendingHandshakeChanged` for direct handshakes.
+    * Modify: `Percolator.Simulator/Features/Scenarios/ScenarioRunnerService.cs` (lines 558, 632, 1582):
+      * Replace `_stateBus.Signals.Where(... PendingHandshakeChanged)` with `target.Services.GetRequiredService<IEventSubscriber>().ObserveEvent<InboundContactRequestReceivedEvent>().Where(e => e.OwnerIdentityId == target.PublicIdentityId).FirstAsync(cancellationToken: ct)` (using `SimulatorEventBusExtensions.ObserveEvent<T>` from `DESK-07-A`).
+    * Update/Create Tests:
+      * `Percolator.Desktop.Tests/Features/Transports/InboundRequestStateServiceTests.cs` (non-nullable `IEventSubscriber`, null-guard permutation, event-driven refresh tests).
+      * `Percolator.Desktop.Tests/Features/Chats/ConversationStateServiceTests.cs` (verify `DirectChannelCreatedEvent` surfaces direct and relayed chats under the correct rail target).
+      * `Percolator.Simulator.Tests/Topology/PersonaCardViewModelTests.cs` (verify `InboundContactRequestReceivedEvent`, `ContactRequestApprovedEvent`, `ContactRequestRejectedEvent`, and `DirectChannelCreatedEvent` drive pending banners and conversation list).
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * Zero `IDateTimeProvider? = null` defaults; zero `PercolatorDbContext` mutations in Simulator; zero inline `DirectChannel.Create` outside `InboundConnectionWorkflow` / `PeerConnectionService`; UI layers read strictly via `IPeerContactQueryService` and `IConversationListQueryService`.
+* **Acceptance Criteria**:
+  * Inbound direct or relayed handshake triggers `InboundContactRequestReceivedEvent` and illuminates Pending Requests in Desktop and Accept/Reject banner in Simulator without `SimulatorNotifyingHandshakeDecorator`.
+  * Accepting an inbound handshake in either Desktop or Simulator persists `DirectChannel`, publishes `DirectChannelCreatedEvent`, clears the pending banner, and immediately displays the active chat in the appropriate chat list (Direct Messages or hosting Relay).
+  * Rejecting (non-block) allows the same peer to re-request cleanly via domain logic without raw EF deletions; blocking drops future handshakes silently.
+* **Verification Gate**:
+  * `dotnet test Percolator.Domain.Tests/Percolator.Domain.Tests.csproj --filter "FullyQualifiedName~PeerContact|FullyQualifiedName~DirectChannel"`
+  * `dotnet test Percolator.Application.Tests/Percolator.Application.Tests.csproj --filter "FullyQualifiedName~ContactRequestCoordinator|FullyQualifiedName~HandshakeService|FullyQualifiedName~InboundConnectionWorkflow"`
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~InboundRequestStateService|FullyQualifiedName~ConversationState"`
   * `dotnet test Percolator.Simulator.Tests/Percolator.Simulator.Tests.csproj --filter "FullyQualifiedName~PersonaCardViewModel"`
+
+---
+
+### [DESK-07-C] Bidirectional Handshake Finalization, Return-Route Carrying & Unified Outbound Workflow
+* **QMS Traceability**: `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`, `DEP-DESKTOP-CRYPTO-BOUNDARY`, `DEP-DESKTOP-ROUTE-PRIVACY` (allocates `SYS-DIRECT-CONTACT-REQUEST-OUTBOX`, `SYS-SEALED-SENDER-ROUTING`)
+* **Detailed Design**: `INV-APP-EVENT-BUS-DECOUPLING`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-SIGNAL-X3DH-PARITY`
+* **Governing Specs**: `[UISS-001]` to `[UISS-005]`, `[VM-003]`, `[VM-006]`, `anti-shortcut-discipline` Rules 1, 2, 3, 11, 13
+* **Target Deliverables**:
+  * **1. Handshake Control Protocol (`AppId.HandshakeControl`) — Eliminates All Simulator Cross-Host RAM Peeking**:
+    * Modify: `Percolator.PluginSdk/AppId.cs` — add `public static readonly AppId HandshakeControl = new(0x04);`.
+    * Create: `Percolator.Application/Handshake/HandshakeControlDto.cs`:
+      ```csharp
+      public enum HandshakeControlType : byte { ReturnRouteOffer = 1, HandshakeAccepted = 2 }
+
+      public sealed record HandshakeControlEnvelopeDto(
+          HandshakeControlType Type,
+          PublicIdentityId SenderIdentityId,
+          string? DirectEndpoint,
+          string? RelayEndpoint,
+          byte[]? MailboxRoutingTokenBytes,
+          byte[]? DeliveryTokenBytes);
+      ```
+  * **2. Domain State Transitions for Outbound Handshake Acceptance**:
+    * Modify: `Percolator.Domain/Identities/Model/PeerContact.cs`:
+      * Add `PendingOutbound = 3` to `ContactState` enum (no DB migration required; column is `int`).
+      * Add `PeerContact.CreateOutboundRequest(PublicIdentityId ownerId, PublicIdentityId remotePeerId, IdentityKey primaryPublicKey, IDateTimeProvider timeProvider)` (sets `ContactState.PendingOutbound`, `PeerTrustLevel.Tofu`).
+      * Add `MarkOutboundAccepted(IDateTimeProvider timeProvider)` transitioning `PendingOutbound` → `Active` (idempotent if already `Active`).
+    * Create: `Percolator.Domain/Channels/Events/DirectChannelActivatedDomainEvent.cs`:
+      ```csharp
+      public sealed record DirectChannelActivatedDomainEvent(
+          ChannelId ChannelId,
+          PublicIdentityId OwnerIdentityId,
+          PublicIdentityId RemotePeerId,
+          RelayEndpoint? RelayEndpoint,
+          DateTimeOffset OccurredOnUtc) : IDomainEvent
+      {
+          public Guid EventId { get; } = Guid.NewGuid();
+      }
+      ```
+    * Modify: `Percolator.Domain/Channels/Model/DirectChannel.cs`:
+      * Add `public DomainResult Activate(IDateTimeProvider timeProvider)`: if `Status == DirectChannelStatus.Active`, return `Success` (idempotent); otherwise set `Status = DirectChannelStatus.Active`, `LastActivityUtc = timeProvider.UtcNow`, and emit `DirectChannelActivatedDomainEvent`.
+  * **3. Application Event, Multi-Persona Context & `HandshakeControlPayloadHandler`**:
+    * Modify: `Percolator.PluginSdk/InboundPayloadContext.cs` — add `PublicIdentityId RecipientIdentityId` parameter to `InboundPayloadContext` (update all construction sites in `InboundIngressPipeline.cs`, `HandshakeService.cs`, and tests so handlers never guess the local persona in multi-persona Desktop vaults).
+    * Create: `Percolator.Application/Channels/Events/DirectChannelActivatedEvent.cs` (`[MapFromDomainEvent(typeof(DirectChannelActivatedDomainEvent))]`, explicit `ChannelId`, `PublicIdentityId OwnerIdentityId`, `PublicIdentityId RemotePeerId`, `RelayEndpoint? RelayEndpoint`).
+    * Create: `Percolator.Application/Handshake/HandshakeControlPayloadHandler.cs` (`sealed class HandshakeControlPayloadHandler : IAppPayloadHandler`, `TargetAppId => AppId.HandshakeControl`):
+      * Dependencies (all non-nullable): `IPayloadSerializer`, `IStreamRegistryManagement`, `IPeerMailboxRoutingRepository`, `IPeerContactRepository`, `IChannelRepository`, `IDateTimeProvider`, `IEventPublisher`.
+      * Validates `dto.SenderIdentityId == context.SenderIdentityId` (anti-impersonation invariant).
+      * On `HandshakeControlType.ReturnRouteOffer`:
+        * If `dto.DirectEndpoint` parses to valid `Uri`, call `_streamRegistry.RegisterDirectEndpoint(context.SenderIdentityId, directUri)`.
+        * If `dto.MailboxRoutingTokenBytes` (16 bytes), `dto.DeliveryTokenBytes` (32 bytes), and `dto.RelayEndpoint` are valid, persist `PeerMailboxRoutingCapability` to `_routingRepo.SaveAsync(...)`.
+      * On `HandshakeControlType.HandshakeAccepted`:
+        * Apply any included return-route info if absent.
+        * Load local `DirectChannel` by `ChannelId.DeterministicForDirect(context.RecipientIdentityId, context.SenderIdentityId)`; call `channel.Activate(_timeProvider)` + `_channelRepo.SaveDirectAsync(channel, ct)`.
+        * Load `PeerContact` via `_contactRepo.GetByPeerIdAsync(context.RecipientIdentityId, context.SenderIdentityId, ct)`, call `contact.MarkOutboundAccepted(_timeProvider)` + `_contactRepo.SaveAsync(contact, ct)`.
+        * Map & publish `DirectChannelActivatedEvent` via `_eventPublisher.PublishAsync(...)` and clear domain events.
+    * Register `services.AddScoped<IAppPayloadHandler, HandshakeControlPayloadHandler>();` in `InfrastructureServiceCollectionExtensions.AddTransportInfrastructure()`.
+  * **4. Wire Initiator Return-Route Offer & Responder Acceptance ACK**:
+    * Modify: `Percolator.Application/Handshake/HandshakeService.cs`:
+      * Line 363 in `ProcessActiveInvitationAsync`: pass `ChannelId.DeterministicForDirect(envelope.RecipientIdentityId, envelope.SenderIdentityId)` instead of `ChannelId.New()`.
+    * Modify: `Percolator.Application/Services/PeerConnectionService.cs`:
+      * Inject non-nullable `IPayloadSerializer`, `IEventPublisher`, `IRelayDirectory`, `INetworkEndpointDiscoveryPort` (update `DesktopPeerConnectionService` and `SimulatedPersonaHost` DI registrations).
+      * In `ConnectToDirectPeerAsync` and `ConnectToPeerAsync`:
+        1. Build `HandshakeControlEnvelopeDto(HandshakeControlType.ReturnRouteOffer, _localIdentityId, localDirectEndpoint, localHomeRelayEndpoint, localRoutingTokenBytes, localDeliveryTokenBytes)` from the initiator's own local stores (zero cross-host peeking).
+        2. Pass `initialAppId: AppId.HandshakeControl, initialPayload: serializedOffer` to `_handshakeService.InitiateHandshakeAsync(...)`.
+        3. Persist `DirectChannel` with `DirectChannelStatus.PendingAcceptance` and `relayEndpoint` (null for direct, relay URI for relayed), publish `DirectChannelCreatedEvent`.
+        4. Persist `PeerContact` with `ContactState.PendingOutbound`.
+    * Modify: `Percolator.Application/Connections/InboundConnectionWorkflow.cs` (`AcceptRequestAsync`):
+      * Inject non-nullable `IPayloadSender`, `IPayloadSerializer`, `IRoutingCoordinator`.
+      * After `CompletePendingHandshakeAsync` (which decrypted Alice's `ReturnRouteOffer` into Bob's routing/stream stores!) and `DirectChannel` persistence:
+        * Resolve route to `requesterId` via `_routingCoordinator.ResolveRouteAsync(requesterId, ct)`.
+        * Serialize `HandshakeControlEnvelopeDto(HandshakeControlType.HandshakeAccepted, personaId, ...)` and send via `_payloadSender.SendPayloadAsync(new OutboundPayloadContext(channelId, personaId, requesterId, DeviceId.Primary, AppId.HandshakeControl, bytes, deliveryRoute), ct)`.
+        * `OutboxDispatchHost` delivers the encrypted `HandshakeAccepted` packet over the wire (Direct gRPC TLS or Relay Mailbox).
+  * **5. Unified Direct & Relayed Outbound Connection Workflow (Invitation-Token Driven)**:
+    * Modify: `Percolator.Application/Connections/OutboundConnectionWorkflow.cs`:
+      * Support relayed invitation payloads (`PeerInvitationPayload` with relay endpoint / routing + delivery tokens) in addition to direct P2P endpoints, routing through `IPeerConnectionService.ConnectToPeerAsync` when relayed or `ConnectToDirectPeerAsync` when direct.
+    * Modify: `Percolator.Simulator/Features/DirectChat/DirectHandshakeOrchestrator.cs`:
+      * Delete lines 167–173 (`senderHost.BoundEndpoint` RAM peeking), lines 204–234 (`senderHost.HomeRelay` / `target.HomeRelay.PeerDirectory` RAM peeking), lines 239–254 (`senderHost.DrainMailboxAsync` & `_stateBus.Publish(senderHost.Id, SignalCategory.RatchetSessionChanged)` RAM poking).
+    * Modify: `Percolator.Simulator/Features/RelayedChat/RelayProvisioningCoordinator.cs`:
+      * Refactor `InitiateRelayedHandshakeAsync` to build/decode a standard `PeerInvitationPayload` and delegate to `IOutboundConnectionWorkflow.ConnectAsync` (removing direct RAM peeking of `target.MailboxRoutingToken` / `target.MailboxDeliveryToken` inside the handshake path).
+  * **6. Desktop & Simulator UI Activation Handlers**:
+    * Modify: `Percolator.Desktop/Features/Chats/Services/ConversationStateService.cs`:
+      * Subscribe to `DirectChannelActivatedEvent` (filtered by `evt.OwnerIdentityId == _activePersonaId`) → reload/transition matching conversation item from `IsPendingOutbound = true` (`Pending`) to `IsPendingOutbound = false` (`Connected`) under its exact route (`DirectMessages` vs `Relay(relayId)`).
+    * Modify: `Percolator.Desktop/Features/Transports/ViewModels/AddConnectionDialogViewModel.cs`:
+      * Remove manual `_conversationStateService.RegisterDirectConversation(...)` UI-only call when handshake is initiated; rely on `DirectChannelCreatedEvent` (staged as `PendingAcceptance`) and `DirectChannelActivatedEvent` (transitions to `Connected` when remote peer accepts).
+    * Modify: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs`:
+      * Subscribe to `DirectChannelActivatedEvent` (filtered by `evt.OwnerIdentityId == _host.PublicIdentityId`) → `RefreshConversations()`.
+      * Remove `_stateBus.Signals` listener for `SignalCategory.RatchetSessionChanged` driving conversation updates.
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * Zero RAM peeking into `senderHost` or `target` DI containers (`anti-shortcut-discipline` Rule 2).
+  * Cryptographic sender verification (`dto.SenderIdentityId == context.SenderIdentityId`) enforced before mutating any routing table or channel state.
+  * Every outbound `HandshakeAccepted` traverses `IPayloadSender` → `OutboundEgressPipeline` → `OutboxJob` → `OutboxDispatchHost` (Rule 11).
+* **Acceptance Criteria**:
+  * Initiating a direct or relayed handshake from Desktop to Simulator (or Simulator to Desktop) stages the chat as Pending Acceptance on the initiator and raises an inbound consent request on the responder.
+  * When the responder clicks Accept, Bob's node derives Alice's return route strictly from the decrypted `ReturnRouteOffer`, persists Bob's active `DirectChannel`, and sends an encrypted `HandshakeAccepted` Double Ratchet message over the wire.
+  * Alice receives `HandshakeAccepted`, finalizes her DH ratchet, transitions `DirectChannel` & `PeerContact` to `Active`, emits `DirectChannelActivatedEvent`, and both Desktop and Simulator display the active chat in the appropriate list (Direct Messages or hosting Relay).
+* **Verification Gate**:
+  * `dotnet test Percolator.Domain.Tests/Percolator.Domain.Tests.csproj --filter "FullyQualifiedName~DirectChannel|FullyQualifiedName~PeerContact"`
+  * `dotnet test Percolator.Application.Tests/Percolator.Application.Tests.csproj --filter "FullyQualifiedName~HandshakeControl|FullyQualifiedName~PeerConnectionService|FullyQualifiedName~InboundConnectionWorkflow"`
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~ConversationState|FullyQualifiedName~AddConnection"`
+
+---
+
+### [DESK-07-D] Shared Group Creation, Relay ACK, Invitation Lifecycle & Live Group Stream Worker
+* **QMS Traceability**: `DEP-DESKTOP-SEGREGATION-ROLE`, `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`, `DEP-DESKTOP-CRYPTO-BOUNDARY` (allocates `SYS-ANONYMOUS-GROUP-RELAY`, `SYS-GROUP-SENDER-KEY-FORWARD-SECRECY`)
+* **Detailed Design**: `INV-APP-EVENT-BUS-DECOUPLING`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-RECORD-EVENT-ENFORCEMENT`
+* **Governing Specs**: `[UISS-001]` to `[UISS-005]`, `[VM-003]`, `[VM-006]`, `[VM-018]`, `anti-shortcut-discipline` Rules 1, 2, 8, 11, 13, 14
+* **Target Deliverables**:
+  * **1. Domain Events on `GroupChannel`**:
+    * Create: `Percolator.Domain/Channels/Events/GroupChannelCreatedDomainEvent.cs`:
+      ```csharp
+      public sealed record GroupChannelCreatedDomainEvent(
+          ChannelId ChannelId,
+          PublicIdentityId CreatorId,
+          string Name,
+          RelayEndpoint? RelayEndpoint,
+          DateTimeOffset OccurredOnUtc) : IDomainEvent
+      {
+          public Guid EventId { get; } = Guid.NewGuid();
+      }
+      ```
+    * Modify: `Percolator.Domain/Channels/Model/GroupChannel.cs`:
+      * `CreateGenesis(ChannelId id, PublicIdentityId creatorId, string name, IDateTimeProvider timeProvider, RelayEndpoint? relayEndpoint = null)`: emit `GroupChannelCreatedDomainEvent`.
+  * **2. Application & Chat Events**:
+    * Create in `Percolator.Application/Channels/Events/`:
+      * `GroupChannelCreatedEvent.cs` (`[MapFromDomainEvent(typeof(GroupChannelCreatedDomainEvent))]`, explicit `ChannelId`, `PublicIdentityId CreatorId`, `string Name`, `RelayEndpoint? RelayEndpoint`).
+      * `GroupMemberJoinedEvent.cs` (`[MapFromDomainEvent(typeof(MemberJoinedEvent))]`, explicit `ChannelId`, `PublicIdentityId MemberId`, `ChannelRole Role`, `EpochNumber NewEpoch`).
+      * `GroupMemberRemovedEvent.cs` (`[MapFromDomainEvent(typeof(MemberRemovedEvent))]`, explicit `ChannelId`, `PublicIdentityId MemberId`, `EpochNumber NewEpoch`).
+    * Create in `Percolator.Apps.Chat/Features/GroupInvitations/Events/` (implementing `Percolator.PluginSdk.Events.IApplicationEvent`):
+      * `GroupInvitationReceivedEvent(InvitationId InvitationId, PublicIdentityId RecipientIdentityId, ChannelId TargetGroupChannelId, PublicIdentityId InviterId, string GroupName, string? RelayEndpoint, DateTimeOffset OccurredOnUtc)`.
+      * `GroupInvitationResolvedEvent(InvitationId InvitationId, PublicIdentityId RecipientIdentityId, ChannelId TargetGroupChannelId, GroupInvitationStatus NewStatus, DateTimeOffset OccurredOnUtc)`.
+  * **3. Driven Relay Port, PluginSdk Invitation Port & Shared `IGroupChannelWorkflow` (Moves 1,000+ Lines Out of Simulator Without Violating Project Boundaries)**:
+    * *Dependency boundary*: `Percolator.Application` references only `Percolator.Domain` + `Percolator.PluginSdk` (NEVER `Percolator.Apps.Chat`). Bridge group-invitation and system-notice actions cleanly via `Percolator.PluginSdk`:
+    * Create: `Percolator.PluginSdk/Groups/IGroupInvitationPort.cs` (implemented by `GroupInvitationService` in `Percolator.Apps.Chat`):
+      ```csharp
+      public interface IGroupInvitationPort
+      {
+          Task<DomainResult<InvitationId>> SendInvitationAsync(
+              ChannelId targetGroupChannelId, string groupName, PublicIdentityId inviterId, PublicIdentityId inviteeId,
+              ChannelId directChannelId, string? relayEndpoint, DeliveryRoute route, IReadOnlyList<PublicIdentityId>? initialMembers = null, CancellationToken ct = default);
+          Task<DomainResult<GroupChannel>> AcceptInvitationAsync(
+              InvitationId invitationId, PublicIdentityId responderId, ChannelId directChannelId, DeliveryRoute responseRoute, CancellationToken ct = default);
+          Task<DomainResult> DeclineInvitationAsync(
+              InvitationId invitationId, PublicIdentityId responderId, ChannelId directChannelId, DeliveryRoute responseRoute, CancellationToken ct = default);
+          Task<DomainResult> SendSystemNoticeAsync(
+              ChannelId directChannelId, PublicIdentityId senderId, PublicIdentityId recipientId, ChannelId targetGroupChannelId, string noticeText, DeliveryRoute route, CancellationToken ct = default);
+      }
+      ```
+    * Create: `Percolator.Application/Ports/IGroupRelayClient.cs`:
+      ```csharp
+      public interface IGroupRelayClient
+      {
+          Task<DomainResult<bool>> CreateGroupAsync(
+              RelayEndpoint relayEndpoint,
+              ChannelId channelId,
+              ReadOnlyMemory<byte> encryptedGenesisBlob,
+              ReadOnlyMemory<byte> zkPublicParams,
+              IReadOnlyList<BlindedRoutingToken> initialRoutingTokens,
+              CancellationToken ct = default);
+
+          Task<DomainResult<uint>> CommitRosterMutationAsync(
+              RelayEndpoint relayEndpoint,
+              ChannelId channelId,
+              IReadOnlyCollection<BlindedRoutingToken> authorizedRoutingTokens,
+              CancellationToken ct = default);
+
+          IAsyncEnumerable<InboundGroupEnvelope> SubscribeGroupStreamAsync(
+              RelayEndpoint relayEndpoint,
+              ChannelId channelId,
+              PublicIdentityId subscriberIdentityId,
+              BlindedRoutingToken subscriberRoutingToken,
+              CancellationToken ct = default);
+      }
+      ```
+    * Create: `Percolator.Infrastructure/Transport/GrpcGroupRelayClient.cs` implementing `IGroupRelayClient` over `IPeerGrpcChannelFactory` + `AnonymousGroupRelayService.AnonymousGroupRelayServiceClient` (real gRPC TLS, zero in-process relay DB peeking).
+    * Create: `Percolator.Application/Groups/IGroupChannelWorkflow.cs` & `Percolator.Application/Groups/GroupChannelWorkflow.cs` (shared by BOTH Desktop and Simulator; depends strictly on Domain, PluginSdk, and Application ports):
+      * `CreateGroupAsync(PublicIdentityId creatorId, RelayEndpoint relayEndpoint, string groupName, IReadOnlyList<PublicIdentityId> memberIds, CancellationToken ct)`:
+        1. Resolve routing tokens for creator (from `IRelayDirectory`) and invited members (from `IPeerMailboxRoutingRepository` — zero cross-host RAM peeking!).
+        2. Call `_groupRelayClient.CreateGroupAsync(...)` and **require explicit Relay ACK (`Created == true`) before persisting or publishing**.
+        3. Call `GroupChannel.CreateGenesis(channelId, creatorId, groupName, _timeProvider, relayEndpoint)`, add members, save via `IChannelRepository.SaveGroupAsync`.
+        4. Persist genesis `GroupCredentials` (`IGroupCredentialsRepository`) and register `IChannelRelayResolver.RegisterRelayForChannel(channelId, relayUri)`.
+        5. Distribute creator SenderKey via `IGroupKeyDistributionService.DistributeSenderKeyAsync`.
+        6. Send pairwise invitations to each invited member via `IGroupInvitationPort.SendInvitationAsync` (resolving each peer's route via `IRoutingCoordinator` and deterministic `ChannelId.DeterministicForDirect`).
+        7. Map & publish `GroupChannelCreatedEvent` via `IEventPublisher` and clear domain events.
+      * `AcceptGroupInvitationAsync(PublicIdentityId personaId, InvitationId invitationId, CancellationToken ct)`:
+        1. Call `_groupInvitationPort.AcceptInvitationAsync(...)` (which creates/updates local `GroupChannel` with `RelayEndpoint`).
+        2. Register `IChannelRelayResolver` and initialize `GroupCredentials` if absent.
+        3. Distribute invitee SenderKey via `IGroupKeyDistributionService.DistributeSenderKeyAsync` to all other group members.
+        4. Publish `GroupChannelCreatedEvent` and `GroupInvitationResolvedEvent`.
+      * `DeclineGroupInvitationAsync(PublicIdentityId personaId, InvitationId invitationId, CancellationToken ct)`:
+        1. Call `_groupInvitationPort.DeclineInvitationAsync(...)` (declines, persists, sends `GroupInvitationResponseDto(Accepted: false)`, and publishes `GroupInvitationResolvedEvent`).
+      * `AddGroupMemberAsync(...)` & `EvictGroupMemberAsync(...)`:
+        * Moves roster mutation, `IGroupRelayClient.CommitRosterMutationAsync`, `IGroupInvitationPort.SendSystemNoticeAsync` pairwise broadcast, forward-secrecy SenderKey rotation, and `GroupMemberJoinedEvent`/`GroupMemberRemovedEvent` publishing into `GroupChannelWorkflow`.
+    * Multi-Persona Group Invitation Persistence & Query Service:
+      * Modify: `Percolator.Apps.Chat/Features/GroupInvitations/PendingGroupInvitation.cs`, `Percolator.Infrastructure/Persistence/Entities/ChatEntities.cs` (`ChatGroupInvitationEntity`), and `SqlGroupInvitationRepository.cs`: add `PublicIdentityId RecipientIdentityId` (`byte[]` column + EF Core migration `AddGroupInvitationRecipientIdentityId`) so multi-persona Desktop vaults isolate group invitations per persona (`DEP-DESKTOP-PERSONA-ISOLATION`).
+      * Modify: `Percolator.Apps.Chat/Features/GroupInvitations/IGroupInvitationQueryService.cs` & `Percolator.Infrastructure/Persistence/Repositories/SqlGroupInvitationQueryService.cs`: refactor from Scoped `PercolatorDbContext` to **Singleton** over `IDbContextFactory<PercolatorDbContext>` (Rule 16) and filter `GetPendingInvitationsAsync(PublicIdentityId recipientId, CancellationToken ct)` by `RecipientIdentityId`.
+    * Modify: `Percolator.Apps.Chat/Ingress/ChatPayloadHandler.cs`:
+      * Inject non-nullable `IEventPublisher`.
+      * `HandleGroupInvitationAsync`: populate `RecipientIdentityId = context.RecipientIdentityId`; after `await _invitationRepo.AddAsync(invitation, ct)`, publish `GroupInvitationReceivedEvent`.
+      * `HandleGroupInvitationResponseAsync`: after updating invitation & group membership, publish `GroupInvitationResolvedEvent` (and `GroupMemberJoinedEvent` if added).
+    * Modify: `Percolator.Apps.Chat/Features/GroupInvitations/GroupInvitationService.cs`:
+      * Implement `IGroupInvitationPort`; inject non-nullable `IEventPublisher`; add `DeclineInvitationAsync(...)` and `SendSystemNoticeAsync(...)`; persist `RelayEndpoint` on `GroupChannel.CreateGenesis`. Register `services.AddScoped<IGroupInvitationPort>(sp => sp.GetRequiredService<GroupInvitationService>());` in `AddChatApp()`.
+  * **4. Real `GroupStreamCoordinator` Wired into `RelayGroupStreamWorker`**:
+    * Create: `Percolator.Infrastructure/Transport/Workers/GroupStreamCoordinator.cs` (`IHostedService` / runner for `RelayGroupStreamWorker`):
+      * On startup, reconciles all active personas (`IActiveIdentitySet`) × persisted joined groups (`IChannelRepository.GetAllGroupsForOwnerAsync`), registers `IChannelRelayResolver` from persisted `GroupChannel.RelayEndpoint`, and opens one supervised gRPC `SubscribeGroupStreamAsync` task per `(personaId, channelId)` feeding inbound `InboundGroupEnvelope`s into `IInboundIngressPipeline.ProcessInboundAsync`.
+      * Subscribes to `GroupChannelCreatedEvent`, `GroupMemberRemovedEvent`, `PersonaActivatedEvent`, `PersonaDeactivatedEvent` via `IEventSubscriber` to dynamically start/stop streams without restart!
+    * Modify: `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`:
+      * Register `IGroupRelayClient → GrpcGroupRelayClient`, `IGroupChannelWorkflow → GroupChannelWorkflow` (Scoped), `IGroupInvitationQueryService → SqlGroupInvitationQueryService` (**Singleton**), and replace the no-op `Task.Delay(Timeout.InfiniteTimeSpan)` `RelayGroupStreamWorker` stub (line 307) with `GroupStreamCoordinator`.
+  * **5. Desktop UI Real Group Integration**:
+    * Create: `Percolator.Desktop/Features/Chats/Services/DesktopGroupChannelWorkflow.cs` (Singleton scope-creating facade for `IGroupChannelWorkflow`, mirroring `DesktopInboundConnectionWorkflow`).
+    * Modify: `Percolator.Desktop/Features/Chats/ViewModels/GroupCreationDialogViewModel.cs`:
+      * Replace `IConversationStateService` with non-nullable `IGroupChannelWorkflow`.
+      * Change `CreateGroup()` to `async Task CreateGroupAsync()` invoking `await _groupChannelWorkflow.CreateGroupAsync(_activePersonaId, SelectedRelay.Endpoint, groupName, selectedMemberIds, ct)`. Delete fake `_conversationStateService.RegisterRelayedConversation(...)` stub!
+    * Modify: `Percolator.Desktop/Features/Transports/Services/InboundRequestStateService.cs` & `PendingRequestsPanelViewModel.cs`:
+      * Inject non-nullable `IGroupInvitationQueryService` (Singleton) and `IGroupChannelWorkflow` (Singleton facade).
+      * Subscribe to `GroupInvitationReceivedEvent` and `GroupInvitationResolvedEvent` (filtered by `evt.RecipientIdentityId == _activePersonaId`) to surface inbound pending group invites alongside direct contact requests (with Accept/Decline actions delegating to `IGroupChannelWorkflow`).
+    * Modify: `Percolator.Desktop/Features/Chats/Services/ConversationStateService.cs`:
+      * Subscribe to `GroupChannelCreatedEvent` → reload via `IConversationListQueryService` so newly created or accepted groups appear immediately under the hosting Relay in `ChatsSidebarViewModel`!
+  * **6. Simulator `GroupChatCoordinator` Reduction**:
+    * Modify: `Percolator.Simulator/Features/GroupMessaging/GroupChatCoordinator.cs`:
+      * Delete `_streamSubscriptions`, `SubscribePersonaToGroup`, `UnsubscribePersonaFromGroup`, `CommitRosterMutationAsync`, `RotateAndDistributeHostSenderKeyAsync`, inline `GroupChannel.CreateGenesis`, and manual `_stateBus.Publish(GroupStateChanged / PendingHandshakeChanged)`.
+      * Delegate `CreateGroupOnRelayAsync`, `AcceptGroupInviteAsync`, `DeclineGroupInviteAsync`, `AddGroupMemberAsync`, `EvictGroupMemberAsync` directly to `IGroupChannelWorkflow` on the target persona host.
+    * Modify: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs`:
+      * Subscribe to `GroupInvitationReceivedEvent`, `GroupInvitationResolvedEvent`, `GroupChannelCreatedEvent`, `GroupMemberJoinedEvent`, `GroupMemberRemovedEvent` via `IEventSubscriber` to drive `HasPendingGroupInvite` banner and `AvailableConversations`.
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * Relay creation ACK is strictly verified over gRPC (`IGroupRelayClient.CreateGroupAsync`) before local persistence or UI event emission.
+  * Strict hexagonal dependency direction preserved: `Percolator.Application` never references `Percolator.Apps.Chat` (all cross-boundary calls flow through `Percolator.PluginSdk` ports).
+  * Zero `_worldState.FindPersonaHostByIdentity(m.Id)?.MailboxRoutingToken` RAM peeking in group workflows (`anti-shortcut-discipline` Rules 2, 13, 14).
+  * `SqlGroupInvitationQueryService` is Singleton over `IDbContextFactory<PercolatorDbContext>` (Rule 16) with strict `RecipientIdentityId` persona filtering.
+* **Acceptance Criteria**:
+  * Creating a group in Desktop or Simulator calls the Relay over gRPC, receives ACK, persists `GroupChannel` + `RelayEndpoint`, opens live group stream via `GroupStreamCoordinator`, sends pairwise invites, and immediately renders the group chat under the hosting Relay in Desktop and Simulator.
+  * Receiving a group invite in Desktop or Simulator surfaces the pending invite via `GroupInvitationReceivedEvent`; accepting it persists `GroupChannel`, subscribes to the relay group stream, distributes SenderKeys, and immediately shows the group chat in both apps.
+* **Verification Gate**:
+  * `dotnet test Percolator.Domain.Tests/Percolator.Domain.Tests.csproj --filter "FullyQualifiedName~GroupChannel"`
+  * `dotnet test Percolator.Apps.Chat.Tests/Percolator.Apps.Chat.Tests.csproj --filter "FullyQualifiedName~GroupInvitation"`
+  * `dotnet test Percolator.Application.Tests/Percolator.Application.Tests.csproj --filter "FullyQualifiedName~GroupChannelWorkflow"`
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~GroupCreation|FullyQualifiedName~ConversationState|FullyQualifiedName~InboundRequestState"`
+
+---
+
+### [DESK-07-E] Real-Time Chat/Profile Event Pipeline, Live Desktop Transcript & Simulator De-Duplication
+* **QMS Traceability**: `DEP-DESKTOP-VOLATILE-DRAFT-ISOLATION`, `DEP-DESKTOP-SEGREGATION-ROLE`, `DEP-DESKTOP-MEDIA-METADATA-SANITIZATION-INGRESS`
+* **Detailed Design**: `DEC-DEBOUNCED-DROP-RELOAD`, `DEC-REACTIVE-EVENT-BUS-BRIDGE`, `INV-APP-EVENT-BUS-DECOUPLING`, `INV-DESKTOP-STATEFUL-PROJECTIONS`
+* **Governing Specs**: `[R3-002]` to `[R3-007]`, `[VM-003]`, `[VM-006]`, `[VM-010]`, `anti-shortcut-discipline` Rules 1, 2, 4, 8, 10
+* **Target Deliverables**:
+  * **1. Chat & Profile Application Events (`Percolator.Apps.Chat/Events/`, implementing `Percolator.PluginSdk.Events.IApplicationEvent`)**:
+    * `ChatMessageSentEvent(ChannelId ChannelId, PayloadId MessageId, PublicIdentityId AuthorId, DateTimeOffset OccurredOnUtc)`
+    * `ChatMessageReceivedEvent(ChannelId ChannelId, PayloadId MessageId, PublicIdentityId AuthorId, DateTimeOffset OccurredOnUtc)`
+    * `ChatMessageEditedEvent(ChannelId ChannelId, PayloadId MessageId, DateTimeOffset OccurredOnUtc)`
+    * `ChatMessageDeletedEvent(ChannelId ChannelId, PayloadId MessageId, DateTimeOffset OccurredOnUtc)`
+    * `ChatReactionUpdatedEvent(ChannelId ChannelId, PayloadId MessageId, DateTimeOffset OccurredOnUtc)`
+    * `ChatReceiptReceivedEvent(ChannelId ChannelId, PayloadId UpToMessageId, bool IsReadReceipt, DateTimeOffset OccurredOnUtc)`
+    * `PeerProfileUpdatedEvent(PublicIdentityId PeerIdentityId, string DisplayName, uint Revision, DateTimeOffset OccurredOnUtc)`
+    * Modify: `Percolator.Apps.Chat/Features/Messaging/ChatService.cs` — inject non-nullable `IEventPublisher`; publish `ChatMessageSentEvent`, `ChatMessageEditedEvent`, `ChatMessageDeletedEvent`, `ChatReactionUpdatedEvent` after repository persistence commits.
+    * Modify: `Percolator.Apps.Chat/Ingress/ChatPayloadHandler.cs` — publish `ChatMessageReceivedEvent`, `ChatMessageEditedEvent`, `ChatMessageDeletedEvent`, `ChatReactionUpdatedEvent`, `ChatReceiptReceivedEvent`, `PeerProfileUpdatedEvent` after repository persistence commits.
+  * **2. Shared Application Profile Sync Workflow (Eliminates Simulator `ProfileSyncCoordinator` Business Logic)**:
+    * Modify: `Percolator.PluginSdk/Profiles/IProfilePorts.cs` — add `IProfileCapabilitySender` exposing `ShareProfileCapabilityAsync(...)` (implemented by `ChatService` in `Percolator.Apps.Chat`, registered via `services.AddScoped<IProfileCapabilitySender>(sp => sp.GetRequiredService<ChatService>());` in `AddChatApp()`) so `Percolator.Application` never references `Percolator.Apps.Chat`.
+    * Create: `Percolator.Application/Profiles/IProfileSyncWorkflow.cs` & `Percolator.Application/Profiles/ProfileSyncWorkflow.cs`:
+      * `ShareProfileWithPeerAsync(PublicIdentityId ownerId, PublicIdentityId peerId, CancellationToken ct)` — uses `ILocalIdentityKeyStore`, `IIdentityProfileRepository`, `IRelayDirectory`, `IRoutingCoordinator`, and `IProfileCapabilitySender.ShareProfileCapabilityAsync` (zero `_worldState` peeking!).
+      * `BroadcastProfileToActiveContactsAsync(PublicIdentityId ownerId, CancellationToken ct)` — iterates `IPeerContactRepository.GetAllForOwnerAsync` (`ContactState.Active`) and calls `ShareProfileWithPeerAsync`.
+    * Create: `Percolator.Infrastructure/Transport/Workers/ProfileSyncEventListener.cs` (`BackgroundService` subscribed to `DirectChannelCreatedEvent` and `DirectChannelActivatedEvent`): automatically invokes `IProfileSyncWorkflow.ShareProfileWithPeerAsync` when active persona policy enables auto-share.
+  * **3. Live Desktop Messaging & Sidebar Updates**:
+    * Modify: `Percolator.Desktop/Features/Chats/ViewModels/ChatViewModel.cs`:
+      * Inject non-nullable `IEventSubscriber eventSubscriber` (update `SessionScopeFactory` & `ChatViewModelTests`).
+      * Subscribe (anchored to `ref Bag`) to `ChatMessageReceivedEvent`, `ChatMessageSentEvent`, `ChatMessageEditedEvent`, `ChatMessageDeletedEvent`, `ChatReactionUpdatedEvent`, `ChatReceiptReceivedEvent` filtered by `evt.ChannelId == _channelId` → invoke `_reloadCoordinator.RequestReload()`.
+    * Modify: `Percolator.Desktop/Features/Chats/Services/ConversationStateService.cs`:
+      * Subscribe to `ChatMessageReceivedEvent`, `ChatMessageSentEvent`, and `PeerProfileUpdatedEvent` → refresh active persona conversation summaries (updating snippet, timestamp, unread badge, and synced display name).
+  * **4. Simulator Complete Handshake & Chat De-Duplication**:
+    * Delete: `Percolator.Simulator/Features/Topology/SimulatorNotifyingAppRouterDecorator.cs`.
+    * Modify: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs` — remove `SimulatorNotifyingAppRouterDecorator` registration; register production `IAppRouter` via `AddTransportInfrastructure`.
+    * Modify: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs`:
+      * **DELETE** `_worldState.Personas` RAM-peeking loop (lines 578–589).
+      * Populate `AvailableConversations` strictly from production `IConversationListQueryService.GetConversationsAsync(...)` (removing `ISimulatorChatQueryService.GetJoinedGroupsAsync` dependency).
+      * Subscribe to `ChatMessageReceivedEvent`, `ChatMessageSentEvent`, `ChatMessageEditedEvent`, `ChatMessageDeletedEvent`, `ChatReactionUpdatedEvent`, `ChatReceiptReceivedEvent`, `PeerProfileUpdatedEvent` via `IEventSubscriber` → invoke `RefreshChatTranscript()` / `RefreshConversations()`.
+      * Remove `SignalCategory.ChatTranscriptChanged`, `SignalCategory.GroupStateChanged`, `SignalCategory.PendingHandshakeChanged`, and `SignalCategory.RatchetSessionChanged` subscriptions from `PersonaCardViewModel`.
+    * Modify: `Percolator.Simulator/Features/DirectChat/DirectChatCoordinator.cs`:
+      * Replace `ISimulatorChatQueryService.GetTranscriptAsync` and direct write-repo reads (`IPeerContactRepository`, `IPeerProfileRepository`) with production `IChatMessageQueryService`, `IPeerContactQueryService`, and `IPeerProfileQueryService`.
+      * Remove manual `FlushOutboxAsync` / `DrainMailboxAsync` and manual `_stateBus.Publish(ChatTranscriptChanged)`.
+    * Modify: `Percolator.Simulator/Features/RichChatAndProfiles/ProfileSyncCoordinator.cs`:
+      * Gut `ShareProfileCapabilityInternalAsync` and `AutoShareProfileOnConnectAsync`; delegate `ShareProfileAsync` and `RerollProfileAsync` broadcast directly to `IProfileSyncWorkflow`.
+    * Modify: `Percolator.Simulator/Features/DirectChat/SimulatorChatQueryService.cs`:
+      * Remove duplicate UI read methods (`GetTranscriptAsync`, `GetJoinedGroupsAsync`), retaining only headless scenario-assertion predicates (`HasMessageContainingAsync`, `FindMessageAsync`, `HasReactionAsync`, etc.) or renaming to `ScenarioAssertionQueryService`.
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * Zero `_worldState.Personas` or `peerHost.DisplayName` RAM peeking in Simulator conversation lists or transcripts (`anti-shortcut-discipline` Rules 2, 4).
+  * Zero `IPeerContactRepository` / `IPeerProfileRepository` write-repo reads in UI coordinators (Rule 8).
+  * Zero manual `ISimulatorStateBus` pokes for domain/chat/handshake state changes.
+* **Acceptance Criteria**:
+  * Sending a message from Simulator to Desktop (or Desktop to Simulator) in either Direct P2P, Relayed 1:1, or Relayed Group chat renders live in Desktop `ChatView` and Simulator `PersonaCardView` via `IEventSubscriber` without manual refresh or persona switching.
+  * Edits, tombstones, emoji reactions, delivery/read receipts, and profile display-name updates propagate live to both Desktop and Simulator UIs.
+  * `SimulatorNotifyingAppRouterDecorator.cs` is deleted.
+* **Verification Gate**:
+  * `dotnet test Percolator.Apps.Chat.Tests/Percolator.Apps.Chat.Tests.csproj`
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~ChatViewModel|FullyQualifiedName~ConversationState"`
+  * `dotnet test Percolator.Simulator.Tests/Percolator.Simulator.Tests.csproj`
+
+---
+
+### [DESK-07-F] Remaining Simulator Business-Logic Cleanup & Cross-Peer E2E Verification
+* **QMS Traceability**: Software Item Integration & Verification (IEC 62304 Clauses 5.6–5.7 / FDA 21 CFR 820.30(f)), `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE`, `DEP-DESKTOP-PEER-BLOCK-UI-SILENCE`
+* **Detailed Design**: `INV-APP-EVENT-BUS-DECOUPLING`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`
+* **Governing Specs**: `[VM-010]`, `[VM-011]`, `anti-shortcut-discipline` Rules 1–16
+* **Target Deliverables**:
+  * **1. Remaining Simulator-to-Application Parity Cleanups**:
+    * File Transfer Events: Add `FileTransferOfferReceivedEvent` and `FileTransferProgressChangedEvent` (`IApplicationEvent`) in `Percolator.Apps.FileTransfer`; publish from `FileTransferPayloadHandler` / `TransferSessionService` and subscribe in Simulator `PersonaCardViewModel` / `SwarmPanelViewModel` (eliminates final reason `SimulatorNotifyingAppRouterDecorator` existed).
+    * Modify: `Percolator.Simulator/Features/RichChatAndProfiles/RichChatActionCoordinator.cs` — remove manual `FlushOutboxAsync`/`DrainMailboxAsync` and manual `_stateBus.Publish(ChatTranscriptChanged)` calls; delegate strictly to `IChatService`.
+    * Audit & Remove Remaining Simulator RAM Peeking:
+      * `Percolator.Simulator/Features/RelayedChat/RelayProvisioningCoordinator.cs`: replace `relay.QueryService.HasActivePreKeyAsync` (in-process relay peeking) with real client gRPC prekey status check (`IPreKeyMaintenanceService` / `IRelayMailboxProvisioner`).
+      * `Percolator.Simulator/Features/Topology/PersonaConnectPeerFlyoutViewModel.cs` & `RelayRegistrationFlyoutViewModel.cs`: verify 100% token/endpoint-only connection flow with zero "in-world persona" / "in-world relay" bypasses.
+      * Confirm `ISimulatorStateBus` is used **exclusively** for simulator-only harness mechanics (Chaos fault toggles, Node start/stop topology cards, Virtual Clock ticks, Flight Recorder UI), with zero domain/protocol event duplication.
+  * **2. Cross-Peer Desktop-Host ↔ Simulator-Host End-to-End Integration Suite**:
+    * Create: `Percolator.ApplicationIntegrationTests/CrossPeerHandshakeAndChatParityTests.cs` running real loopback Kestrel TLS + SQLite hosts composed with the exact production DI slices (`AddSessionCoreInfrastructure`, `AddVaultPersistenceInfrastructure`, `AddTransportInfrastructure`, `AddChatInfrastructure`, `AddChatApp`):
+      1. **Direct P2P Handshake Round-Trip**: Initiator sends invitation → Responder receives `InboundContactRequestReceivedEvent` → Responder accepts → Responder creates `DirectChannel` & sends encrypted `HandshakeAccepted` → Initiator receives `DirectChannelActivatedEvent` → both query `IConversationListQueryService` (0-message active chat present) → bidirectional chat messages arrive live via `ChatMessageReceivedEvent`.
+      2. **Relayed 1:1 Handshake Round-Trip**: Both peers register on a real Kestrel Relay → Initiator connects via invitation token → Relay mailbox queues handshake → Responder drains, receives `InboundContactRequestReceivedEvent`, accepts → encrypted `HandshakeAccepted` returns via Relay mailbox → Initiator receives `DirectChannelActivatedEvent` → both query `IConversationListQueryService` with `RelayIdentityId` populated → bidirectional relayed messages & receipts deliver live.
+      3. **Group Creation & Invitation Round-Trip**: Creator invokes `IGroupChannelWorkflow.CreateGroupAsync` → real Relay ACKs `CreateGroupAsync` → `GroupChannelCreatedEvent` fires → Invitee receives `GroupInvitationReceivedEvent`, accepts via `IGroupChannelWorkflow.AcceptGroupInvitationAsync` → `GroupStreamCoordinator` connects both peers to `AnonymousGroupRelayService.SubscribeGroupStream` → group broadcast messages deliver live to all members.
+      4. **Reject vs Block Parity**: Rejecting deletes pending handshake and allows clean re-request via `ReopenInboundRequest`; blocking silently drops subsequent handshakes with zero events emitted (`SYS-BLOCK-WIRE-INDISTINGUISHABILITY`).
+  * **3. Full Simulator Scenario Replay & Regression Audit**:
+    * Update any remaining scenario steps in `Percolator.Simulator/Features/Scenarios/ScenarioRunnerService.cs` to await deterministic `IEventSubscriber.ObserveEvent<T>()` signals (zero `Task.Delay` sleeps, zero deprecated `SignalCategory` waits).
+* **Acceptance Criteria**:
+  * Zero Simulator-owned decorators for handshake, app-router, or outbox flushing remain (`SimulatorNotifyingHandshakeDecorator`, `SimulatorNotifyingAppRouterDecorator`, `SimulatorOutboxFlushingIngressPipelineDecorator` all deleted).
+  * Desktop and Simulator share 100% of handshake, routing, group lifecycle, profile sync, and real-time messaging code paths with zero duplicate business logic.
+  * All 4 cross-peer E2E integration tests pass over real loopback TLS gRPC + SQLite.
+  * All Simulator headless replay scenarios and solution-wide unit/integration tests pass with zero warnings.
+* **Verification Gate**:
+  * `dotnet test Percolator.ApplicationIntegrationTests/Percolator.ApplicationIntegrationTests.csproj --filter "FullyQualifiedName~CrossPeerHandshakeAndChatParityTests"`
+  * `dotnet run --project Percolator.Simulator\Percolator.Simulator.csproj -f net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator\Scenarios`
+  * `dotnet test` (100% pass across all solution test projects)
+  * `pwsh -File scripts/validate-qms-compliance.ps1`
 
 ---
 
@@ -540,13 +992,24 @@ This matrix maps all infrastructure ports and desktop adapters across their owni
 | `IOutboundPendingRetryWorker` | Desktop Transports | `OutboundPendingRetryWorker` | Chunk 6 (`[DESK-06]`) |
 | `IPeerContactQueryService` | Application Delivery | `SqlPeerContactQueryService` (Infrastructure) | Chunk 6 (`[DESK-06]`) |
 | `IPendingHandshakeRepository`| Domain Delivery | `SqlitePendingHandshakeRepository` | Chunk 6 (`[DESK-06]`) |
-| `IContactRequestCoordinator` | Application Profiles | `ContactRequestCoordinator` | Chunk 7A (`[DESK-07-A]`) |
-| `IEventPublisher` | Application Ports | `InMemoryEventBus` (Infrastructure) | Chunk 7A (`[DESK-07-A]`) |
-| `IEventSubscriber` | Application Ports | `InMemoryEventBus` (Infrastructure) | Chunk 7A (`[DESK-07-A]`) |
+| `IEventPublisher` | PluginSdk Events | `InMemoryEventBus` (Infrastructure) | Chunk 7A (`[DESK-07-A]`) |
+| `IEventSubscriber` | PluginSdk Events | `InMemoryEventBus` (Infrastructure) | Chunk 7A (`[DESK-07-A]`) |
+| `IHostedService` (Outbox) | Infrastructure Transport | `OutboxDispatchHost` (Infrastructure) | Chunk 7A (`[DESK-07-A]`) |
+| `IConversationListQueryService`| Apps Chat | `SqlConversationListQueryService` (Infrastructure, Singleton) | Chunk 7 / 7A (`[DESK-07-A]`) |
+| `IContactRequestCoordinator` | Application Profiles | `ContactRequestCoordinator` | Chunk 7B (`[DESK-07-B]`) |
+| `IInboundConnectionWorkflow` | Application Connections | `InboundConnectionWorkflow` / `DesktopInboundConnectionWorkflow` | Chunk 7B (`[DESK-07-B]`) |
+| `IAppPayloadHandler` (Control) | PluginSdk | `HandshakeControlPayloadHandler` (Application) | Chunk 7C (`[DESK-07-C]`) |
+| `IOutboundConnectionWorkflow` | Application Connections | `OutboundConnectionWorkflow` | Chunk 7C (`[DESK-07-C]`) |
+| `IGroupRelayClient` | Application Ports | `GrpcGroupRelayClient` (Infrastructure) | Chunk 7D (`[DESK-07-D]`) |
+| `IGroupInvitationPort` | PluginSdk Groups | `GroupInvitationService` (Apps Chat) | Chunk 7D (`[DESK-07-D]`) |
+| `IGroupInvitationQueryService` | Apps Chat | `SqlGroupInvitationQueryService` (Infrastructure, Singleton) | Chunk 7D (`[DESK-07-D]`) |
+| `IGroupChannelWorkflow` | Application Groups | `GroupChannelWorkflow` / `DesktopGroupChannelWorkflow` | Chunk 7D (`[DESK-07-D]`) |
+| `IHostedService` (Group Streams) | Infrastructure Transport | `GroupStreamCoordinator` / `RelayGroupStreamWorker` | Chunk 7D (`[DESK-07-D]`) |
+| `IProfileCapabilitySender` | PluginSdk Profiles | `ChatService` (Apps Chat) | Chunk 7E (`[DESK-07-E]`) |
+| `IProfileSyncWorkflow` | Application Profiles | `ProfileSyncWorkflow` / `ProfileSyncEventListener` | Chunk 7E (`[DESK-07-E]`) |
 | `IChatDraftStateService` | Desktop Chats | `ChatDraftStateService` | Chunk 7 (`[DESK-07]`) |
-| `IChatService` | Apps Chat | `ChatService` | Chunk 7 (`[DESK-07]`) |
+| `IChatService` | Apps Chat | `ChatService` | Chunk 7 / 7E (`[DESK-07-E]`) |
 | `IChatMessageQueryService` | Apps Chat | `SqlChatMessageQueryService` (Infrastructure) | Chunk 7 (`[DESK-07]`) |
-| `IConversationListQueryService`| Apps Chat | `SqlConversationListQueryService` (Infrastructure)| Chunk 7 (`[DESK-07]`) |
 | `IDiscoveryStateService` | Desktop Discovery | `DiscoveryStateService` | Chunk 9 (`[DESK-09]`) |
 | `INearbyPeerDiscoveryWorkflow` | Apps Discovery | `NearbyPeerDiscoveryWorkflow` | Chunk 9 (`[DESK-09]`) |
 | `IPrivateRendezvousService` | Apps Discovery | `PrivateRendezvousService` | Chunk 9 (`[DESK-09]`) |
