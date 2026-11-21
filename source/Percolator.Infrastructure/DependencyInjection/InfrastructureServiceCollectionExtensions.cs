@@ -337,7 +337,7 @@ public static class InfrastructureServiceCollectionExtensions
     public static IServiceCollection AddChatInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IChatMessageRepository, SqlChatMessageRepository>();
-        services.AddScoped<IChatMessageQueryService, SqlChatMessageQueryService>();
+        services.AddSingleton<IChatMessageQueryService, SqlChatMessageQueryService>();
         services.AddSingleton<IConversationListQueryService, SqlConversationListQueryService>();
         services.AddScoped<IGroupInvitationRepository, SqlGroupInvitationRepository>();
         services.AddScoped<IGroupInvitationQueryService, SqlGroupInvitationQueryService>();

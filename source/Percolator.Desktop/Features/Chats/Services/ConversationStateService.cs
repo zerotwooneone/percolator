@@ -282,6 +282,38 @@ public sealed class ConversationStateService : IConversationStateService
         }
     }
 
+    public void RegisterRelayedConversation(
+        ChannelId channelId,
+        string displayName,
+        PublicIdentityId relayId,
+        bool isGroup = false)
+    {
+        if (_disposed) return;
+
+        lock (_lock)
+        {
+            var existing = _conversationsList.FirstOrDefault(c => c.ConversationId == channelId);
+            if (existing != null)
+            {
+                existing.DisplayName = displayName;
+            }
+            else
+            {
+                _conversationsList.Add(new ConversationSummaryModel(
+                    conversationId: channelId,
+                    peerOrGroupId: relayId,
+                    displayName: displayName,
+                    routeType: ConversationRouteType.Relayed,
+                    relayId: relayId,
+                    lastMessageSnippet: isGroup ? "Group created." : "Relayed connection active.",
+                    lastActivityUtc: _timeProvider.GetUtcNow(),
+                    unreadCount: 0,
+                    isPendingOutbound: false,
+                    deliveryStatus: ConversationDeliveryStatus.Connected));
+            }
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

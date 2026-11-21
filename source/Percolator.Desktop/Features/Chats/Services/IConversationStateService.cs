@@ -58,4 +58,14 @@ public interface IConversationStateService : IDisposable
     /// Registers or updates an established direct conversation with a peer.
     /// </summary>
     void RegisterDirectConversation(PublicIdentityId peerId, string displayName, ChannelId? channelId = null);
+
+    /// <summary>
+    /// Registers a relayed direct or group conversation in the local conversation state.
+    /// </summary>
+    void RegisterRelayedConversation(
+        ChannelId channelId,
+        string displayName,
+        PublicIdentityId relayId,
+        bool isGroup = false);
 }
+

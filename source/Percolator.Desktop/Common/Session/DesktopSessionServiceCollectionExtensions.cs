@@ -70,6 +70,12 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<IConversationListQueryService, SqlConversationListQueryService>();
         services.AddSingleton<IConversationStateService, ConversationStateService>();
         services.AddTransient<ChatsSidebarViewModel>();
+
+        // Real-time messaging, volatile drafts, and LRU session scope factory (DESK-07)
+        services.AddSingleton<IChatDraftStateService, ChatDraftStateService>();
+        services.AddSingleton<ISessionScopeFactory, SessionScopeFactory>();
+        services.AddSingleton<IChatMessageQueryService, SqlChatMessageQueryService>();
+
         services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
         services.AddScoped<InboundConnectionWorkflow>();
         services.AddSingleton<IInboundConnectionWorkflow, DesktopInboundConnectionWorkflow>();

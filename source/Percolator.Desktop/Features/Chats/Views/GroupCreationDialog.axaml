@@ -1,0 +1,100 @@
+<!-- SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/View.spec.md before modifying this file. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Percolator.Desktop.Features.Chats.ViewModels"
+        xmlns:models="using:Percolator.Desktop.Features.Chats.Models"
+        xmlns:ports="using:Percolator.Application.Delivery.Ports"
+        x:Class="Percolator.Desktop.Features.Chats.Views.GroupCreationDialog"
+        x:DataType="vm:GroupCreationDialogViewModel"
+        Title="Create Group Channel"
+        Width="460"
+        Height="540"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="24">
+        <!-- Header & Inputs -->
+        <StackPanel Grid.Row="0" Spacing="16" Margin="0,0,0,16">
+            <TextBlock Text="Create New Group Channel"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}" />
+
+            <TextBlock Text="Group channels route traffic through a shared common relay. Select the relay and invite contacts."
+                       TextWrapping="Wrap"
+                       Opacity="0.8" />
+
+            <StackPanel Spacing="6">
+                <TextBlock Text="Group Name" FontWeight="Medium" />
+                <TextBox Text="{Binding GroupName, Mode=TwoWay}"
+                         Watermark="e.g. Project Apollo" />
+            </StackPanel>
+
+            <StackPanel Spacing="6">
+                <TextBlock Text="Common Relay" FontWeight="Medium" />
+                <ComboBox ItemsSource="{Binding AvailableRelays}"
+                          SelectedItem="{Binding SelectedRelay, Mode=TwoWay}"
+                          HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="ports:PersonaRelayLinkReadModel">
+                            <TextBlock Text="{Binding DisplayName}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Contacts Selection -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource SurfaceSubtleBrush}"
+                BorderBrush="{DynamicResource ControlBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="8">
+            <Grid RowDefinitions="Auto,*">
+                <TextBlock Grid.Row="0"
+                           Text="Select Members"
+                           FontWeight="Medium"
+                           Margin="4,4,4,8" />
+
+                <ListBox Grid.Row="1"
+                         ItemsSource="{Binding Contacts}"
+                         Background="Transparent">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:ContactSelectionItemModel">
+                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                      Content="{Binding DisplayName}"
+                                      HorizontalAlignment="Stretch" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+
+        <!-- Actions & Status -->
+        <StackPanel Grid.Row="2" Margin="0,16,0,0" Spacing="12">
+            <!-- Loading indicator -->
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsLoading}"
+                         Height="4" />
+
+            <!-- Error message -->
+            <TextBlock Text="{Binding ErrorMessage}"
+                       Foreground="{DynamicResource DangerBrush}"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                       TextWrapping="Wrap" />
+
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <Button Grid.Column="1"
+                        Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        Margin="0,0,8,0" />
+
+                <Button Grid.Column="2"
+                        Content="Create Group"
+                        Classes="accent"
+                        Command="{Binding CreateGroupCommand}" />
+            </Grid>
+        </StackPanel>
+    </Grid>
+</Window>

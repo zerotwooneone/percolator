@@ -5,7 +5,9 @@ namespace Percolator.Desktop.Features.Shell.ViewModels;
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Percolator.Desktop.Common.Navigation;
 using Percolator.Desktop.Common.Services;
+using Percolator.Desktop.Features.Chats.Services;
 using Percolator.Desktop.Features.Chats.ViewModels;
 using Percolator.Desktop.Features.Shell.Models;
 using Percolator.Desktop.Features.Transports.ViewModels;
@@ -19,6 +21,8 @@ using R3;
 public sealed partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ICurrentPersonaService _currentPersonaService;
+    private readonly IShellNavigationStateService _navigationService;
+    private readonly ISessionScopeFactory _sessionScopeFactory;
 
     /// <summary>
     /// ViewModel governing the 72px fixed Left Rail navigation sidebar ([DESK-05]).
@@ -29,6 +33,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// ViewModel governing the 240px contextual right sidebar chats directory ([DESK-06]).
     /// </summary>
     public ChatsSidebarViewModel ChatsSidebar { get; }
+
+    /// <summary>
+    /// Active conversation ViewModel resolved from the LRU session scope factory ([DEC-LRU-SESSION-SCOPES], [DESK-07]).
+    /// Null when no conversation is currently selected.
+    /// </summary>
+    [ObservableProperty]
+    private ChatViewModel? _currentChat;
 
     /// <summary>
     /// Two-way bound to the right-anchored inspector <c>SplitView.IsPaneOpen</c>.
@@ -60,10 +71,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public MainWindowViewModel(
         ICurrentPersonaService currentPersonaService,
+        IShellNavigationStateService navigationService,
+        ISessionScopeFactory sessionScopeFactory,
         TransportsSidebarViewModel transportsSidebar,
         ChatsSidebarViewModel chatsSidebar)
     {
         _currentPersonaService = currentPersonaService ?? throw new ArgumentNullException(nameof(currentPersonaService));
+        _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
+        _sessionScopeFactory = sessionScopeFactory ?? throw new ArgumentNullException(nameof(sessionScopeFactory));
         TransportsSidebar = transportsSidebar ?? throw new ArgumentNullException(nameof(transportsSidebar));
         ChatsSidebar = chatsSidebar ?? throw new ArgumentNullException(nameof(chatsSidebar));
 
@@ -71,9 +86,32 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         _currentPersonaService.CurrentPersonaChanged
             .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(p => CurrentPersona = p)
+            .Subscribe(p =>
+            {
+                CurrentPersona = p;
+                CurrentChat = null;
+                ActiveConversationTitle = string.Empty;
+            })
+            .AddTo(ref Bag);
+
+        _navigationService.SelectedConversationId
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(channelId =>
+            {
+                if (channelId == null)
+                {
+                    CurrentChat = null;
+                    ActiveConversationTitle = string.Empty;
+                }
+                else
+                {
+                    CurrentChat = _sessionScopeFactory.GetOrCreateChatViewModel(channelId.Value);
+                    ActiveConversationTitle = CurrentChat.ConversationTitle;
+                }
+            })
             .AddTo(ref Bag);
     }
+
 
     [RelayCommand]
     private void ToggleInspector()

@@ -100,8 +100,18 @@
                         </Grid>
                     </Border>
 
+                    <!-- Active Conversation: ChatView -->
+                    <Panel Grid.Row="1"
+                           Grid.RowSpan="2"
+                           IsVisible="{Binding CurrentChat, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <chats:ChatView DataContext="{Binding CurrentChat}" />
+                    </Panel>
+
                     <!-- Message list placeholder / welcome empty state -->
-                    <Grid Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid Grid.Row="1"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          IsVisible="{Binding CurrentChat, Converter={x:Static ObjectConverters.IsNull}}">
                         <StackPanel Spacing="12" HorizontalAlignment="Center" MaxWidth="420">
                             <controls:NerdIcon GlyphType="MeshNetwork"
                                                FontSize="48"
@@ -126,9 +136,10 @@
                     <Border Grid.Row="2"
                             Padding="12"
                             BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
-                            BorderThickness="0,1,0,0">
+                            BorderThickness="0,1,0,0"
+                            IsVisible="{Binding CurrentChat, Converter={x:Static ObjectConverters.IsNull}}">
                         <TextBox IsEnabled="False"
-                                 Watermark="Message composer arrives in DESK-06"
+                                 Watermark="Select a conversation to start messaging"
                                  CornerRadius="{StaticResource ControlCornerRadius}" />
                     </Border>
                 </Grid>

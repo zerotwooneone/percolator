@@ -20,4 +20,5 @@ public sealed record ChatMessageReadModel(
     bool IsTombstone,
     IReadOnlyList<ReactionGroupReadModel> Reactions,
     ulong? DeliveredAtUnixMs = null,
-    ulong? ReadAtUnixMs = null);
+    ulong? ReadAtUnixMs = null,
+    ulong? ExpiresAtUnixMs = null);

@@ -95,6 +95,33 @@ internal sealed class FakeConversationStateService : IConversationStateService
         }
     }
 
+    public void RegisterRelayedConversation(
+        ChannelId channelId,
+        string displayName,
+        PublicIdentityId relayId,
+        bool isGroup = false)
+    {
+        var existing = _list.FirstOrDefault(c => c.ConversationId == channelId);
+        if (existing != null)
+        {
+            existing.DisplayName = displayName;
+        }
+        else
+        {
+            _list.Add(new ConversationSummaryModel(
+                channelId,
+                relayId,
+                displayName,
+                ConversationRouteType.Relayed,
+                relayId: relayId,
+                lastMessageSnippet: isGroup ? "Group created." : "Relayed connection active.",
+                lastActivityUtc: DateTimeOffset.UtcNow,
+                unreadCount: 0,
+                isPendingOutbound: false,
+                deliveryStatus: ConversationDeliveryStatus.Connected));
+        }
+    }
+
     public void SimulateConnectionSuccess(OutboundPendingConnectionModel model)
     {
         var match = _list.FirstOrDefault(c => c.PeerOrGroupId == model.PeerId);

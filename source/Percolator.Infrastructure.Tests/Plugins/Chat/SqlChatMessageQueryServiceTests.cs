@@ -18,7 +18,7 @@ public sealed class SqlChatMessageQueryServiceTests
     {
         using var testDb = new SqliteTestDb();
         var repo = new SqlChatMessageRepository(testDb.DbContext);
-        var queryService = new SqlChatMessageQueryService(testDb.DbContext);
+        var queryService = new SqlChatMessageQueryService(testDb.ContextFactory);
 
         var channelId = ChannelId.New();
         var authorId = Domain.Identities.PublicIdentityId.New();

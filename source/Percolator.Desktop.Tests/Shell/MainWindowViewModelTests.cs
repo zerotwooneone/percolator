@@ -12,6 +12,7 @@ using ObservableCollections;
 using Percolator.Desktop.Common.Navigation;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
+using Percolator.Desktop.Features.Chats.Services;
 using Percolator.Desktop.Features.Chats.ViewModels;
 using Percolator.Desktop.Features.Shell.Models;
 using Percolator.Desktop.Features.Shell.ViewModels;
@@ -28,6 +29,7 @@ public sealed class MainWindowViewModelTests
 {
     private ShellNavigationStateService _navigationService = null!;
     private Mock<ICurrentPersonaService> _currentPersonaServiceMock = null!;
+    private Mock<ISessionScopeFactory> _sessionScopeFactoryMock = null!;
     private Mock<IWindowManager> _windowManagerMock = null!;
     private Mock<IRelayStateService> _relayStateServiceMock = null!;
     private FakeInboundRequestStateService _fakeInboundService = null!;
@@ -53,6 +55,7 @@ public sealed class MainWindowViewModelTests
 
         _navigationService = new ShellNavigationStateService(NullLogger<ShellNavigationStateService>.Instance);
         _currentPersonaServiceMock = new Mock<ICurrentPersonaService>();
+        _sessionScopeFactoryMock = new Mock<ISessionScopeFactory>();
         _windowManagerMock = new Mock<IWindowManager>();
         _relayStateServiceMock = new Mock<IRelayStateService>();
         _fakeInboundService = new FakeInboundRequestStateService();
@@ -100,6 +103,8 @@ public sealed class MainWindowViewModelTests
     {
         return new MainWindowViewModel(
             _currentPersonaServiceMock.Object,
+            _navigationService,
+            _sessionScopeFactoryMock.Object,
             _transportsSidebar,
             _chatsSidebar);
     }
@@ -107,14 +112,20 @@ public sealed class MainWindowViewModelTests
     [Test]
     public void Constructor_WithNullDependencies_ThrowsArgumentNullException()
     {
-        var act1 = () => new MainWindowViewModel(null!, _transportsSidebar, _chatsSidebar);
+        var act1 = () => new MainWindowViewModel(null!, _navigationService, _sessionScopeFactoryMock.Object, _transportsSidebar, _chatsSidebar);
         act1.Should().Throw<ArgumentNullException>().WithParameterName("currentPersonaService");
 
-        var act2 = () => new MainWindowViewModel(_currentPersonaServiceMock.Object, null!, _chatsSidebar);
-        act2.Should().Throw<ArgumentNullException>().WithParameterName("transportsSidebar");
+        var act2 = () => new MainWindowViewModel(_currentPersonaServiceMock.Object, null!, _sessionScopeFactoryMock.Object, _transportsSidebar, _chatsSidebar);
+        act2.Should().Throw<ArgumentNullException>().WithParameterName("navigationService");
 
-        var act3 = () => new MainWindowViewModel(_currentPersonaServiceMock.Object, _transportsSidebar, null!);
-        act3.Should().Throw<ArgumentNullException>().WithParameterName("chatsSidebar");
+        var act3 = () => new MainWindowViewModel(_currentPersonaServiceMock.Object, _navigationService, null!, _transportsSidebar, _chatsSidebar);
+        act3.Should().Throw<ArgumentNullException>().WithParameterName("sessionScopeFactory");
+
+        var act4 = () => new MainWindowViewModel(_currentPersonaServiceMock.Object, _navigationService, _sessionScopeFactoryMock.Object, null!, _chatsSidebar);
+        act4.Should().Throw<ArgumentNullException>().WithParameterName("transportsSidebar");
+
+        var act5 = () => new MainWindowViewModel(_currentPersonaServiceMock.Object, _navigationService, _sessionScopeFactoryMock.Object, _transportsSidebar, null!);
+        act5.Should().Throw<ArgumentNullException>().WithParameterName("chatsSidebar");
     }
 
     [Test]
@@ -168,4 +179,27 @@ public sealed class MainWindowViewModelTests
         vm.ToggleChatsSidebarCommand.Execute(null);
         vm.IsChatsSidebarOpen.Should().BeTrue();
     }
+
+    [Test]
+    public void SelectedConversationId_WhenNull_CurrentChatIsNull()
+    {
+        using var vm = CreateViewModel();
+        _navigationService.SelectConversation(null);
+
+        vm.CurrentChat.Should().BeNull();
+        vm.ActiveConversationTitle.Should().BeEmpty();
+    }
+
+    [Test]
+    public void CurrentPersonaChanged_ResetsCurrentChatToNull()
+    {
+        using var vm = CreateViewModel();
+
+        var newPersona = new ActivePersonaModel(PublicIdentityId.New(), "Charlie", 5128);
+        _currentPersonaChanged.OnNext(newPersona);
+
+        vm.CurrentChat.Should().BeNull();
+        vm.ActiveConversationTitle.Should().BeEmpty();
+    }
 }
+

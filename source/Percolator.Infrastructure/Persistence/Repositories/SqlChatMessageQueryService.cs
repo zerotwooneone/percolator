@@ -16,11 +16,11 @@ using Percolator.PluginSdk;
 
 public sealed class SqlChatMessageQueryService : IChatMessageQueryService
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
 
-    public SqlChatMessageQueryService(PercolatorDbContext dbContext)
+    public SqlChatMessageQueryService(IDbContextFactory<PercolatorDbContext> contextFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
     }
 
     public async Task<IReadOnlyList<ChatMessageReadModel>> GetMessagesAsync(
@@ -36,8 +36,9 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
         }
 
         var channelGuid = channelId.Value;
+        await using var dbContext = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
-        var query = _dbContext.ChatMessages
+        var query = dbContext.ChatMessages
             .AsNoTracking()
             .Where(m => m.ChannelId == channelGuid &&
                         (m.ExpiresAtUnixMs == null || (long)m.ExpiresAtUnixMs > (long)currentTimestampMs));
@@ -62,17 +63,17 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
 
         var messageIds = entities.Select(e => e.Id).ToList();
 
-        var reactions = await _dbContext.ChatReactions
+        var reactions = await dbContext.ChatReactions
             .AsNoTracking()
             .Where(r => messageIds.Contains(r.MessageId))
             .ToListAsync(ct);
 
-        var mentions = await _dbContext.ChatMessageMentions
+        var mentions = await dbContext.ChatMessageMentions
             .AsNoTracking()
             .Where(m => messageIds.Contains(m.MessageId))
             .ToListAsync(ct);
 
-        var attachments = await _dbContext.ChatAttachments
+        var attachments = await dbContext.ChatAttachments
             .AsNoTracking()
             .Where(a => messageIds.Contains(a.MessageId))
             .ToListAsync(ct);
@@ -194,7 +195,8 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
                 entity.IsTombstone,
                 reactionGroups,
                 DeliveredAtUnixMs: entity.DeliveredAtUnixMs,
-                ReadAtUnixMs: entity.ReadAtUnixMs));
+                ReadAtUnixMs: entity.ReadAtUnixMs,
+                ExpiresAtUnixMs: entity.ExpiresAtUnixMs));
         }
 
         return result;
