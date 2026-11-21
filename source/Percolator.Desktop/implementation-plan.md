@@ -166,6 +166,7 @@ flowchart TD
         C5["[DESK-05] State Services Foundation & Left Rail Discord Architecture (Flows A & C Phase 1) (Completed)"]
         C6["[DESK-06] Direct P2P & Relayed Conversation Directory with Outbound Pending (Flows B & C Phase 2)"]
         C7["[DESK-07] Real-Time Messaging Experience, Volatile Drafts & Disappearing Messages (Apps.Chat)"]
+        C7A["[DESK-07-A] Inbound Handshake Domain/Application Event Pipeline & Simulator Decoupling"]
         C8["[DESK-08] Right-Anchored Profile & Connection Inspector Drawer"]
     end
 
@@ -177,7 +178,7 @@ flowchart TD
         C13["[DESK-13] Headless UI & Comprehensive Verification Test Suite"]
     end
 
-    C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C8 --> C9 --> C10 --> C11 --> C12 --> C13
+    C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C7A --> C8 --> C9 --> C10 --> C11 --> C12 --> C13
 ```
 
 ---
@@ -299,6 +300,108 @@ flowchart TD
 * **Verification Gate**:
   * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~Chat|FullyQualifiedName~Scope"`
   * Verifies draft restoration on chat switch; 50ms debounced SQLite reload; pending banner behavior; disappearing message tombstone transitions.
+
+---
+
+### [DESK-07-A] Inbound Handshake Domain/Application Event Pipeline & Simulator Decoupling
+* **QMS Traceability**: `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`), `DEP-DESKTOP-CRYPTO-BOUNDARY` (allocates `SYS-CRYPTO-BOUNDARY-ISOLATION`)
+* **Detailed Design**: `DEC-PULL-BASED-CONSENT-STAGING`, `INV-APP-EVENT-BUS-DECOUPLING`, `INV-RECORD-EVENT-ENFORCEMENT`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`
+* **Governing Specs**: `[STYLE-002]`, `[STYLE-005]`, `[STYLE-006]`, `[VM-001]`, `[VM-002]`, `[VM-003]`, `[VM-005]`, `[VM-006]`, `[VM-010]`, `[VM-014]`, `[R3-004]`, `[R3-005]`, `[R3-006]`, `[UISS-001]`, `[UISS-002]`
+* **Target Deliverables**:
+  * Create: `Percolator.Domain/Identities/Events/InboundContactRequestReceivedDomainEvent.cs`
+    * Record: `public sealed record InboundContactRequestReceivedDomainEvent(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId, IdentityKey PrimaryPublicKey, DateTimeOffset OccurredOnUtc) : IDomainEvent` with `public Guid EventId { get; } = Guid.NewGuid();`
+  * Create: `Percolator.Domain/Identities/Events/ContactRequestApprovedDomainEvent.cs`
+    * Record: `public sealed record ContactRequestApprovedDomainEvent(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId, PeerTrustLevel TrustLevel, DateTimeOffset OccurredOnUtc) : IDomainEvent` with `public Guid EventId { get; } = Guid.NewGuid();`
+  * Create: `Percolator.Domain/Identities/Events/ContactRequestRejectedDomainEvent.cs`
+    * Record: `public sealed record ContactRequestRejectedDomainEvent(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId, bool IsBlocked, DateTimeOffset OccurredOnUtc) : IDomainEvent` with `public Guid EventId { get; } = Guid.NewGuid();`
+  * Modify: `Percolator.Domain/Identities/Model/PeerContact.cs`
+    * `CreateInboundRequest(...)`: Append `contact.AddDomainEvent(new InboundContactRequestReceivedDomainEvent(ownerIdentityId, remotePeerId, primaryPublicKey, timeProvider.UtcNow));` before returning success.
+    * `Approve(...)`: Update signature to `public DomainResult Approve(PeerTrustLevel initialTrust = PeerTrustLevel.Tofu, IDateTimeProvider? timeProvider = null)`. Append `AddDomainEvent(new ContactRequestApprovedDomainEvent(OwnerIdentityId, RemotePeerId, TrustLevel, timeProvider?.UtcNow ?? DateTimeOffset.UtcNow));` on transition to `ContactState.Active`.
+    * `Reject(...)`: Update signature to `public DomainResult Reject(bool block = false, IDateTimeProvider? timeProvider = null)`. Append `AddDomainEvent(new ContactRequestRejectedDomainEvent(OwnerIdentityId, RemotePeerId, block, timeProvider?.UtcNow ?? DateTimeOffset.UtcNow));` on transition to `ContactState.Rejected`.
+  * Create: `Percolator.Application/Profiles/Events/InboundContactRequestReceivedEvent.cs`
+    * Explicit Property Types (prevents primitive Value Object unboxing to naked Guids):
+      ```csharp
+      namespace Percolator.Application.Profiles.Events;
+      [Percolator.SourceGenerators.MapFromDomainEvent(typeof(Percolator.Domain.Identities.Events.InboundContactRequestReceivedDomainEvent))]
+      public sealed partial record InboundContactRequestReceivedEvent : Percolator.Application.Ports.IApplicationEvent
+      {
+          public Percolator.Domain.Identities.PublicIdentityId OwnerIdentityId { get; init; }
+          public Percolator.Domain.Identities.PublicIdentityId RemotePeerId { get; init; }
+          public Percolator.Domain.Identities.ValueObjects.IdentityKey PrimaryPublicKey { get; init; }
+      }
+      ```
+  * Create: `Percolator.Application/Profiles/Events/ContactRequestApprovedEvent.cs`
+    * Explicit Property Types:
+      ```csharp
+      namespace Percolator.Application.Profiles.Events;
+      [Percolator.SourceGenerators.MapFromDomainEvent(typeof(Percolator.Domain.Identities.Events.ContactRequestApprovedDomainEvent))]
+      public sealed partial record ContactRequestApprovedEvent : Percolator.Application.Ports.IApplicationEvent
+      {
+          public Percolator.Domain.Identities.PublicIdentityId OwnerIdentityId { get; init; }
+          public Percolator.Domain.Identities.PublicIdentityId RemotePeerId { get; init; }
+          public Percolator.Domain.Identities.Model.PeerTrustLevel TrustLevel { get; init; }
+      }
+      ```
+  * Create: `Percolator.Application/Profiles/Events/ContactRequestRejectedEvent.cs`
+    * Explicit Property Types:
+      ```csharp
+      namespace Percolator.Application.Profiles.Events;
+      [Percolator.SourceGenerators.MapFromDomainEvent(typeof(Percolator.Domain.Identities.Events.ContactRequestRejectedDomainEvent))]
+      public sealed partial record ContactRequestRejectedEvent : Percolator.Application.Ports.IApplicationEvent
+      {
+          public Percolator.Domain.Identities.PublicIdentityId OwnerIdentityId { get; init; }
+          public Percolator.Domain.Identities.PublicIdentityId RemotePeerId { get; init; }
+          public bool IsBlocked { get; init; }
+      }
+      ```
+  * Modify: `Percolator.Application/Profiles/ContactRequestCoordinator.cs`
+    * Constructor: Add non-nullable `IEventPublisher eventPublisher` parameter (`_eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));`).
+    * `HandleInboundRequestAsync(...)`: After `await _contactRepo.SaveAsync(contact, ct);`, iterate `contact.DomainEvents`, map `InboundContactRequestReceivedDomainEvent` to `InboundContactRequestReceivedEvent.FromDomain(e)`, publish via `await _eventPublisher.PublishAsync(appEvent, ct);`, then `contact.ClearDomainEvents();`. (Note: Existing contacts in `PendingApproval` state exit early without raising events, preserving idempotency).
+    * `ApproveRequestAsync(...)`: Pass `_timeProvider` to `contact.Approve(initialTrust, _timeProvider)`. After `await _contactRepo.SaveAsync(contact, ct);`, iterate `contact.DomainEvents`, map `ContactRequestApprovedDomainEvent` to `ContactRequestApprovedEvent.FromDomain(e)`, publish via `await _eventPublisher.PublishAsync(appEvent, ct);`, then `contact.ClearDomainEvents();`.
+    * `RejectRequestAsync(...)`: Pass `_timeProvider` to `contact.Reject(block, _timeProvider)`. After `await _contactRepo.SaveAsync(contact, ct);`, iterate `contact.DomainEvents`, map `ContactRequestRejectedDomainEvent` to `ContactRequestRejectedEvent.FromDomain(e)`, publish via `await _eventPublisher.PublishAsync(appEvent, ct);`, then `contact.ClearDomainEvents();`.
+  * Update Affected Application & Integration Tests for `ContactRequestCoordinator` ctor change:
+    * `Percolator.Application.Tests/Handshake/HandshakeServiceTests.cs` (supply mock `IEventPublisher` or `InMemoryEventBus`)
+    * `Percolator.Application.Tests/Ingress/AppHostPipelineTests.cs` (supply mock `IEventPublisher`)
+    * `Percolator.Application.Tests/Profiles/ProfileAndContactTests.cs` (supply mock `IEventPublisher` and verify published events)
+    * `Percolator.ApplicationIntegrationTests/Builders/TestIdentityNode.cs` (supply host `IEventPublisher`)
+  * Modify: `Percolator.Desktop/Features/Transports/Services/InboundRequestStateService.cs`
+    * Constructor: Add non-nullable `IEventSubscriber eventSubscriber` parameter (`_eventSubscriber = eventSubscriber ?? throw new ArgumentNullException(nameof(eventSubscriber));`).
+    * Event Subscriptions:
+      * `eventSubscriber.Subscribe<InboundContactRequestReceivedEvent>(evt => { if (evt.OwnerIdentityId == _activePersonaId) _ = LoadRequestsForPersonaAsync(evt.OwnerIdentityId); }).AddTo(ref _bag);`
+      * `eventSubscriber.Subscribe<ContactRequestApprovedEvent>(evt => { if (evt.OwnerIdentityId == _activePersonaId) _ = LoadRequestsForPersonaAsync(evt.OwnerIdentityId); }).AddTo(ref _bag);`
+      * `eventSubscriber.Subscribe<ContactRequestRejectedEvent>(evt => { if (evt.OwnerIdentityId == _activePersonaId) _ = LoadRequestsForPersonaAsync(evt.OwnerIdentityId); }).AddTo(ref _bag);`
+  * Update: `Percolator.Desktop.Tests/Features/Transports/InboundRequestStateServiceTests.cs`
+    * Update `CreateService()` to supply mock `IEventSubscriber`.
+    * Update `Constructor_WithNullDependencies_ThrowsArgumentNullException` to include permutation check for null `IEventSubscriber`.
+    * Add unit tests verifying `InboundContactRequestReceivedEvent` and `ContactRequestApprovedEvent` trigger `LoadRequestsForPersonaAsync`.
+  * Delete: `Percolator.Simulator/Features/Topology/SimulatorNotifyingHandshakeDecorator.cs`
+  * Modify: `Percolator.Simulator/Features/Topology/SimulatedPersonaHost.cs`
+    * Remove registration and constructor use of `SimulatorNotifyingHandshakeDecorator`. Register `services.AddScoped<IHandshakeService, HandshakeService>();` directly.
+  * Modify: `Percolator.Simulator/Features/Topology/PersonaCardViewModel.cs`
+    * Remove `_stateBus.Signals.Where(s => s.Category == SignalCategory.PendingHandshakeChanged)` listener for direct handshakes.
+    * When `_host != null`, resolve `IEventSubscriber` from `_hostScope.ServiceProvider`.
+    * Subscribe to `InboundContactRequestReceivedEvent` and `ContactRequestApprovedEvent` filtered by `evt.OwnerIdentityId == _host.PublicIdentityId`, invoking `RefreshPendingHandshakes()`, and registering via `.AddTo(ref Disposables)`.
+  * Modify: `Percolator.Simulator/Features/Scenarios/ScenarioRunnerService.cs`
+    * Replace `_stateBus.Signals.Where(s => s.NodeId == target.Id && s.Category == SignalCategory.PendingHandshakeChanged)` in lines 558, 632, 1582 with reactive event subscription on the target host's event subscriber: `target.Services.GetRequiredService<IEventSubscriber>().ObserveEvent<InboundContactRequestReceivedEvent>().Where(e => e.OwnerIdentityId == target.PublicIdentityId).FirstAsync(cancellationToken: ct)`.
+  * Create: `Percolator.Simulator.Tests/Topology/PersonaCardViewModelTests.cs`
+    * Verify that publishing `InboundContactRequestReceivedEvent` on the host event bus sets `HasPendingHandshake = true` and updates `PendingHandshakeText`.
+    * Verify that publishing `ContactRequestApprovedEvent` clears `HasPendingHandshake = false` and empties `PendingHandshakeText`.
+* **CQRS Query & Anti-Shortcut Boundaries**:
+  * **Mandatory CQRS Read Port**: UI components (`InboundRequestStateService` and `PersonaCardViewModel`) MUST query pending requests strictly through `IPeerContactQueryService` (`[VM-006]`). Direct injection or invocation of write-side repositories (`IPeerContactRepository`, `IPendingHandshakeRepository`) in UI/ViewModel layers is prohibited.
+  * **Non-Nullable Required Dependencies**: All injected services (`IEventPublisher`, `IEventSubscriber`, `IPeerContactQueryService`) must be non-nullable, injected via constructor, and guarded with `ArgumentNullException.ThrowIfNull` (Anti-Shortcut Rule 1).
+  * **Strict Hexagonal Event Translation**: Domain emits `IDomainEvent`; Application maps via source-generated `[MapFromDomainEvent]` to `IApplicationEvent` records; Application publishes via `IEventPublisher`; UI subscribes via `IEventSubscriber`. The domain layer MUST NOT reference application pub/sub, and the UI layer MUST NOT subscribe directly to domain events.
+  * **Deterministic Subscription Teardown**: All event bus subscriptions must be explicitly attached to `_bag` (`DisposableBag`) or `Disposables` (`CompositeDisposable`) to eliminate memory leaks on persona deactivation/disposal.
+* **Acceptance Criteria**:
+  * Direct and relayed inbound handshake envelopes processed by `HandshakeService.ReceiveInvitationAsync` persist to `IPendingHandshakeRepository` and `IPeerContactRepository`, raising `InboundContactRequestReceivedDomainEvent` and publishing `InboundContactRequestReceivedEvent`.
+  * Desktop `InboundRequestStateService` reacts dynamically to `InboundContactRequestReceivedEvent` for the active persona, updating `PendingCount` and `Requests` collection without manual reload or persona toggle.
+  * Simulator `PersonaCardViewModel` reacts directly to `InboundContactRequestReceivedEvent` from the host's event bus, displaying the pending handshake notification banner and Accept/Reject buttons in real time.
+  * Handshake completion/approval removes the pending request and clears the notification banner across both Desktop and Simulator via `ContactRequestApprovedEvent`.
+  * `SimulatorNotifyingHandshakeDecorator` is deleted; no side-channel simulator state bus signals are used for handshake notification.
+* **Verification Gate**:
+  * `dotnet test Percolator.Domain.Tests/Percolator.Domain.Tests.csproj --filter "FullyQualifiedName~PeerContact"`
+  * `dotnet test Percolator.Application.Tests/Percolator.Application.Tests.csproj --filter "FullyQualifiedName~ContactRequestCoordinator|FullyQualifiedName~HandshakeService"`
+  * `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj --filter "FullyQualifiedName~InboundRequestStateService"`
+  * `dotnet test Percolator.Simulator.Tests/Percolator.Simulator.Tests.csproj --filter "FullyQualifiedName~PersonaCardViewModel"`
 
 ---
 
@@ -437,6 +540,9 @@ This matrix maps all infrastructure ports and desktop adapters across their owni
 | `IOutboundPendingRetryWorker` | Desktop Transports | `OutboundPendingRetryWorker` | Chunk 6 (`[DESK-06]`) |
 | `IPeerContactQueryService` | Application Delivery | `SqlPeerContactQueryService` (Infrastructure) | Chunk 6 (`[DESK-06]`) |
 | `IPendingHandshakeRepository`| Domain Delivery | `SqlitePendingHandshakeRepository` | Chunk 6 (`[DESK-06]`) |
+| `IContactRequestCoordinator` | Application Profiles | `ContactRequestCoordinator` | Chunk 7A (`[DESK-07-A]`) |
+| `IEventPublisher` | Application Ports | `InMemoryEventBus` (Infrastructure) | Chunk 7A (`[DESK-07-A]`) |
+| `IEventSubscriber` | Application Ports | `InMemoryEventBus` (Infrastructure) | Chunk 7A (`[DESK-07-A]`) |
 | `IChatDraftStateService` | Desktop Chats | `ChatDraftStateService` | Chunk 7 (`[DESK-07]`) |
 | `IChatService` | Apps Chat | `ChatService` | Chunk 7 (`[DESK-07]`) |
 | `IChatMessageQueryService` | Apps Chat | `SqlChatMessageQueryService` (Infrastructure) | Chunk 7 (`[DESK-07]`) |
