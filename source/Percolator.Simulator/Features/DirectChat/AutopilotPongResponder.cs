@@ -1,10 +1,15 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Ports;
+using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -63,19 +68,39 @@ internal sealed class AutopilotPongResponder : IDisposable
 
                 using var scope = host.Services.CreateScope();
                 var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
+                var contactQuery = scope.ServiceProvider.GetRequiredService<IPeerContactQueryService>();
 
                 // Query all channels or find latest incoming message
-                // In direct chat, check messages across channels for this host
-                var peers = _worldState.Personas.Where(p => p.Id != nodeId).ToList();
-                SimulatorChatMessageReadModel? latestIncoming = null;
-                ISimulatedPersonaHost? senderHost = null;
-
-                foreach (var peer in peers)
+                // In direct chat, check messages across contacts and in-world peers for this host
+                var activeContactIds = new HashSet<PublicIdentityId>();
+                try
                 {
-                    var peerHost = _worldState.GetPersonaHost(peer.Id);
-                    if (peerHost == null) continue;
+                    var contacts = await contactQuery.GetContactSummariesAsync(host.PublicIdentityId);
+                    foreach (var c in contacts.Where(c => c.State == ContactState.Active))
+                    {
+                        activeContactIds.Add(c.IdentityId);
+                    }
+                }
+                catch
+                {
+                    // Ignore query failures on initial startup
+                }
 
-                    var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerHost.PublicIdentityId);
+                foreach (var peer in _worldState.Personas.Where(p => p.Id != nodeId))
+                {
+                    var pHost = _worldState.GetPersonaHost(peer.Id);
+                    if (pHost != null)
+                    {
+                        activeContactIds.Add(pHost.PublicIdentityId);
+                    }
+                }
+
+                SimulatorChatMessageReadModel? latestIncoming = null;
+                PublicIdentityId? senderIdentityId = null;
+
+                foreach (var peerId in activeContactIds)
+                {
+                    var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerId);
                     var messages = await chatQuery.GetTranscriptAsync(channelId);
                     var candidate = messages
                         .Where(m => m.AuthorId != host.PublicIdentityId)
@@ -85,11 +110,11 @@ internal sealed class AutopilotPongResponder : IDisposable
                     if (candidate != null && (latestIncoming == null || candidate.TimestampUnixMs > latestIncoming.TimestampUnixMs))
                     {
                         latestIncoming = candidate;
-                        senderHost = peerHost;
+                        senderIdentityId = peerId;
                     }
                 }
 
-                if (latestIncoming == null || senderHost == null) return;
+                if (latestIncoming == null || senderIdentityId == null) return;
 
                 // Deduplicate responses: don't reply twice to the same payload
                 if (_lastRespondedPayload.TryGetValue(nodeId, out var lastId) && lastId == latestIncoming.MessageId)
@@ -108,6 +133,8 @@ internal sealed class AutopilotPongResponder : IDisposable
                     : latestIncoming.Content;
 
                 var replyText = $"Pong #{count} (re: {snippet})";
+                var senderHost = _worldState.FindPersonaHostByIdentity(senderIdentityId.Value);
+                var senderName = senderHost?.DisplayName ?? senderIdentityId.Value.ToString()[..8];
 
                 _logSink.Log(new SimulatorLogEntry(
                     DateTimeOffset.UtcNow,
@@ -115,9 +142,9 @@ internal sealed class AutopilotPongResponder : IDisposable
                     host.DisplayName,
                     host.Id,
                     "Autopilot",
-                    $"Autopilot triggered. Sending '{replyText}' to '{senderHost.DisplayName}'"));
+                    $"Autopilot triggered. Sending '{replyText}' to '{senderName}'"));
 
-                await _chatCoordinator.SendDirectMessageAsync(host.Id, senderHost.Id, replyText);
+                await _chatCoordinator.SendDirectMessageAsync(host.Id, senderIdentityId.Value, replyText);
             }
             catch (Exception ex)
             {

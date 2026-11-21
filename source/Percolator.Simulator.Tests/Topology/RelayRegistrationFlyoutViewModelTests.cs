@@ -6,19 +6,16 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using NUnit.Framework;
-using ObservableCollections;
 using Percolator.Application.Delivery.Ports;
-using Percolator.Application.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
-using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
-using Percolator.Simulator.Features.Scenarios.Model;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
 
@@ -36,22 +33,27 @@ public sealed class RelayRegistrationFlyoutViewModelTests
     private RelayProvisioningCoordinator _relayCoordinator = null!;
 
     private SimulatedNodeId _hostNodeId;
-    private SimulatedNodeId _relayNodeId;
     private PublicIdentityId _hostIdentityId;
-    private PublicIdentityId _relayIdentityId;
+    private BlindedRoutingToken _routingToken;
+    private DeliveryToken _deliveryToken;
+    private DeliveryToken _drainToken;
 
     [SetUp]
     public void SetUp()
     {
         _hostNodeId = SimulatedNodeId.CreateNew();
-        _relayNodeId = SimulatedNodeId.CreateNew();
         _hostIdentityId = new PublicIdentityId(Guid.NewGuid());
-        _relayIdentityId = new PublicIdentityId(Guid.NewGuid());
+        _routingToken = new BlindedRoutingToken(Guid.NewGuid());
+        _deliveryToken = DeliveryToken.GenerateRandom();
+        _drainToken = DeliveryToken.GenerateRandom();
 
         _hostMock = new Mock<ISimulatedPersonaHost>(MockBehavior.Strict);
         _hostMock.SetupGet(h => h.Id).Returns(_hostNodeId);
         _hostMock.SetupGet(h => h.DisplayName).Returns("Alice");
         _hostMock.SetupGet(h => h.PublicIdentityId).Returns(_hostIdentityId);
+        _hostMock.SetupGet(h => h.MailboxRoutingToken).Returns(_routingToken);
+        _hostMock.SetupGet(h => h.MailboxDeliveryToken).Returns(_deliveryToken);
+        _hostMock.SetupGet(h => h.MailboxDrainToken).Returns(_drainToken);
 
         _worldStateMock = new Mock<ISimulatedWorldStateService>(MockBehavior.Strict);
         _toastServiceMock = new Mock<IStatusToastService>(MockBehavior.Loose);
@@ -66,36 +68,16 @@ public sealed class RelayRegistrationFlyoutViewModelTests
             _logSinkMock.Object);
     }
 
-    [Test]
-    public void AvailableInWorldRelays_PopulatesAndUpdatesFromWorldState()
+    [TearDown]
+    public void TearDown()
     {
-        var relaysList = new ObservableList<SimulatedNodeSummary>();
-        _worldStateMock.SetupGet(w => w.Relays).Returns(relaysList);
-
-        using var vm = new RelayRegistrationFlyoutViewModel(
-            _hostMock.Object,
-            _worldStateMock.Object,
-            _relayCoordinator,
-            _toastServiceMock.Object,
-            _flightRecorderMock.Object);
-
-        vm.AvailableInWorldRelays.Should().BeEmpty();
-
-        var relaySummary = new SimulatedNodeSummary(_relayNodeId, "Relay Alpha", SimulatedNodeType.Relay, "percolator://127.0.0.1:5100");
-        relaysList.Add(relaySummary);
-
-        vm.RefreshAvailableInWorldRelays();
-
-        vm.AvailableInWorldRelays.Should().ContainSingle(r => r.Id == _relayNodeId);
-        vm.SelectedInWorldRelay.Should().NotBeNull();
-        vm.SelectedInWorldRelay!.DisplayName.Should().Be("Relay Alpha");
+        _deliveryToken.Dispose();
+        _drainToken.Dispose();
     }
 
     [Test]
-    public async Task RegisterRelayAsync_InWorldMode_WhenNoRelaySelected_SetsErrorMessage()
+    public async Task RegisterRelayAsync_WhenEmptyInput_SetsErrorMessage()
     {
-        _worldStateMock.SetupGet(w => w.Relays).Returns(new ObservableList<SimulatedNodeSummary>());
-
         using var vm = new RelayRegistrationFlyoutViewModel(
             _hostMock.Object,
             _worldStateMock.Object,
@@ -103,62 +85,106 @@ public sealed class RelayRegistrationFlyoutViewModelTests
             _toastServiceMock.Object,
             _flightRecorderMock.Object);
 
-        vm.SelectedTabIndex = 0;
-        vm.SelectedInWorldRelay = null;
-
-        await vm.RegisterRelayAsync();
-
-        vm.ErrorMessage.Should().Be("Please select an in-world relay.");
-    }
-
-    [Test]
-    public async Task RegisterRelayAsync_InWorldMode_WhenRelayNotRunning_SetsErrorMessage()
-    {
-        var relaySummary = new SimulatedNodeSummary(_relayNodeId, "Relay Alpha", SimulatedNodeType.Relay, "percolator://127.0.0.1:5100");
-        _worldStateMock.SetupGet(w => w.Relays).Returns(new ObservableList<SimulatedNodeSummary> { relaySummary });
-        _worldStateMock.Setup(w => w.GetRelayHost(_relayNodeId)).Returns((ISimulatedRelayHost?)null);
-
-        using var vm = new RelayRegistrationFlyoutViewModel(
-            _hostMock.Object,
-            _worldStateMock.Object,
-            _relayCoordinator,
-            _toastServiceMock.Object,
-            _flightRecorderMock.Object);
-
-        vm.SelectedTabIndex = 0;
-        vm.SelectedInWorldRelay = relaySummary;
-
-        await vm.RegisterRelayAsync();
-
-        vm.ErrorMessage.Should().Be("Selected relay is not currently running.");
-    }
-
-    [Test]
-    public async Task RegisterRelayAsync_ExternalMode_WhenEmptyInput_SetsErrorMessage()
-    {
-        _worldStateMock.SetupGet(w => w.Relays).Returns(new ObservableList<SimulatedNodeSummary>());
-
-        using var vm = new RelayRegistrationFlyoutViewModel(
-            _hostMock.Object,
-            _worldStateMock.Object,
-            _relayCoordinator,
-            _toastServiceMock.Object,
-            _flightRecorderMock.Object);
-
-        vm.SelectedTabIndex = 1;
-        vm.ExternalRelayInput = "   ";
+        vm.RelayEndpointInput = "   ";
 
         await vm.RegisterRelayAsync();
 
         vm.ErrorMessage.Should().Be("Please enter a relay endpoint (host:port).");
     }
 
-    [TestCase("invalid-no-port")]
-    [TestCase("relay://127.0.0.1:5100")]
-    [TestCase("https://127.0.0.1:5100")]
-    public async Task RegisterRelayAsync_ExternalMode_WhenInvalidEndpointFormat_SetsErrorMessage(string endpoint)
+    [Test]
+    public async Task RegisterRelayAsync_WhenInvalidScheme_SetsErrorMessage()
     {
-        _worldStateMock.SetupGet(w => w.Relays).Returns(new ObservableList<SimulatedNodeSummary>());
+        using var vm = new RelayRegistrationFlyoutViewModel(
+            _hostMock.Object,
+            _worldStateMock.Object,
+            _relayCoordinator,
+            _toastServiceMock.Object,
+            _flightRecorderMock.Object);
+
+        vm.RelayEndpointInput = "http://127.0.0.1:5100";
+
+        await vm.RegisterRelayAsync();
+
+        vm.ErrorMessage.Should().Contain("Invalid relay endpoint format");
+    }
+
+    [Test]
+    public async Task RegisterRelayAsync_WhenInvalidPort_SetsErrorMessage()
+    {
+        using var vm = new RelayRegistrationFlyoutViewModel(
+            _hostMock.Object,
+            _worldStateMock.Object,
+            _relayCoordinator,
+            _toastServiceMock.Object,
+            _flightRecorderMock.Object);
+
+        vm.RelayEndpointInput = "127.0.0.1:notaport";
+
+        await vm.RegisterRelayAsync();
+
+        vm.ErrorMessage.Should().Contain("Invalid relay endpoint format");
+    }
+
+    [Test]
+    public async Task RegisterRelayAsync_WhenValidInput_PerformsNetworkRegistrationAndAssignsHomeRelay()
+    {
+        var relayDirectoryMock = new Mock<IRelayDirectory>(MockBehavior.Strict);
+        var provisionerMock = new Mock<IRelayMailboxProvisioner>(MockBehavior.Strict);
+
+        relayDirectoryMock.Setup(d => d.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<RelayDirectoryEntry>());
+
+        relayDirectoryMock.Setup(d => d.RegisterRemoteRelayAsync(
+                It.IsAny<PublicIdentityId>(),
+                It.IsAny<RelayEndpoint>(),
+                It.IsAny<CertificatePin?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PublicIdentityId id, RelayEndpoint ep, CertificatePin? pin, CancellationToken ct) =>
+                DomainResult<RelayDirectoryEntry>.Success(new RelayDirectoryEntry(id, "Remote Relay", ep, false, Array.Empty<PublicIdentityId>())));
+
+        relayDirectoryMock.Setup(d => d.LinkIdentityAsync(
+                It.IsAny<PublicIdentityId>(),
+                _hostIdentityId,
+                _routingToken,
+                _drainToken,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult<RelayMailboxBinding>.Success(
+                new RelayMailboxBinding(_hostIdentityId, _routingToken, _drainToken, DateTimeOffset.UtcNow)));
+
+        relayDirectoryMock.Setup(d => d.EnsureMailboxProvisionedAsync(
+                It.IsAny<PublicIdentityId>(),
+                _hostIdentityId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult.Success());
+
+        relayDirectoryMock.Setup(d => d.GetMailboxTokensAsync(
+                _hostIdentityId,
+                It.IsAny<PublicIdentityId>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult<MailboxTokenTriad>.Success(
+                new MailboxTokenTriad(_routingToken, _deliveryToken, _drainToken)));
+
+        provisionerMock.Setup(p => p.PublishPreKeyBundleAsync(
+                _hostIdentityId,
+                DeviceId.Primary,
+                It.IsAny<RelayEndpoint>(),
+                It.IsAny<MailboxTokenTriad>(),
+                25u,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult.Success());
+
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddScoped<IRelayDirectory>(_ => relayDirectoryMock.Object);
+        serviceCollection.AddScoped<IRelayMailboxProvisioner>(_ => provisionerMock.Object);
+        var serviceProvider = serviceCollection.BuildServiceProvider();
+
+        _hostMock.SetupGet(h => h.Services).Returns(serviceProvider);
+        _hostMock.Setup(h => h.AssignHomeRelayAsync(It.IsAny<ISimulatedRelayHost>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _worldStateMock.Setup(w => w.GetAllRelayHosts())
+            .Returns(Array.Empty<ISimulatedRelayHost>());
 
         using var vm = new RelayRegistrationFlyoutViewModel(
             _hostMock.Object,
@@ -167,11 +193,41 @@ public sealed class RelayRegistrationFlyoutViewModelTests
             _toastServiceMock.Object,
             _flightRecorderMock.Object);
 
-        vm.SelectedTabIndex = 1;
-        vm.ExternalRelayInput = endpoint;
+        vm.RelayEndpointInput = "127.0.0.1:5100";
 
         await vm.RegisterRelayAsync();
 
-        vm.ErrorMessage.Should().Contain("Invalid relay endpoint format");
+        vm.ErrorMessage.Should().BeNull();
+        vm.RelayEndpointInput.Should().BeEmpty();
+
+        relayDirectoryMock.Verify(d => d.RegisterRemoteRelayAsync(
+            It.IsAny<PublicIdentityId>(),
+            It.Is<RelayEndpoint>(e => e.Port == 5100),
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        relayDirectoryMock.Verify(d => d.LinkIdentityAsync(
+            It.IsAny<PublicIdentityId>(),
+            _hostIdentityId,
+            _routingToken,
+            _drainToken,
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        relayDirectoryMock.Verify(d => d.EnsureMailboxProvisionedAsync(
+            It.IsAny<PublicIdentityId>(),
+            _hostIdentityId,
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        provisionerMock.Verify(p => p.PublishPreKeyBundleAsync(
+            _hostIdentityId,
+            DeviceId.Primary,
+            It.Is<RelayEndpoint>(e => e.Port == 5100),
+            It.IsAny<MailboxTokenTriad>(),
+            25u,
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _hostMock.Verify(h => h.AssignHomeRelayAsync(
+            It.Is<ISimulatedRelayHost>(r => r.BoundPort == 5100),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

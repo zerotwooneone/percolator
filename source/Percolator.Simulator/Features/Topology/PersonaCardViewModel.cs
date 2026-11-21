@@ -38,7 +38,8 @@ internal sealed record ConversationItemViewModel(
     string DisplayTitle,
     bool IsGroup,
     SimulatedNodeId? PeerNodeId,
-    ChannelId? GroupChannelId)
+    ChannelId? GroupChannelId,
+    PublicIdentityId? PeerIdentityId = null)
 {
     public override string ToString() => DisplayTitle;
 }
@@ -543,12 +544,47 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             {
                 var list = new List<ConversationItemViewModel>();
 
-                // 1. Direct Peers
+                // 1. Direct Peers and Contacts
+                if (_host != null)
+                {
+                    try
+                    {
+                        using var scope = _host.Services.CreateScope();
+                        var contactQuery = scope.ServiceProvider.GetRequiredService<IPeerContactQueryService>();
+                        var contacts = await contactQuery.GetContactSummariesAsync(_host.PublicIdentityId);
+                        foreach (var contact in contacts.Where(c => c.State == ContactState.Active))
+                        {
+                            var personaHost = _worldState.FindPersonaHostByIdentity(contact.IdentityId);
+                            var displayTitle = personaHost != null
+                                ? $"👤 {personaHost.DisplayName}"
+                                : $"👤 {(!string.IsNullOrWhiteSpace(contact.DisplayName) ? contact.DisplayName : contact.IdentityId.ToString()[..8])}";
+                            var peerNodeId = personaHost?.Id;
+                            list.Add(new ConversationItemViewModel(displayTitle, IsGroup: false, peerNodeId, null, contact.IdentityId));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logSink.Log(new SimulatorLogEntry(
+                            DateTimeOffset.UtcNow,
+                            LogLevel.Debug,
+                            DisplayName,
+                            NodeId,
+                            "PersonaCard",
+                            $"Error loading contacts for persona conversations: {ex.Message}"));
+                    }
+                }
+
+                // Add any other active personas in world state that are not yet in list
                 foreach (var persona in _worldState.Personas)
                 {
                     if (persona.Id != NodeId && IsActivePersona(persona.Id))
                     {
-                        list.Add(new ConversationItemViewModel($"👤 {persona.DisplayName}", IsGroup: false, persona.Id, null));
+                        var personaHost = _worldState.GetPersonaHost(persona.Id);
+                        var identityId = personaHost?.PublicIdentityId;
+                        if (!list.Any(i => !i.IsGroup && (i.PeerNodeId == persona.Id || (identityId.HasValue && i.PeerIdentityId == identityId))))
+                        {
+                            list.Add(new ConversationItemViewModel($"👤 {persona.DisplayName}", IsGroup: false, persona.Id, null, identityId));
+                        }
                     }
                 }
 
@@ -596,7 +632,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                     {
                         var match = AvailableConversations.FirstOrDefault(c =>
                             (c.IsGroup && currentSelected.IsGroup && c.GroupChannelId == currentSelected.GroupChannelId) ||
-                            (!c.IsGroup && !currentSelected.IsGroup && c.PeerNodeId == currentSelected.PeerNodeId));
+                            (!c.IsGroup && !currentSelected.IsGroup &&
+                             ((c.PeerIdentityId.HasValue && currentSelected.PeerIdentityId.HasValue && c.PeerIdentityId == currentSelected.PeerIdentityId) ||
+                              (c.PeerNodeId.HasValue && currentSelected.PeerNodeId.HasValue && c.PeerNodeId == currentSelected.PeerNodeId))));
                         if (match != null)
                         {
                             SelectedConversation = match;
@@ -646,6 +684,26 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 {
                     var channelId = SelectedConversation.GroupChannelId.Value;
                     transcript = await _groupCoordinator.GetGroupTranscriptAsync(_host, channelId);
+                }
+                else if (SelectedConversation?.PeerIdentityId.HasValue == true)
+                {
+                    var peerId = SelectedConversation.PeerIdentityId.Value;
+                    transcript = await _chatCoordinator.GetTranscriptAsync(NodeId, peerId);
+
+                    if (SendReadReceipts && IsListening)
+                    {
+                        var lastUnreadIncoming = transcript.LastOrDefault(m => !m.IsOutgoing && !m.IsRead);
+                        if (lastUnreadIncoming != null &&
+                            Guid.TryParse(lastUnreadIncoming.MessageId, out var msgGuid) &&
+                            msgGuid != _lastMarkedReadMessageId)
+                        {
+                            var success = await _chatCoordinator.MarkConversationAsReadAsync(NodeId, peerId, msgGuid);
+                            if (success)
+                            {
+                                _lastMarkedReadMessageId = msgGuid;
+                            }
+                        }
+                    }
                 }
                 else
                 {
@@ -1055,6 +1113,32 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             _ => (int?)null
         };
 
+        if (SelectedConversation is { IsGroup: false, PeerIdentityId: not null })
+        {
+            var peerIdentityId = SelectedConversation.PeerIdentityId.Value;
+            var peerTitle = SelectedConversation.DisplayTitle.Replace("👤 ", "");
+            var successDirect = await UiTaskRunner.RunAsync(
+                () => _chatCoordinator.SendDirectMessageAsync(NodeId, peerIdentityId, text, expireSeconds),
+                category: "DirectChat",
+                logSink: _logSink,
+                toastService: _toastService,
+                nodeName: DisplayName,
+                nodeId: NodeId);
+
+            if (successDirect)
+            {
+                if (expireSeconds.HasValue && expireSeconds.Value > 0)
+                {
+                    _flightRecorder.RecordStep(new SendDisappearingMessageStep(DisplayName, peerTitle, text, expireSeconds.Value));
+                }
+                else
+                {
+                    _flightRecorder.RecordStep(new SendDirectMessageStep(DisplayName, peerTitle, text));
+                }
+            }
+            return;
+        }
+
         var peer = GetActivePeerSummary();
         if (peer == null)
         {
@@ -1063,7 +1147,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         }
 
         var peerId = peer.Id;
-        var successDirect = await UiTaskRunner.RunAsync(
+        var successDirectLegacy = await UiTaskRunner.RunAsync(
             () => _chatCoordinator.SendDirectMessageAsync(NodeId, peerId, text, expireSeconds),
             category: "DirectChat",
             logSink: _logSink,
@@ -1071,7 +1155,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             nodeName: DisplayName,
             nodeId: NodeId);
 
-        if (successDirect)
+        if (successDirectLegacy)
         {
             if (expireSeconds.HasValue && expireSeconds.Value > 0)
             {

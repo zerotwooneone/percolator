@@ -70,29 +70,8 @@
                             <StackPanel DataContext="{Binding ConnectPeer}" Spacing="8" MinWidth="300" Margin="4">
                                 <TextBlock Text="Connect to Peer" FontWeight="Bold" FontSize="12" />
 
-                                <!-- Tabs: In-World vs External URL -->
-                                <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="0,4,0,0">
-                                    <TabItem Header="In-World Persona">
-                                        <StackPanel Spacing="6" Margin="0,8,0,0">
-                                            <TextBlock Text="Select In-World Persona:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                            <ComboBox ItemsSource="{Binding AvailableInWorldPersonas}"
-                                                      SelectedItem="{Binding SelectedInWorldTarget}"
-                                                      HorizontalAlignment="Stretch">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <TextBlock Text="{Binding DisplayName}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </StackPanel>
-                                    </TabItem>
-                                    <TabItem Header="External URL">
-                                        <StackPanel Spacing="6" Margin="0,8,0,0">
-                                            <TextBlock Text="Paste Invitation Code / URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                            <TextBox Text="{Binding ExternalInvitationInput}" Watermark="percolator://invite?..." />
-                                        </StackPanel>
-                                    </TabItem>
-                                </TabControl>
+                                <TextBlock Text="Paste Invitation Code / URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBox Text="{Binding InvitationInput}" Watermark="percolator://invite?... or base64 token" />
 
                                 <TextBlock Text="{Binding ErrorMessage}"
                                            Foreground="{DynamicResource SystemFillColorCriticalBrush}"
@@ -162,29 +141,8 @@
                             <StackPanel DataContext="{Binding RelayRegistration}" Spacing="8" MinWidth="300" Margin="4">
                                 <TextBlock Text="Relay Registration" FontWeight="Bold" FontSize="12" />
 
-                                <!-- Tabs: In-World vs External Relay -->
-                                <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="0,4,0,0">
-                                    <TabItem Header="In-World Relay">
-                                        <StackPanel Spacing="6" Margin="0,8,0,0">
-                                            <TextBlock Text="Select In-World Relay:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                            <ComboBox ItemsSource="{Binding AvailableInWorldRelays}"
-                                                      SelectedItem="{Binding SelectedInWorldRelay}"
-                                                      HorizontalAlignment="Stretch">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <TextBlock Text="{Binding DisplayName}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </StackPanel>
-                                    </TabItem>
-                                    <TabItem Header="External Relay">
-                                        <StackPanel Spacing="6" Margin="0,8,0,0">
-                                            <TextBlock Text="Relay Endpoint (host:port):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                            <TextBox Text="{Binding ExternalRelayInput}" Watermark="e.g. 127.0.0.1:5100 or percolator://..." />
-                                        </StackPanel>
-                                    </TabItem>
-                                </TabControl>
+                                <TextBlock Text="Relay Endpoint (host:port):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBox Text="{Binding RelayEndpointInput}" Watermark="e.g. 127.0.0.1:5100 or percolator://..." />
 
                                 <CheckBox Content="Seed 25 PreKeys on Registration" IsChecked="{Binding SeedPreKeysToRelay}" />
 
@@ -205,6 +163,7 @@
                     </DropDownButton.Flyout>
                 </DropDownButton>
             </StackPanel>
+
 
             <!-- Pending Banners CTL-PER-14, 15, 16 -->
             <StackPanel Grid.Row="2" Spacing="4" Margin="0,0,0,8">

@@ -13,6 +13,7 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
@@ -49,29 +50,43 @@ internal sealed class DirectChatCoordinator
         int? expireAfterSeconds = null,
         CancellationToken ct = default)
     {
+        var recipient = _worldState.GetPersonaHost(recipientNodeId);
+        if (recipient == null)
+        {
+            _toastService.ShowToast("Send Failed", "Recipient must be an active persona.", ToastSeverity.Error);
+            return Task.FromResult(false);
+        }
+        return SendDirectMessageAsync(senderNodeId, recipient.PublicIdentityId, text, expireAfterSeconds, ct);
+    }
+
+    public Task<bool> SendDirectMessageAsync(
+        SimulatedNodeId senderNodeId,
+        PublicIdentityId recipientIdentityId,
+        string text,
+        int? expireAfterSeconds = null,
+        CancellationToken ct = default)
+    {
         if (string.IsNullOrWhiteSpace(text)) return Task.FromResult(false);
 
         return Task.Run(async () =>
         {
             var sender = _worldState.GetPersonaHost(senderNodeId);
-            var recipient = _worldState.GetPersonaHost(recipientNodeId);
-
-            if (sender == null || recipient == null)
+            if (sender == null)
             {
-                _toastService.ShowToast("Send Failed", "Both sender and recipient must be active.", ToastSeverity.Error);
+                _toastService.ShowToast("Send Failed", "Sender must be an active persona.", ToastSeverity.Error);
                 return false;
             }
 
             try
             {
-                var channelId = ChannelIdUtility.DeterministicFor(sender.PublicIdentityId, recipient.PublicIdentityId);
+                var channelId = ChannelIdUtility.DeterministicFor(sender.PublicIdentityId, recipientIdentityId);
 
                 using var scope = sender.Services.CreateScope();
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
                 // Auto-detect whether to route via DirectP2P or RelayedOneToOne based on IRoutingCoordinator
                 var routingCoordinator = scope.ServiceProvider.GetRequiredService<IRoutingCoordinator>();
-                var routeResult = await routingCoordinator.ResolveRouteAsync(recipient.PublicIdentityId, ct).ConfigureAwait(false);
+                var routeResult = await routingCoordinator.ResolveRouteAsync(recipientIdentityId, ct).ConfigureAwait(false);
                 var route = (routeResult.IsSuccess && routeResult.Value.Mode == DeliveryRoutingMode.RelayMailbox)
                     ? DeliveryRoute.RelayedOneToOne
                     : DeliveryRoute.DirectP2P;
@@ -79,7 +94,7 @@ internal sealed class DirectChatCoordinator
                 var command = new SendMessageCommand(
                     ChannelId: channelId,
                     AuthorId: sender.PublicIdentityId,
-                    RecipientIdentityId: recipient.PublicIdentityId,
+                    RecipientIdentityId: recipientIdentityId,
                     RecipientDeviceId: DeviceId.Primary,
                     Content: text,
                     Mentions: null,
@@ -99,8 +114,8 @@ internal sealed class DirectChatCoordinator
                 _stateBus.Publish(new SimulatorStateSignal(
                     sender.Id,
                     SignalCategory.ChatTranscriptChanged,
-                    Details: recipient.PublicIdentityId.ToString(),
-                    Payload: new ChatTranscriptSignalPayload(recipient.PublicIdentityId)));
+                    Details: recipientIdentityId.ToString(),
+                    Payload: new ChatTranscriptSignalPayload(recipientIdentityId)));
 
                 // Immediately flush outbox to deliver encrypted payload via loopback gRPC TLS or Relay mailbox
                 var flushResult = await sender.FlushOutboxAsync(ct);
@@ -110,18 +125,20 @@ internal sealed class DirectChatCoordinator
                     return false;
                 }
 
-                if (route == DeliveryRoute.RelayedOneToOne && recipient.HomeRelay != null)
+                var recipientHost = _worldState.FindPersonaHostByIdentity(recipientIdentityId);
+                if (recipientHost != null && route == DeliveryRoute.RelayedOneToOne && recipientHost.HomeRelay != null)
                 {
-                    await recipient.DrainMailboxAsync(ct);
+                    await recipientHost.DrainMailboxAsync(ct);
                 }
 
+                var recipientDisplayName = recipientHost?.DisplayName ?? recipientIdentityId.ToString()[..8];
                 _logSink.Log(new SimulatorLogEntry(
                     DateTimeOffset.UtcNow,
                     LogLevel.Information,
                     sender.DisplayName,
                     sender.Id,
                     "DirectChat",
-                    $"Message ({route}) sent to '{recipient.DisplayName}': \"{text}\""));
+                    $"Message ({route}) sent to '{recipientDisplayName}': \"{text}\""));
 
                 return true;
             }
@@ -147,6 +164,22 @@ internal sealed class DirectChatCoordinator
         SimulatedNodeId? peerNodeId = null,
         CancellationToken ct = default)
     {
+        if (peerNodeId.HasValue)
+        {
+            var peerHost = _worldState.GetPersonaHost(peerNodeId.Value);
+            if (peerHost != null)
+            {
+                return GetTranscriptAsync(nodeId, peerHost.PublicIdentityId, ct);
+            }
+        }
+        return Task.FromResult<IReadOnlyList<ChatMessageItemViewModel>>(Array.Empty<ChatMessageItemViewModel>());
+    }
+
+    public Task<IReadOnlyList<ChatMessageItemViewModel>> GetTranscriptAsync(
+        SimulatedNodeId nodeId,
+        PublicIdentityId peerIdentityId,
+        CancellationToken ct = default)
+    {
         return Task.Run<IReadOnlyList<ChatMessageItemViewModel>>(async () =>
         {
             var host = _worldState.GetPersonaHost(nodeId);
@@ -159,58 +192,51 @@ internal sealed class DirectChatCoordinator
                 var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
                 var profileRepo = scope.ServiceProvider.GetRequiredService<IPeerProfileRepository>();
 
-                if (peerNodeId.HasValue)
+                var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerIdentityId);
+                var messages = await chatQuery.GetTranscriptAsync(channelId, ct);
+
+                var peerHost = _worldState.FindPersonaHostByIdentity(peerIdentityId);
+
+                // Resolve remote peer display name from local observer store (contact nickname first, then synced profile, then fallback)
+                var contact = await contactRepo.GetByPeerIdAsync(host.PublicIdentityId, peerIdentityId, ct);
+                var profile = await profileRepo.GetByPeerIdAsync(peerIdentityId, ct);
+
+                var isExplicitNickname = contact != null &&
+                    !string.IsNullOrWhiteSpace(contact.Nickname.Value) &&
+                    contact.Nickname.Value != peerIdentityId.ToString();
+
+                var peerDisplayName = isExplicitNickname
+                    ? contact!.Nickname.Value
+                    : (profile != null && !string.IsNullOrWhiteSpace(profile.DisplayName)
+                        ? profile.DisplayName
+                        : (peerHost?.DisplayName ?? peerIdentityId.ToString()[..8]));
+
+                return messages.Select(m =>
                 {
-                    var peerHost = _worldState.GetPersonaHost(peerNodeId.Value);
-                    if (peerHost != null)
+                    var isOutgoing = m.AuthorId == host.PublicIdentityId;
+                    var senderName = isOutgoing ? host.DisplayName : peerDisplayName;
+                    var timeText = DateTimeOffset.FromUnixTimeMilliseconds((long)m.TimestampUnixMs).ToLocalTime().ToString("HH:mm:ss");
+                    var isRead = m.ReadAtUnixMs.HasValue;
+                    var isDelivered = m.DeliveredAtUnixMs.HasValue || isRead;
+                    var statusText = isOutgoing ? (isDelivered ? "✓✓" : "✓") : string.Empty;
+                    var reactionsSummary = m.Reactions.Count > 0
+                        ? string.Join(" ", m.Reactions.GroupBy(r => r).Select(g => $"{g.Key} {g.Count()}"))
+                        : string.Empty;
+
+                    return new ChatMessageItemViewModel
                     {
-                        var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerHost.PublicIdentityId);
-                        var messages = await chatQuery.GetTranscriptAsync(channelId, ct);
-
-                        // Resolve remote peer display name from local observer store (contact nickname first, then synced profile, then fallback)
-                        var contact = await contactRepo.GetByPeerIdAsync(host.PublicIdentityId, peerHost.PublicIdentityId, ct);
-                        var profile = await profileRepo.GetByPeerIdAsync(peerHost.PublicIdentityId, ct);
-
-                        var isExplicitNickname = contact != null &&
-                            !string.IsNullOrWhiteSpace(contact.Nickname.Value) &&
-                            contact.Nickname.Value != peerHost.PublicIdentityId.ToString();
-
-                        var peerDisplayName = isExplicitNickname
-                            ? contact!.Nickname.Value
-                            : (profile != null && !string.IsNullOrWhiteSpace(profile.DisplayName)
-                                ? profile.DisplayName
-                                : (peerHost.DisplayName ?? peerHost.PublicIdentityId.ToString()[..8]));
-
-                        return messages.Select(m =>
-                        {
-                            var isOutgoing = m.AuthorId == host.PublicIdentityId;
-                            var senderName = isOutgoing ? host.DisplayName : peerDisplayName;
-                            var timeText = DateTimeOffset.FromUnixTimeMilliseconds((long)m.TimestampUnixMs).ToLocalTime().ToString("HH:mm:ss");
-                            var isRead = m.ReadAtUnixMs.HasValue;
-                            var isDelivered = m.DeliveredAtUnixMs.HasValue || isRead;
-                            var statusText = isOutgoing ? (isDelivered ? "✓✓" : "✓") : string.Empty;
-                            var reactionsSummary = m.Reactions.Count > 0
-                                ? string.Join(" ", m.Reactions.GroupBy(r => r).Select(g => $"{g.Key} {g.Count()}"))
-                                : string.Empty;
-
-                            return new ChatMessageItemViewModel
-                            {
-                                MessageId = m.MessageId.ToString(),
-                                SenderName = senderName,
-                                Content = m.Content,
-                                TimestampText = timeText,
-                                IsOutgoing = isOutgoing,
-                                StatusText = statusText,
-                                IsEdited = m.EditedAtUnixMs.HasValue,
-                                IsDelivered = isDelivered,
-                                IsRead = isRead,
-                                ReactionsSummary = reactionsSummary
-                            };
-                        }).ToList();
-                    }
-                }
-
-                return Array.Empty<ChatMessageItemViewModel>();
+                        MessageId = m.MessageId.ToString(),
+                        SenderName = senderName,
+                        Content = m.Content,
+                        TimestampText = timeText,
+                        IsOutgoing = isOutgoing,
+                        StatusText = statusText,
+                        IsEdited = m.EditedAtUnixMs.HasValue,
+                        IsDelivered = isDelivered,
+                        IsRead = isRead,
+                        ReactionsSummary = reactionsSummary
+                    };
+                }).ToList();
             }
             catch (Exception ex)
             {
@@ -233,36 +259,39 @@ internal sealed class DirectChatCoordinator
         Guid upToMessageId,
         CancellationToken ct = default)
     {
+        var sender = _worldState.GetPersonaHost(senderNodeId);
+        if (sender == null) return Task.FromResult(false);
+        return MarkConversationAsReadAsync(readerNodeId, sender.PublicIdentityId, upToMessageId, ct);
+    }
+
+    public Task<bool> MarkConversationAsReadAsync(
+        SimulatedNodeId readerNodeId,
+        PublicIdentityId senderIdentityId,
+        Guid upToMessageId,
+        CancellationToken ct = default)
+    {
         return Task.Run(async () =>
         {
             var reader = _worldState.GetPersonaHost(readerNodeId);
-            var sender = _worldState.GetPersonaHost(senderNodeId);
-            if (reader == null || sender == null) return false;
+            if (reader == null) return false;
 
             try
             {
-                var channelId = ChannelIdUtility.DeterministicFor(reader.PublicIdentityId, sender.PublicIdentityId);
+                var channelId = ChannelIdUtility.DeterministicFor(reader.PublicIdentityId, senderIdentityId);
                 using var scope = reader.Services.CreateScope();
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
-                var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-                var route = DeliveryRoute.DirectP2P;
-                if (streamRegistry.GetDirectEndpoint(sender.PublicIdentityId) == null && sender.HomeRelay != null)
-                {
-                    var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                    var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
-                    var bestRoute = await routingRepo.GetBestRouteAsync(sender.PublicIdentityId, now, ct);
-                    if (bestRoute != null)
-                    {
-                        route = DeliveryRoute.RelayedOneToOne;
-                    }
-                }
+                var routingCoordinator = scope.ServiceProvider.GetRequiredService<IRoutingCoordinator>();
+                var routeResult = await routingCoordinator.ResolveRouteAsync(senderIdentityId, ct).ConfigureAwait(false);
+                var route = (routeResult.IsSuccess && routeResult.Value.Mode == DeliveryRoutingMode.RelayMailbox)
+                    ? DeliveryRoute.RelayedOneToOne
+                    : DeliveryRoute.DirectP2P;
 
                 var command = new MarkAsReadCommand(
                     ChannelId: channelId,
                     ReaderId: reader.PublicIdentityId,
                     UpToPayloadId: PayloadId.FromGuid(upToMessageId),
-                    RecipientIdentityId: sender.PublicIdentityId,
+                    RecipientIdentityId: senderIdentityId,
                     RecipientDeviceId: DeviceId.Primary,
                     Route: route);
 
@@ -272,16 +301,17 @@ internal sealed class DirectChatCoordinator
                 var flushResult = await reader.FlushOutboxAsync(ct);
                 if (!flushResult.IsSuccess) return false;
 
-                if (route == DeliveryRoute.RelayedOneToOne && sender.HomeRelay != null)
+                var senderHost = _worldState.FindPersonaHostByIdentity(senderIdentityId);
+                if (route == DeliveryRoute.RelayedOneToOne && senderHost?.HomeRelay != null)
                 {
-                    await sender.DrainMailboxAsync(ct);
+                    await senderHost.DrainMailboxAsync(ct);
                 }
 
                 _stateBus.Publish(new SimulatorStateSignal(
                     reader.Id,
                     SignalCategory.ChatTranscriptChanged,
-                    Details: sender.PublicIdentityId.ToString(),
-                    Payload: new ChatTranscriptSignalPayload(sender.PublicIdentityId)));
+                    Details: senderIdentityId.ToString(),
+                    Payload: new ChatTranscriptSignalPayload(senderIdentityId)));
 
                 return true;
             }
@@ -293,7 +323,8 @@ internal sealed class DirectChatCoordinator
                     reader.DisplayName,
                     reader.Id,
                     "DirectChat",
-                    $"Failed to send read receipt: {ex.Message}"));
+                    $"Error sending read receipt: {ex.Message}"));
+
                 return false;
             }
         }, ct);

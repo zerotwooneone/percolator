@@ -15,6 +15,7 @@ using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
@@ -23,6 +24,7 @@ using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Scenarios;
@@ -197,6 +199,38 @@ internal sealed class DirectHandshakeOrchestrator
                 {
                     var channel = DirectChannel.Create(channelId, target.PublicIdentityId, senderId, timeProvider).Value!;
                     await channelRepo.SaveDirectAsync(channel, ct);
+                }
+
+                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+                var existingRoute = await routingRepo.GetByPeerIdAsync(senderId, ct).ConfigureAwait(false);
+                if (existingRoute == null)
+                {
+                    if (senderHost != null && senderHost.HomeRelay != null)
+                    {
+                        var relayEndpoint = RelayEndpoint.FromHostAndPort(senderHost.HomeRelay.BoundEndpoint.Host, senderHost.HomeRelay.BoundPort);
+                        var cap = new PeerMailboxRoutingCapability(
+                            senderHost.PublicIdentityId,
+                            senderHost.MailboxRoutingToken,
+                            senderHost.MailboxDeliveryToken,
+                            relayEndpoint,
+                            timeProvider.UtcNow);
+                        await routingRepo.SaveAsync(cap, ct).ConfigureAwait(false);
+                    }
+                    else if (target.HomeRelay != null && target.HomeRelay.PeerDirectory != null)
+                    {
+                        var reg = await target.HomeRelay.PeerDirectory.GetPeerAsync(senderId, ct).ConfigureAwait(false);
+                        if (reg != null && reg.RoutingToken.HasValue && reg.DeliveryToken != null)
+                        {
+                            var relayEndpoint = RelayEndpoint.FromHostAndPort(target.HomeRelay.BoundEndpoint.Host, target.HomeRelay.BoundPort);
+                            var cap = new PeerMailboxRoutingCapability(
+                                senderId,
+                                reg.RoutingToken.Value,
+                                reg.DeliveryToken,
+                                relayEndpoint,
+                                timeProvider.UtcNow);
+                            await routingRepo.SaveAsync(cap, ct).ConfigureAwait(false);
+                        }
+                    }
                 }
 
                 // Flush outbox in case any reply packets were queued

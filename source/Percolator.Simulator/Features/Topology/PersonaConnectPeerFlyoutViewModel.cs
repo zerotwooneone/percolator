@@ -1,41 +1,37 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using ObservableCollections;
+using Microsoft.Extensions.DependencyInjection;
 using Percolator.Application.Connections;
 using Percolator.Application.Invitations;
+using Percolator.Application.Profiles;
+using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 using Percolator.Simulator.Features.Shell;
-using R3;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.Topology;
 
 internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
 {
     private readonly ISimulatedPersonaHost _host;
-    private readonly ISimulatedWorldStateService _worldState;
     private readonly IPeerInvitationCodec _codec;
     private readonly IOutboundConnectionWorkflow _workflow;
     private readonly IStatusToastService _toastService;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsInWorldMode))]
-    [NotifyPropertyChangedFor(nameof(IsExternalMode))]
-    private int _selectedTabIndex;
+    private string _invitationInput = string.Empty;
 
-    [ObservableProperty]
-    private IReadOnlyList<SimulatedNodeSummary> _availableInWorldPersonas = Array.Empty<SimulatedNodeSummary>();
-
-    [ObservableProperty]
-    private SimulatedNodeSummary? _selectedInWorldTarget;
-
-    [ObservableProperty]
-    private string _externalInvitationInput = string.Empty;
+    public string ExternalInvitationInput
+    {
+        get => InvitationInput;
+        set => InvitationInput = value;
+    }
 
     [ObservableProperty]
     private bool _isConnecting;
@@ -43,8 +39,17 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
     [ObservableProperty]
     private string? _errorMessage;
 
-    public bool IsInWorldMode => SelectedTabIndex == 0;
-    public bool IsExternalMode => SelectedTabIndex == 1;
+    public PersonaConnectPeerFlyoutViewModel(
+        ISimulatedPersonaHost host,
+        IPeerInvitationCodec codec,
+        IOutboundConnectionWorkflow workflow,
+        IStatusToastService toastService)
+    {
+        _host = host ?? throw new ArgumentNullException(nameof(host));
+        _codec = codec ?? throw new ArgumentNullException(nameof(codec));
+        _workflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
+        _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
+    }
 
     public PersonaConnectPeerFlyoutViewModel(
         ISimulatedPersonaHost host,
@@ -52,33 +57,8 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
         IPeerInvitationCodec codec,
         IOutboundConnectionWorkflow workflow,
         IStatusToastService toastService)
+        : this(host, codec, workflow, toastService)
     {
-        _host = host ?? throw new ArgumentNullException(nameof(host));
-        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
-        _codec = codec ?? throw new ArgumentNullException(nameof(codec));
-        _workflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
-        _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
-
-        RefreshAvailableInWorldPersonas();
-
-        _worldState.Personas.ObserveChanged()
-            .Subscribe(_ =>
-            {
-                UiTaskRunner.PostToUi(RefreshAvailableInWorldPersonas);
-            })
-            .AddTo(ref Disposables);
-    }
-
-    public void RefreshAvailableInWorldPersonas()
-    {
-        AvailableInWorldPersonas = _worldState.Personas
-            .Where(p => p.Id != _host.Id)
-            .ToList();
-
-        if (SelectedInWorldTarget == null || !AvailableInWorldPersonas.Any(p => p.Id == SelectedInWorldTarget.Id))
-        {
-            SelectedInWorldTarget = AvailableInWorldPersonas.FirstOrDefault();
-        }
     }
 
     [RelayCommand]
@@ -86,65 +66,26 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
     {
         ErrorMessage = null;
         IsConnecting = true;
+
         try
         {
-            if (IsInWorldMode)
+            var rawInput = InvitationInput?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(rawInput))
             {
-                if (SelectedInWorldTarget == null)
-                {
-                    ErrorMessage = "Please select an in-world persona to connect to.";
-                    return;
-                }
-
-                var targetHost = _worldState.GetPersonaHost(SelectedInWorldTarget.Id);
-                if (targetHost == null)
-                {
-                    ErrorMessage = "Target persona is not currently online or hosted.";
-                    return;
-                }
-
-                var payload = new PeerInvitationPayload(
-                    targetHost.PublicIdentityId,
-                    targetHost.MailboxRoutingToken,
-                    targetHost.MailboxDeliveryToken,
-                    new[] { targetHost.BoundEndpoint.Host },
-                    PortRange.Single((ushort)targetHost.BoundPort));
-
-                var result = await _workflow.ConnectAsync(payload, TimeSpan.FromSeconds(3)).ConfigureAwait(true);
-                if (result.IsFailure)
-                {
-                    ErrorMessage = result.Error.Description;
-                    return;
-                }
-
-                await _host.FlushOutboxAsync().ConfigureAwait(false);
-
-                _toastService.ShowToast(
-                    "Connected",
-                    $"Direct connection initiated to {targetHost.DisplayName}.",
-                    ToastSeverity.Informational);
+                ErrorMessage = "Please enter an invitation URL or code.";
+                return;
             }
-            else
+
+            var input = rawInput;
+            if (input.StartsWith("percolator://", StringComparison.OrdinalIgnoreCase))
             {
-                var input = ExternalInvitationInput?.Trim() ?? string.Empty;
-                if (input.StartsWith("percolator://", StringComparison.OrdinalIgnoreCase))
-                {
-                    input = input["percolator://".Length..].Trim();
-                }
+                input = input["percolator://".Length..].Trim();
+            }
 
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    ErrorMessage = "Please enter an invitation URL or code.";
-                    return;
-                }
-
-                var decodeResult = _codec.Decode(input);
-                if (decodeResult.IsFailure)
-                {
-                    ErrorMessage = $"Invalid invitation: {decodeResult.Error.Description}";
-                    return;
-                }
-
+            // 1. Try decoding as PeerInvitationPayload (query param or base64 format)
+            var decodeResult = _codec.Decode(input);
+            if (decodeResult.IsSuccess)
+            {
                 var payload = decodeResult.Value!;
                 var result = await _workflow.ConnectAsync(payload, TimeSpan.FromSeconds(3)).ConfigureAwait(true);
                 if (result.IsFailure)
@@ -159,8 +100,53 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
                     "Connected",
                     $"Direct connection initiated to {payload.IdentityId.Value.ToString()[..8]}.",
                     ToastSeverity.Informational);
-                ExternalInvitationInput = string.Empty;
+                InvitationInput = string.Empty;
+                return;
             }
+
+            // 2. Try decoding as InvitationLink (relayed base64 or direct URL format)
+            if (InvitationLink.TryParse(rawInput, out var link, out _) ||
+                InvitationLink.TryParse(input, out link, out _))
+            {
+                if (link?.Kind == InvitationKind.Relayed && link.PeerIdentityId.HasValue && link.RelayEndpoint != null)
+                {
+                    using var scope = _host.Services.CreateScope();
+                    var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+                    var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+                    var peerConnService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
+
+                    var cap = new PeerMailboxRoutingCapability(
+                        link.PeerIdentityId.Value,
+                        link.RoutingToken ?? BlindedRoutingToken.New(),
+                        link.DeliveryToken ?? DeliveryToken.GenerateRandom(),
+                        link.RelayEndpoint,
+                        timeProvider.UtcNow);
+
+                    await routingRepo.SaveAsync(cap).ConfigureAwait(false);
+
+                    var connResult = await peerConnService.ConnectToPeerAsync(
+                        link.PeerIdentityId.Value,
+                        link.PeerDeviceId,
+                        link.RelayEndpoint).ConfigureAwait(true);
+
+                    if (connResult.IsFailure)
+                    {
+                        ErrorMessage = connResult.Error.Description;
+                        return;
+                    }
+
+                    await _host.FlushOutboxAsync().ConfigureAwait(false);
+
+                    _toastService.ShowToast(
+                        "Connected",
+                        $"Relayed connection initiated to {link.PeerIdentityId.Value.ToString()[..8]} via {link.RelayEndpoint}.",
+                        ToastSeverity.Informational);
+                    InvitationInput = string.Empty;
+                    return;
+                }
+            }
+
+            ErrorMessage = $"Invalid invitation: {decodeResult.Error.Description}";
         }
         catch (Exception ex)
         {
