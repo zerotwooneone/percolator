@@ -237,7 +237,7 @@ public sealed class RecordingTrackerPort : IDistributedTrackerPort
     }
 }
 
-public sealed class FakeNetworkEndpointDiscoveryPort : INetworkEndpointDiscoveryPort
+public sealed class FakeNetworkEndpointDiscoveryPort : Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort
 {
     public List<DirectEndpointCandidate> LocalCandidates { get; set; } =
     [

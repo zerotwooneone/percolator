@@ -90,11 +90,10 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
 
         Status = DirectChannelStatus.Active;
         LastActivityUtc = timeProvider.UtcNow;
-        AddDomainEvent(new DirectChannelCreatedDomainEvent(
+        AddDomainEvent(new DirectChannelActivatedDomainEvent(
             Id,
             OwnerIdentityId,
             RemotePeerId,
-            Status,
             RelayEndpoint,
             timeProvider.UtcNow));
 

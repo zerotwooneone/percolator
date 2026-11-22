@@ -38,6 +38,9 @@ This skill enforces zero-tolerance standards against AI code shortcuts in Percol
 | **20** | **CQRS Query Integrity (No N+1, Permissive Fallbacks, or String Key Queries)** | `await db.*` inside `foreach`, querying unowned tables on empty results, or comparing raw string URLs | Batch child lookups into single projections; enforce ownership boundaries with zero fallback queries into unowned tables; normalize Value Objects (`RelayEndpoint.Parse`) before comparison. |
 | **21** | **Immediate Deletion of Synthetic UI Fallbacks** | Preserving `ChannelId.New()` or fake channels when adding real CQRS read models | Delete synthetic entity/ID fabrication in the same step that delivers the real query/command model. Never keep dead/divergent UI fallback branches alive. |
 | **22** | **Deterministic Event-Driven Testing (Zero Masking Timers)** | Testing event-driven handlers with short poll intervals (`PollInterval = 50ms`) or `await Task.Delay(...)` | When testing event-driven `BackgroundService` loops, disable background polling (`PollInterval = Timeout.InfiniteTimeSpan`) and synchronize via `TaskCompletionSource`/`SemaphoreSlim` so broken subscriptions fail immediately. |
+| **23** | **Zero JSON Serialization in Protocols & Test Doubles** | `System.Text.Json` or `JsonSerializer` in wire/storage/test doubles | Protocol payloads, network wire formats, and test doubles must use strongly-typed Protobuf schemas (`ProtobufPayloadSerializer`) or binary codecs. Never create JSON test serializer fakes that pass unit tests while masking missing Protobuf registrations. |
+| **24** | **No Unpadded Control Messages or Ad-Hoc `AppId`s** | Creating new `AppId` or unpadded DTOs without QMS threat review | Handshake, greeting, and capability exchange must enforce `SteppedPadding` and strict `SYS-RELAY-ONLY-CLOAKING` (never emit local IP/ports on relayed paths). Never invent ad-hoc `AppId`s when standard Signal 0-RTT profile capabilities and ratchet turns already solve the problem. |
+| **25** | **Strict Simulator WorldState Scoping** | `_worldState.FindPersonaHostByIdentity(peerId)` inside persona hosts or protocol coordinators | `ISimulatedWorldStateService` is strictly a UI shell topology manager (spawning/stopping nodes). Persona hosts and coordinators must resolve peer state strictly from their own local storage and driven ports, never peeking at remote host memory or triggering remote actions. |
 
 ---
 
@@ -311,6 +314,41 @@ var processedTcs = new TaskCompletionSource<bool>();
 await processedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 ```
 
+### 23. Zero JSON Serialization in Protocols & Test Doubles
+```csharp
+// BAD: Fabricating JSON test double that masks missing Protobuf registrations
+public sealed class FakePayloadSerializer : IPayloadSerializer {
+    public ReadOnlyMemory<byte> Serialize<T>(T payload) => JsonSerializer.SerializeToUtf8Bytes(payload);
+}
+
+// GOOD: Use the real production ProtobufPayloadSerializer in unit and integration tests
+services.AddSingleton<IPayloadSerializer, ProtobufPayloadSerializer>();
+```
+
+### 24. No Unpadded Control Messages or Ad-Hoc `AppId`s
+```csharp
+// BAD: Inventing ad-hoc AppId with unpadded plaintext DTO leaking IP address on relayed paths
+public static readonly AppId HandshakeControl = new(0x04);
+var payload = new HandshakeControlDto(directEndpoint: "https://10.0.0.1:5000"); // LEAKS LOCAL IP OVER RELAY!
+
+// GOOD: Use standard Signal 0-RTT ProfileCapability with SteppedPadding and cloaking
+var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(serializer, ChatPayloadType.ProfileCapability, profileCapDto);
+// Emits direct IP ONLY when local policy allows Direct P2P and route is direct; never over relay!
+```
+
+### 25. Strict Simulator WorldState Scoping
+```csharp
+// BAD: Reaching into remote peer host via world state and forcing remote actions
+var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
+await senderHost.DrainMailboxAsync(ct);
+await _profileCoordinator.AutoShareProfileOnConnectAsync(target, senderHost, ct);
+
+// GOOD: Operate strictly on target's own scope and local storage; let network delivery handle the rest
+using var scope = target.Services.CreateScope();
+var workflow = scope.ServiceProvider.GetRequiredService<IInboundConnectionWorkflow>();
+await workflow.AcceptRequestAsync(target.PublicIdentityId, senderId, ct);
+```
+
 ---
 
 ## Anti-Shortcut Pre-Flight Checklist
@@ -339,6 +377,9 @@ Before completing any task, ticket, or PR, verify:
 - [ ] **20. CQRS Query Integrity**: No N+1 queries, zero fallback querying unowned tables, and Value Objects normalized before comparison.
 - [ ] **21. Zero Synthetic UI Fallbacks**: Zero `ChannelId.New()` or fabricated channel aggregates in UI state services.
 - [ ] **22. Deterministic Event Tests**: `PollInterval = Timeout.InfiniteTimeSpan` and zero `Task.Delay` when testing event-driven workers.
+- [ ] **23. Zero JSON Serialization**: Wire frames, storage tables, and protocol test doubles use Protobuf / binary codecs, never `System.Text.Json`.
+- [ ] **24. Padded Wire Protocols & Cloaking**: All conversation and capability envelopes use `SteppedPadding`; local IP/port is omitted on relay routes.
+- [ ] **25. Scoped WorldState**: `_worldState` is never used inside persona hosts or protocol coordinators to resolve remote peer state.
 - [ ] **Verification**: Run `dotnet run --project Percolator.Simulator\Percolator.Simulator.csproj -f net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator\Scenarios` (all pass).
 - [ ] **Regression**: Run all test projects (`dotnet test`) and verify 0 failures.
 

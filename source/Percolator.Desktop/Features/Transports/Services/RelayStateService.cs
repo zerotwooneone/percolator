@@ -1,5 +1,7 @@
 // SPECIFICATION GOVERNANCE: Read Percolator.Desktop/spec/UiStateService.spec.md before modifying this file.
 
+using Percolator.Application.Delivery.Ports;
+
 namespace Percolator.Desktop.Features.Transports.Services;
 
 using System;
@@ -9,7 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
-using Percolator.Application.Delivery.Ports;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Domain.Delivery.Model;

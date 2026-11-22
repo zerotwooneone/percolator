@@ -213,6 +213,7 @@ private InMemoryBlobStorageService _blobStorage = null!;
 
         var inboundCtx = new InboundPayloadContext(
             channelId,
+            recipientId,
             senderId,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -260,6 +261,7 @@ private InMemoryBlobStorageService _blobStorage = null!;
         var payloadHandler = new FileTransferPayloadHandler(recipientRepo, policyRepo, _serializer, _clock, _blobStorage, new FakeTransferStreamPool());
         await payloadHandler.HandleInboundAsync(new InboundPayloadContext(
             channelId,
+            recipientId,
             senderId,
             DeviceId.Primary,
             AppId.FileTransferControl,

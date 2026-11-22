@@ -12,6 +12,7 @@ public sealed class AuthenticatedSession : IAuthenticatedSession
     private readonly IHost _host;
     private readonly ILogger<AuthenticatedSession> _logger;
     private bool _disposed;
+    private bool _started;
 
     public AuthenticatedSession(IHost host, ILogger<AuthenticatedSession> logger)
     {
@@ -24,11 +25,14 @@ public sealed class AuthenticatedSession : IAuthenticatedSession
     public async Task StartAsync(CancellationToken ct = default)
     {
         await _host.StartAsync(ct).ConfigureAwait(false);
+        _started = true;
     }
 
     public async Task StopAsync(CancellationToken ct = default)
     {
+        if (!_started) return;
         await _host.StopAsync(ct).ConfigureAwait(false);
+        _started = false;
     }
 
     public async ValueTask DisposeAsync()
@@ -36,13 +40,17 @@ public sealed class AuthenticatedSession : IAuthenticatedSession
         if (_disposed) return;
         _disposed = true;
 
-        try
+        if (_started)
         {
-            await _host.StopAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error stopping authenticated session host during teardown");
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await _host.StopAsync(cts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error stopping authenticated session host during teardown");
+            }
         }
 
         _host.Dispose();

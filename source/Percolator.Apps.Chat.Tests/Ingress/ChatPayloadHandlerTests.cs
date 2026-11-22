@@ -33,7 +33,16 @@ public class ChatPayloadHandlerTests
     private FakeProfileManager _profileManager = null!;
     private ChatTestCryptoEngine _cryptoEngine = null!;
     private TestPayloadSender _payloadSender = null!;
+    private FakeDirectEndpointRegistry _directEndpointRegistry = null!;
     private ChatPayloadHandler _sut = null!;
+
+    private sealed class FakeDirectEndpointRegistry : IDirectEndpointRegistry
+    {
+        public readonly Dictionary<PublicIdentityId, Uri> Endpoints = new();
+        public void RegisterDirectEndpoint(PublicIdentityId targetId, Uri directEndpoint) => Endpoints[targetId] = directEndpoint;
+        public void UnregisterDirectEndpoint(PublicIdentityId targetId) => Endpoints.Remove(targetId);
+        public Uri? GetDirectEndpoint(PublicIdentityId targetId) => Endpoints.GetValueOrDefault(targetId);
+    }
 
     [SetUp]
     public void SetUp()
@@ -49,6 +58,7 @@ public class ChatPayloadHandlerTests
         _profileManager = new FakeProfileManager();
         _cryptoEngine = new ChatTestCryptoEngine();
         _payloadSender = new TestPayloadSender();
+        _directEndpointRegistry = new FakeDirectEndpointRegistry();
 
         _sut = new ChatPayloadHandler(
             _chatRepo,
@@ -63,7 +73,8 @@ public class ChatPayloadHandlerTests
             _profileDeliveryClient,
             _profileManager,
             _cryptoEngine,
-            new FakePeerMailboxRoutingRepository());
+            new FakePeerMailboxRoutingRepository(),
+            _directEndpointRegistry);
     }
 
     [Test]
@@ -94,6 +105,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             channel.Id,
+            channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -135,6 +147,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             unknownGroupId,
+            ChatTestFactory.AliceId,
             ChatTestFactory.BobId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -180,6 +193,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             channel.Id,
+            channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -219,7 +233,7 @@ public class ChatPayloadHandlerTests
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Message, _serializer.Serialize(msgDto), Array.Empty<byte>());
         var rawPayload = _serializer.Serialize(envelope);
 
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, rawPayload, _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, rawPayload, _timeProvider.UtcNow);
         var result = await _sut.HandleInboundAsync(context);
 
         result.IsSuccess.Should().BeTrue();
@@ -247,7 +261,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Reaction, _serializer.Serialize(reactionDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -275,7 +289,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Reaction, _serializer.Serialize(reactionDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -305,7 +319,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Edit, _serializer.Serialize(editDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -338,7 +352,7 @@ public class ChatPayloadHandlerTests
             initialSentMs + 1000);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Edit, _serializer.Serialize(spoofedEditDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -365,7 +379,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Edit, _serializer.Serialize(editDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -390,7 +404,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Tombstone, _serializer.Serialize(tombstoneDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -422,7 +436,7 @@ public class ChatPayloadHandlerTests
         // 1. Forged reader identity is rejected
         var forgedReceipt = new ReadReceiptDto(channel.Id, channel.OwnerIdentityId, msgId, _timeProvider.UtcNowUnixMs);
         var forgedEnv = new ChatPayloadEnvelopeDto(ChatPayloadType.ReadReceipt, _serializer.Serialize(forgedReceipt), Array.Empty<byte>());
-        var forgedCtx = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(forgedEnv), _timeProvider.UtcNow);
+        var forgedCtx = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(forgedEnv), _timeProvider.UtcNow);
         var forgedResult = await _sut.HandleInboundAsync(forgedCtx);
         forgedResult.IsFailure.Should().BeTrue();
         forgedResult.Error.Code.Should().Be("UNAUTHORIZED_AUTHOR");
@@ -430,7 +444,7 @@ public class ChatPayloadHandlerTests
         // 2. Valid read receipt marks message read and starts 30s expiration countdown
         var validReceipt = new ReadReceiptDto(channel.Id, channel.RemotePeerId, msgId, _timeProvider.UtcNowUnixMs);
         var validEnv = new ChatPayloadEnvelopeDto(ChatPayloadType.ReadReceipt, _serializer.Serialize(validReceipt), Array.Empty<byte>());
-        var validCtx = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(validEnv), _timeProvider.UtcNow);
+        var validCtx = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(validEnv), _timeProvider.UtcNow);
         var validResult = await _sut.HandleInboundAsync(validCtx);
         validResult.IsSuccess.Should().BeTrue();
 
@@ -448,6 +462,7 @@ public class ChatPayloadHandlerTests
         // 1. Oversized frame (> 64 KB) is dropped before deserialization
         var oversized = new InboundPayloadContext(
             channelId,
+            ChatTestFactory.AliceId,
             ChatTestFactory.BobId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -458,6 +473,7 @@ public class ChatPayloadHandlerTests
         // 2. Valid frames accepted up to rate limit
         var validFrame = new InboundPayloadContext(
             channelId,
+            ChatTestFactory.AliceId,
             ChatTestFactory.BobId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -474,7 +490,7 @@ public class ChatPayloadHandlerTests
         var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
         var garbage = new byte[] { 0xFF, 0xFE, 0x00, 0x01 };
 
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, garbage, _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, garbage, _timeProvider.UtcNow);
         var result = await _sut.HandleInboundAsync(context);
 
         result.IsFailure.Should().BeTrue();
@@ -488,7 +504,7 @@ public class ChatPayloadHandlerTests
         var unknownType = (ChatPayloadType)99;
 
         var envelope = new ChatPayloadEnvelopeDto(unknownType, new byte[] { 1, 2, 3 }, Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -517,7 +533,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -545,7 +561,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -584,7 +600,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -619,7 +635,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -659,12 +675,82 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("DECRYPTION_FAILED");
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_ProfileCapability_DirectP2P_RegistersDirectEndpoint()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        var fakePackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
+        _profileDeliveryClient.HostedProfiles[locator] = fakePackage;
+        _profileManager.OnDecryptProfile = (pkg, key, engine, rev) =>
+            DomainResult<ProfileMetadata>.Success(new ProfileMetadata("Bob Direct", null, null, 1));
+
+        var dto = new ProfileCapabilityDto(
+            channel.Id,
+            channel.RemotePeerId,
+            profileKey.ToArray(),
+            locator.ToArray(),
+            routingToken.Value.ToByteArray(),
+            Revision: 1,
+            _timeProvider.UtcNowUnixMs,
+            SourceEndpoint: "https://192.168.1.100:5100",
+            SourceType: ProfileSourceType.DirectP2P);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsSuccess.Should().BeTrue();
+        _directEndpointRegistry.GetDirectEndpoint(channel.RemotePeerId).Should().Be(new Uri("https://192.168.1.100:5100"));
+    }
+
+    [Test]
+    public async Task HandleInboundAsync_ProfileCapability_Relay_DoesNotRegisterDirectEndpoint()
+    {
+        var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
+        await _channelRepo.SaveDirectAsync(channel);
+
+        var profileKey = ProfileKey.Generate();
+        var locator = BlindedProfileLocator.FromBytes(new byte[32]);
+        var routingToken = BlindedRoutingToken.New();
+
+        var fakePackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
+        _profileDeliveryClient.HostedProfiles[locator] = fakePackage;
+        _profileManager.OnDecryptProfile = (pkg, key, engine, rev) =>
+            DomainResult<ProfileMetadata>.Success(new ProfileMetadata("Bob Relay", null, null, 1));
+
+        var dto = new ProfileCapabilityDto(
+            channel.Id,
+            channel.RemotePeerId,
+            profileKey.ToArray(),
+            locator.ToArray(),
+            routingToken.Value.ToByteArray(),
+            Revision: 1,
+            _timeProvider.UtcNowUnixMs,
+            SourceEndpoint: "https://relay.example.com",
+            SourceType: ProfileSourceType.Relay);
+
+        var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+
+        var result = await _sut.HandleInboundAsync(context);
+
+        result.IsSuccess.Should().BeTrue();
+        _directEndpointRegistry.GetDirectEndpoint(channel.RemotePeerId).Should().BeNull();
     }
 
     #endregion
@@ -691,7 +777,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Reaction, _serializer.Serialize(forgedReactionDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -722,7 +808,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Reaction, _serializer.Serialize(crossChannelReaction), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channelB.Id, channelA.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channelB.Id, channelB.OwnerIdentityId, channelA.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -756,7 +842,7 @@ public class ChatPayloadHandlerTests
             null);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Message, _serializer.Serialize(replayDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -782,7 +868,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs + 3600_000);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.GroupInvitation, _serializer.Serialize(forgedInvite), Array.Empty<byte>());
-        var context = new InboundPayloadContext(channel.Id, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -811,7 +897,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs + 100);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Tombstone, _serializer.Serialize(tombstoneDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(group.Id, adminId, ChatTestFactory.AliceDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(group.Id, adminId, adminId, ChatTestFactory.AliceDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -845,7 +931,7 @@ public class ChatPayloadHandlerTests
             _timeProvider.UtcNowUnixMs + 100);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Tombstone, _serializer.Serialize(tombstoneDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(group.Id, nonAdminId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(group.Id, adminId, nonAdminId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -877,7 +963,7 @@ public class ChatPayloadHandlerTests
             null);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.Message, _serializer.Serialize(msgDto), Array.Empty<byte>());
-        var context = new InboundPayloadContext(group.Id, senderId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
+        var context = new InboundPayloadContext(group.Id, adminId, senderId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
 
         var result = await _sut.HandleInboundAsync(context);
 
@@ -905,7 +991,8 @@ public class ChatPayloadHandlerTests
             _profileDeliveryClient,
             _profileManager,
             _cryptoEngine,
-            new FakePeerMailboxRoutingRepository());
+            new FakePeerMailboxRoutingRepository(),
+            _directEndpointRegistry);
 
         var msgId = PayloadId.New();
         var msgDto = new ChatMessageDto(
@@ -929,6 +1016,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             channel.Id,
+            channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -1005,6 +1093,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             channel.Id,
+            channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -1066,6 +1155,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             channel.Id,
+            channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -1112,6 +1202,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             channel.Id,
+            channel.OwnerIdentityId,
             channel.RemotePeerId, // cryptographic sender
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -1154,6 +1245,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             channel.Id,
+            channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
             AppId.Chat,
@@ -1191,6 +1283,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             directChannelId,
+            ChatTestFactory.BobId,
             adminId,
             ChatTestFactory.AliceDeviceId,
             AppId.Chat,
@@ -1227,6 +1320,7 @@ public class ChatPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             directChannelId,
+            ChatTestFactory.BobId,
             adminId,
             ChatTestFactory.AliceDeviceId,
             AppId.Chat,

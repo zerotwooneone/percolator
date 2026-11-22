@@ -18,7 +18,8 @@ public enum ContactState
 {
     Active = 0,
     PendingApproval = 1,
-    Rejected = 2
+    Rejected = 2,
+    PendingOutbound = 3
 }
 
 public readonly record struct PeerContactId(PublicIdentityId OwnerIdentityId, PublicIdentityId RemotePeerId);
@@ -155,6 +156,48 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         return DomainResult.Success();
     }
 
+    public static DomainResult<PeerContact> CreateOutboundRequest(
+        PublicIdentityId ownerId,
+        PublicIdentityId remotePeerId,
+        IdentityKey primaryPublicKey,
+        IDateTimeProvider timeProvider)
+    {
+        if (!ownerId.IsValid)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("INVALID_OWNER_ID", "Owner identity id cannot be empty."));
+        }
+
+        if (!remotePeerId.IsValid)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("INVALID_PEER_ID", "Remote peer identity id cannot be empty."));
+        }
+
+        if (ownerId == remotePeerId)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("CANNOT_CONTACT_SELF", "Cannot create a contact request for oneself."));
+        }
+
+        if (primaryPublicKey == null)
+        {
+            return DomainResult<PeerContact>.Failure(new DomainError("NULL_PUBLIC_KEY", "Primary public key cannot be null."));
+        }
+
+        ArgumentNullException.ThrowIfNull(timeProvider);
+
+        var nickname = ContactNickname.Create(null, remotePeerId);
+
+        var contact = new PeerContact(
+            ownerId,
+            remotePeerId,
+            nickname,
+            PeerTrustLevel.Tofu,
+            timeProvider.UtcNow,
+            primaryPublicKey,
+            ContactState.PendingOutbound);
+
+        return DomainResult<PeerContact>.Success(contact);
+    }
+
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static PeerContact Rehydrate(
         PublicIdentityId ownerIdentityId,
@@ -224,6 +267,31 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
             TrustLevel,
             timeProvider.UtcNow));
 
+        return DomainResult.Success();
+    }
+
+    public DomainResult MarkOutboundAccepted(IDateTimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        if (TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError(
+                "CONTACT_BLOCKED", "Cannot activate an outbound contact that is blocked."));
+        }
+
+        if (State == ContactState.Active)
+        {
+            return DomainResult.Success();
+        }
+
+        if (State != ContactState.PendingOutbound)
+        {
+            return DomainResult.Failure(new DomainError(
+                "INVALID_STATE_TRANSITION", $"Cannot activate outbound contact in state '{State}'."));
+        }
+
+        State = ContactState.Active;
+        LastSeenAtUtc = timeProvider.UtcNow;
         return DomainResult.Success();
     }
 

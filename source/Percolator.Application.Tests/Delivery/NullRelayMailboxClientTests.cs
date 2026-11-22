@@ -3,6 +3,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.ValueObjects;
 
 namespace Percolator.Application.Tests.Delivery;

@@ -162,7 +162,7 @@ public sealed class InboundConnectionWorkflowTests
         result.IsSuccess.Should().BeTrue();
         var updatedChannel = await _channelRepo.GetDirectByIdAsync(expectedChannelId);
         updatedChannel!.Status.Should().Be(Domain.Channels.Model.DirectChannelStatus.Active);
-        _eventPublisher.PublishedEvents.Should().ContainSingle(e => e is Percolator.Application.Channels.Events.DirectChannelCreatedEvent);
+        _eventPublisher.PublishedEvents.Should().ContainSingle(e => e is Percolator.Application.Channels.Events.DirectChannelActivatedEvent);
     }
 
     [Test]

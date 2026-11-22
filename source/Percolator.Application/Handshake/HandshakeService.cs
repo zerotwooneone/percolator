@@ -366,15 +366,22 @@ public sealed class HandshakeService : IHandshakeService
                 var handlerResult = _appRouter.Resolve(appId);
                 if (handlerResult.IsSuccess)
                 {
+                    var channelId = ChannelId.DeterministicForDirect(envelope.RecipientIdentityId, envelope.SenderIdentityId);
                     var appContext = new InboundPayloadContext(
-                        ChannelId.New(),
+                        channelId,
+                        envelope.RecipientIdentityId,
                         envelope.SenderIdentityId,
                         envelope.SenderDeviceId,
                         appId,
                         appPayload,
                         envelope.ReceivedAtUtc);
 
-                    await handlerResult.Value!.HandleInboundAsync(appContext, ct);
+                    var handleResult = await handlerResult.Value!.HandleInboundAsync(appContext, ct);
+                    if (handleResult.IsFailure)
+                    {
+                        Array.Clear(decrypted, 0, decrypted.Length);
+                        return handleResult;
+                    }
                 }
 
                 Array.Clear(decrypted, 0, decrypted.Length);

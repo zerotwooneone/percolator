@@ -34,6 +34,7 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
@@ -56,6 +57,7 @@ using Percolator.Infrastructure.Windows.Storage;
 #endif
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 using Percolator.PluginSdk.Profiles;
 using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.DirectChat;
@@ -200,7 +202,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         {
             // 1. Core infrastructure registration
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
-            services.AddSingleton<INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(BoundPort, allowLoopback: true));
+            services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(BoundPort, allowLoopback: true));
+            services.AddSingleton<Percolator.PluginSdk.INetworkEndpointDiscoveryPort>(_ => new SimulatedNetworkEndpointDiscoveryPort(() => BoundEndpoint));
             services.AddSingleton<IRelayMailboxCapabilityStore, SqliteRelayMailboxCapabilityStore>();
             services.AddSingleton<IDateTimeProvider>(_virtualClock);
 #if WINDOWS
@@ -245,7 +248,9 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 sp.GetRequiredService<IDateTimeProvider>(),
                 sp.GetRequiredService<IStreamRegistryManagement>(),
                 sp.GetRequiredService<IPeerMailboxRoutingRepository>(),
-                sp.GetRequiredService<IPeerContactRepository>()));
+                sp.GetRequiredService<IPeerContactRepository>(),
+                sp.GetRequiredService<IEventPublisher>(),
+                sp.GetRequiredService<IInitialHandshakePayloadProvider>()));
             services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
             // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
             services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
@@ -815,5 +820,10 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         {
             // Best-effort temporary directory cleanup on node disposal
         }
+    }
+
+    private sealed class SimulatedNetworkEndpointDiscoveryPort(Func<Uri?> endpointProvider) : Percolator.PluginSdk.INetworkEndpointDiscoveryPort
+    {
+        public Uri? GetLocalDirectEndpoint() => endpointProvider();
     }
 }

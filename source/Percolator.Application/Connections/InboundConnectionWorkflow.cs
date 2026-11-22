@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Handshake;
 using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
 using Percolator.Domain.Channels.Model;
@@ -12,6 +13,8 @@ using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.ValueObjects;
+using Percolator.PluginSdk;
 using Percolator.PluginSdk.Events;
 using Percolator.PluginSdk.Profiles;
 

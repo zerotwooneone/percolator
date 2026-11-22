@@ -97,6 +97,35 @@ public sealed class ConversationStateService : IConversationStateService
             })
             .AddTo(ref _bag);
 
+        eventSubscriber.ObserveEvent<DirectChannelActivatedEvent>()
+            .Subscribe(evt =>
+            {
+                PublicIdentityId? activePersona;
+                lock (_lock)
+                {
+                    if (_disposed) return;
+                    activePersona = _activePersonaId;
+                }
+
+                if (activePersona.HasValue && evt.OwnerIdentityId == activePersona.Value)
+                {
+                    lock (_lock)
+                    {
+                        var match = _conversationsList.FirstOrDefault(c => c.PeerOrGroupId == evt.RemotePeerId && c.IsPendingOutbound);
+                        if (match != null)
+                        {
+                            _logger.LogInformation("Transitioning pending conversation for peer {PeerId} to Connected on DirectChannelActivatedEvent", evt.RemotePeerId);
+                            match.IsPendingOutbound = false;
+                            match.DeliveryStatus = ConversationDeliveryStatus.Connected;
+                            match.LastMessageSnippet = "Connected.";
+                        }
+                    }
+
+                    TriggerReload(activePersona.Value);
+                }
+            })
+            .AddTo(ref _bag);
+
         _retryWorker.ConnectionSucceeded
             .Subscribe(model =>
             {

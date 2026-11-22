@@ -1,5 +1,5 @@
 using Percolator.Application.Delivery.Ports;
-using Percolator.Application.Ports;
+using Percolator.Domain.Delivery.Model;
 
 namespace Percolator.Infrastructure.Transport;
 

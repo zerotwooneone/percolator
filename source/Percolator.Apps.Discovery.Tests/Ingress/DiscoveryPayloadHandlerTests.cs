@@ -53,6 +53,7 @@ public sealed class DiscoveryPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             _channelId,
+            _aliceId,
             _bobId,
             _deviceId,
             AppId.Discovery,
@@ -75,6 +76,7 @@ public sealed class DiscoveryPayloadHandlerTests
         // Alice attempts to alter Bob's visibility
         var context = new InboundPayloadContext(
             _channelId,
+            _bobId,
             _aliceId, // Authenticated session sender is Alice
             _deviceId,
             AppId.Discovery,
@@ -100,6 +102,7 @@ public sealed class DiscoveryPayloadHandlerTests
         // Bob queries for nearby peers
         var context = new InboundPayloadContext(
             _channelId,
+            _aliceId,
             _bobId, // Requester is Bob
             _deviceId,
             AppId.Discovery,
@@ -122,6 +125,7 @@ public sealed class DiscoveryPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             _channelId,
+            _aliceId,
             _bobId,
             _deviceId,
             AppId.Discovery,
@@ -142,6 +146,7 @@ public sealed class DiscoveryPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             _channelId,
+            _aliceId,
             _bobId,
             _deviceId,
             AppId.Discovery,
@@ -166,6 +171,7 @@ public sealed class DiscoveryPayloadHandlerTests
 
         var context = new InboundPayloadContext(
             _channelId,
+            _aliceId,
             _bobId,
             _deviceId,
             AppId.Discovery,
@@ -190,6 +196,7 @@ public sealed class DiscoveryPayloadHandlerTests
 
         var ctx = new InboundPayloadContext(
             _channelId,
+            _aliceId,
             _bobId,
             _deviceId,
             AppId.Discovery,
@@ -205,6 +212,7 @@ public sealed class DiscoveryPayloadHandlerTests
         _directory.Policy = RelayDiscoveryPolicy.BlindedContactsOnly;
         var aliceNearbyCtx = new InboundPayloadContext(
             _channelId,
+            _bobId,
             _aliceId,
             _deviceId,
             AppId.Discovery,
@@ -214,6 +222,7 @@ public sealed class DiscoveryPayloadHandlerTests
 
         var aliceRendezvousCtx = new InboundPayloadContext(
             _channelId,
+            _bobId,
             _aliceId,
             _deviceId,
             AppId.Discovery,
@@ -227,6 +236,7 @@ public sealed class DiscoveryPayloadHandlerTests
     {
         var context = new InboundPayloadContext(
             _channelId,
+            _aliceId,
             _bobId,
             _deviceId,
             AppId.Chat, // Mismatched AppId

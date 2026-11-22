@@ -153,6 +153,7 @@ public sealed class GroupKeyDistributionServiceTests
 
         var inboundContext = new InboundPayloadContext(
             _channelId,
+            _recipient1,
             _senderId,
             _senderDeviceId,
             AppId.SystemControl,
@@ -176,6 +177,7 @@ public sealed class GroupKeyDistributionServiceTests
         byte[] shortPayload = new byte[10];
         var inboundContext = new InboundPayloadContext(
             _channelId,
+            _recipient1,
             _senderId,
             _senderDeviceId,
             AppId.SystemControl,
@@ -199,6 +201,7 @@ public sealed class GroupKeyDistributionServiceTests
 
         var inboundContext = new InboundPayloadContext(
             _channelId,
+            _recipient1,
             _senderId,
             _senderDeviceId,
             AppId.SystemControl,

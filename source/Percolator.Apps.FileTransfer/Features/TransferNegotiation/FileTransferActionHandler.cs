@@ -12,6 +12,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+using INetworkEndpointDiscoveryPort = Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort;
 
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 

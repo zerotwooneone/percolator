@@ -58,6 +58,7 @@ public sealed class PeerDiscoveryScenarioTests
 
         var unauthContext = new InboundPayloadContext(
             ChannelId.New(),
+            relay.RelayIdentityId,
             eveId, // Authenticated sender is Eve, but payload declares Bob
             DeviceId.Primary,
             AppId.Discovery,
@@ -269,6 +270,7 @@ public sealed class PeerDiscoveryScenarioTests
 
         var pubContext = new InboundPayloadContext(
             ChannelId.New(),
+            relay.RelayIdentityId,
             alice.IdentityId,
             alice.DeviceId,
             AppId.Discovery,
@@ -287,6 +289,7 @@ public sealed class PeerDiscoveryScenarioTests
         var queryPayload = new BlindedRendezvousQueryPayload(queryWindow);
         var queryContext = new InboundPayloadContext(
             ChannelId.New(),
+            relay.RelayIdentityId,
             dave.IdentityId,
             dave.DeviceId,
             AppId.Discovery,

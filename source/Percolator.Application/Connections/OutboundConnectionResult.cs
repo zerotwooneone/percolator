@@ -8,4 +8,4 @@ public sealed record OutboundConnectionResult(
     OutboundConnectionStatus Status,
     PublicIdentityId PeerId,
     PeerInvitationPayload Invitation,
-    Uri ResolvedEndpoint);
+    Uri? ResolvedEndpoint = null);

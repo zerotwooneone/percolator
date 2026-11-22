@@ -6,6 +6,7 @@ namespace Percolator.PluginSdk;
 
 public readonly record struct InboundPayloadContext(
     ChannelId ChannelId,
+    PublicIdentityId RecipientIdentityId,
     PublicIdentityId SenderIdentityId,
     DeviceId SenderDeviceId,
     AppId AppId,

@@ -307,6 +307,17 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 return ValueTask.CompletedTask;
             }).AddTo(ref Disposables);
 
+            eventSubscriber.Subscribe<DirectChannelActivatedEvent>((evt, ct) =>
+            {
+                if (evt.OwnerIdentityId == _host.PublicIdentityId)
+                {
+                    RefreshConversations();
+                    RefreshPendingHandshakes();
+                    RefreshChatTranscript();
+                }
+                return ValueTask.CompletedTask;
+            }).AddTo(ref Disposables);
+
             _stateBus.Signals
                 .Where(s => (s.NodeId == NodeId ||
                              s.Details == _host.PublicIdentityId.ToString() ||
@@ -327,15 +338,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                     RefreshConversations();
                     RefreshChatTranscript();
                     RefreshPendingHandshakes();
-                })
-                .AddTo(ref Disposables);
-
-            _stateBus.Signals
-                .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.RatchetSessionChanged)
-                .Subscribe(_ =>
-                {
-                    RefreshPendingHandshakes();
-                    RefreshChatTranscript();
                 })
                 .AddTo(ref Disposables);
 

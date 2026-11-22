@@ -35,6 +35,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IProfileManager _profileManager;
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IPeerMailboxRoutingRepository _peerMailboxRoutingRepo;
+    private readonly IDirectEndpointRegistry _directEndpointRegistry;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -49,7 +50,8 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IProfileDeliveryClient profileDeliveryClient,
         IProfileManager profileManager,
         ICryptoEngine cryptoEngine,
-        IPeerMailboxRoutingRepository peerMailboxRoutingRepo)
+        IPeerMailboxRoutingRepository peerMailboxRoutingRepo,
+        IDirectEndpointRegistry directEndpointRegistry)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -64,6 +66,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _profileManager = profileManager ?? throw new ArgumentNullException(nameof(profileManager));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _peerMailboxRoutingRepo = peerMailboxRoutingRepo ?? throw new ArgumentNullException(nameof(peerMailboxRoutingRepo));
+        _directEndpointRegistry = directEndpointRegistry ?? throw new ArgumentNullException(nameof(directEndpointRegistry));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -120,76 +123,9 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target profile capability belongs to a different channel."));
         }
 
-        // Conditional Fetch: check if cached profile is up-to-date
-        var cached = await _peerProfileRepo.GetByPeerIdAsync(dto.AuthorId, ct).ConfigureAwait(false);
-        if (cached is not null && cached.Revision >= dto.Revision)
-        {
-            return DomainResult.Success();
-        }
-
-        // Fetch and decrypt profile package via delivery client, profile manager, and crypto engine
-        Uri? fetchEndpointUri = null;
-        if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
-        {
-            if (Uri.TryCreate(dto.SourceEndpoint, UriKind.Absolute, out var parsedUri))
-            {
-                fetchEndpointUri = parsedUri;
-            }
-            else if (Uri.TryCreate($"https://{dto.SourceEndpoint}", UriKind.Absolute, out var fallbackUri))
-            {
-                fetchEndpointUri = fallbackUri;
-            }
-        }
-
-        var locator = BlindedProfileLocator.FromBytes(dto.BlindedLocatorBytes);
-        var fetchResult = await _profileDeliveryClient.FetchProfileAsync(fetchEndpointUri, locator, ct).ConfigureAwait(false);
-        if (fetchResult.IsFailure)
-        {
-            return DomainResult.Failure(fetchResult.Error);
-        }
-
         using var profileKey = ProfileKey.FromBytes(dto.ProfileKeyBytes);
-        var decryptResult = _profileManager.DecryptProfile(fetchResult.Value, profileKey, _cryptoEngine, dto.Revision);
-        if (decryptResult.IsFailure)
-        {
-            return DomainResult.Failure(decryptResult.Error);
-        }
 
-        var decrypted = decryptResult.Value;
-        var record = new PeerProfileRecord(
-            dto.AuthorId,
-            decrypted.DisplayName,
-            decrypted.StatusBio,
-            decrypted.AvatarReference,
-            dto.Revision,
-            _timeProvider.UtcNow);
-
-        await _peerProfileRepo.SaveAsync(record, ct).ConfigureAwait(false);
-
-        if (decrypted.AvatarReference != null)
-        {
-            try
-            {
-                await _blobStorage.DownloadBlobAsync(new BlobDownloadRequest(decrypted.AvatarReference), ct: ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Non-fatal: avatar blob fetch failure must not reject valid profile capability ingestion
-            }
-        }
-
-        // Record multi-source snapshot without remote-provided expiry heuristics
-        var snapshot = new PeerProfileSourceSnapshot(
-            dto.AuthorId,
-            dto.SourceEndpoint ?? (dto.SourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay"),
-            dto.SourceType,
-            decrypted,
-            locator,
-            _timeProvider.UtcNow);
-
-        await _peerProfileRepo.SaveSourceSnapshotAsync(snapshot, ct: ct).ConfigureAwait(false);
-
-        // Sealed Sender Delivery Token Derivation & Storage
+        // 1. Sealed Sender Delivery Token Derivation & Storage (must occur unconditionally before remote fetch)
         if (dto.MailboxRoutingTokenBytes.Length == 16)
         {
             var routingToken = BlindedRoutingToken.FromGuid(new Guid(dto.MailboxRoutingTokenBytes));
@@ -221,6 +157,88 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                 }
             }
         }
+
+        // 2. Direct P2P Endpoint Registration:
+        // Enforce [SYS-RELAY-ONLY-CLOAKING] & Anti-SSRF:
+        // A direct endpoint can ONLY be registered if the target direct channel has NO relay endpoint
+        // (meaning this is an authentic direct P2P channel, not a relayed channel where an attacker could decloak IP).
+        Uri? fetchEndpointUri = null;
+        if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
+        {
+            if (Uri.TryCreate(dto.SourceEndpoint, UriKind.Absolute, out var parsedUri) &&
+                (parsedUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                 parsedUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)))
+            {
+                fetchEndpointUri = parsedUri;
+            }
+        }
+
+        if (dto.SourceType == ProfileSourceType.DirectP2P && fetchEndpointUri != null)
+        {
+            var channel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
+            if (channel != null && channel.RelayEndpoint == null)
+            {
+                _directEndpointRegistry.RegisterDirectEndpoint(dto.AuthorId, fetchEndpointUri);
+            }
+        }
+
+        // 3. Conditional Fetch: check if cached profile is up-to-date
+        var cached = await _peerProfileRepo.GetByPeerIdAsync(dto.AuthorId, ct).ConfigureAwait(false);
+        if (cached is not null && cached.Revision >= dto.Revision)
+        {
+            return DomainResult.Success();
+        }
+
+        // 4. Fetch and decrypt profile package via delivery client, profile manager, and crypto engine
+        var locator = BlindedProfileLocator.FromBytes(dto.BlindedLocatorBytes);
+        var fetchResult = await _profileDeliveryClient.FetchProfileAsync(fetchEndpointUri, locator, ct).ConfigureAwait(false);
+        if (fetchResult.IsFailure)
+        {
+            // Non-fatal: if the remote peer's profile is not yet hosted or temporarily unavailable,
+            // the handshake and channel capability reception must proceed cleanly without rejecting the envelope.
+            return DomainResult.Success();
+        }
+
+        var decryptResult = _profileManager.DecryptProfile(fetchResult.Value, profileKey, _cryptoEngine, dto.Revision);
+        if (decryptResult.IsFailure)
+        {
+            // Non-fatal: invalid or incompatible profile payload must not fail valid channel ingestion
+            return DomainResult.Success();
+        }
+
+        var decrypted = decryptResult.Value;
+        var record = new PeerProfileRecord(
+            dto.AuthorId,
+            decrypted.DisplayName,
+            decrypted.StatusBio,
+            decrypted.AvatarReference,
+            dto.Revision,
+            _timeProvider.UtcNow);
+
+        await _peerProfileRepo.SaveAsync(record, ct).ConfigureAwait(false);
+
+        if (decrypted.AvatarReference != null)
+        {
+            try
+            {
+                await _blobStorage.DownloadBlobAsync(new BlobDownloadRequest(decrypted.AvatarReference), ct: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Non-fatal: avatar blob fetch failure must not reject valid profile capability ingestion
+            }
+        }
+
+        // Record multi-source snapshot without remote-provided expiry heuristics
+        var snapshot = new PeerProfileSourceSnapshot(
+            dto.AuthorId,
+            dto.SourceEndpoint ?? (dto.SourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay"),
+            dto.SourceType,
+            decrypted,
+            locator,
+            _timeProvider.UtcNow);
+
+        await _peerProfileRepo.SaveSourceSnapshotAsync(snapshot, ct: ct).ConfigureAwait(false);
 
         return DomainResult.Success();
     }

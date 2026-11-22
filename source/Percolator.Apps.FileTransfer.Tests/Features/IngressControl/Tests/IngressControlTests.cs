@@ -40,6 +40,7 @@ public sealed class IngressControlTests
         InboundPayloadContext context = new(
             ChannelId.New(),
             PublicIdentityId.New(),
+            PublicIdentityId.New(),
             DeviceId.Primary,
             AppId.FileTransferControl,
             new byte[] { (byte)FileTransferControlOpcode.Offer },
@@ -63,6 +64,7 @@ public sealed class IngressControlTests
 
         InboundPayloadContext context = new(
             ChannelId.New(),
+            PublicIdentityId.New(),
             blockedPeer,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -89,6 +91,7 @@ public sealed class IngressControlTests
         PublicIdentityId senderId = PublicIdentityId.New();
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
+            PublicIdentityId.New(),
             senderId,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -114,6 +117,7 @@ public sealed class IngressControlTests
         PublicIdentityId senderId = PublicIdentityId.New();
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
+            PublicIdentityId.New(),
             senderId,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -269,6 +273,7 @@ public sealed class IngressControlTests
 
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
+            PublicIdentityId.New(),
             initiatorId,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -311,6 +316,7 @@ public sealed class IngressControlTests
 
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
+            PublicIdentityId.New(),
             attackerId,
             DeviceId.Primary,
             AppId.FileTransferControl,

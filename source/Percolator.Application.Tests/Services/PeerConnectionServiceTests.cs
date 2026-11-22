@@ -130,6 +130,27 @@ public sealed class PeerConnectionServiceTests
         }
     }
 
+    private sealed class FakeInitialHandshakePayloadProvider : IInitialHandshakePayloadProvider
+    {
+        public bool? LastAllowDirectEndpoint { get; private set; }
+        public ChannelId? LastChannelId { get; private set; }
+        public PublicIdentityId? LastLocalIdentityId { get; private set; }
+        public (AppId AppId, ReadOnlyMemory<byte> Payload)? PayloadToReturn { get; set; } =
+            (AppId.Chat, new byte[] { 1, 2, 3 });
+
+        public ValueTask<(AppId AppId, ReadOnlyMemory<byte> Payload)?> CreateInitialPayloadAsync(
+            PublicIdentityId localIdentityId,
+            ChannelId channelId,
+            bool allowDirectEndpoint,
+            CancellationToken ct = default)
+        {
+            LastLocalIdentityId = localIdentityId;
+            LastChannelId = channelId;
+            LastAllowDirectEndpoint = allowDirectEndpoint;
+            return ValueTask.FromResult(PayloadToReturn);
+        }
+    }
+
     private PublicIdentityId _localId;
     private DeviceId _localDeviceId;
     private FakePreKeyBundleProvider _bundleProvider = null!;
@@ -139,6 +160,8 @@ public sealed class PeerConnectionServiceTests
     private InMemoryStreamRegistry _streamRegistry = null!;
     private TestPeerMailboxRoutingRepository _routingRepository = null!;
     private InMemoryPeerContactRepository _contactRepository = null!;
+    private FakeEventPublisher _eventPublisher = null!;
+    private FakeInitialHandshakePayloadProvider _initialPayloadProvider = null!;
     private PeerConnectionService _service = null!;
 
     private PreKeyBundle _dummyBundle = null!;
@@ -155,6 +178,8 @@ public sealed class PeerConnectionServiceTests
         _streamRegistry = new InMemoryStreamRegistry();
         _routingRepository = new TestPeerMailboxRoutingRepository();
         _contactRepository = new InMemoryPeerContactRepository();
+        _eventPublisher = new FakeEventPublisher();
+        _initialPayloadProvider = new FakeInitialHandshakePayloadProvider();
 
         _dummyBundle = new PreKeyBundle(
             DeviceId.Primary,
@@ -174,19 +199,23 @@ public sealed class PeerConnectionServiceTests
             _timeProvider,
             _streamRegistry,
             _routingRepository,
-            _contactRepository);
+            _contactRepository,
+            _eventPublisher,
+            _initialPayloadProvider);
     }
 
     [Test]
     public void Constructor_NullDependencies_ThrowsArgumentNullException()
     {
-        var action1 = () => new PeerConnectionService(_localId, _localDeviceId, null!, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, _contactRepository);
-        var action2 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, null!, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, _contactRepository);
-        var action3 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, null!, _timeProvider, _streamRegistry, _routingRepository, _contactRepository);
-        var action4 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, null!, _streamRegistry, _routingRepository, _contactRepository);
-        var action5 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, null!, _routingRepository, _contactRepository);
-        var action6 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, null!, _contactRepository);
-        var action7 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, null!);
+        var action1 = () => new PeerConnectionService(_localId, _localDeviceId, null!, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, _contactRepository, _eventPublisher, _initialPayloadProvider);
+        var action2 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, null!, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, _contactRepository, _eventPublisher, _initialPayloadProvider);
+        var action3 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, null!, _timeProvider, _streamRegistry, _routingRepository, _contactRepository, _eventPublisher, _initialPayloadProvider);
+        var action4 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, null!, _streamRegistry, _routingRepository, _contactRepository, _eventPublisher, _initialPayloadProvider);
+        var action5 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, null!, _routingRepository, _contactRepository, _eventPublisher, _initialPayloadProvider);
+        var action6 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, null!, _contactRepository, _eventPublisher, _initialPayloadProvider);
+        var action7 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, null!, _eventPublisher, _initialPayloadProvider);
+        var action8 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, _contactRepository, null!, _initialPayloadProvider);
+        var action9 = () => new PeerConnectionService(_localId, _localDeviceId, _bundleProvider, _handshakeService, _channelRepository, _timeProvider, _streamRegistry, _routingRepository, _contactRepository, _eventPublisher, null!);
 
         action1.Should().Throw<ArgumentNullException>().WithParameterName("preKeyBundleProvider");
         action2.Should().Throw<ArgumentNullException>().WithParameterName("handshakeService");
@@ -195,6 +224,8 @@ public sealed class PeerConnectionServiceTests
         action5.Should().Throw<ArgumentNullException>().WithParameterName("streamRegistry");
         action6.Should().Throw<ArgumentNullException>().WithParameterName("routingRepository");
         action7.Should().Throw<ArgumentNullException>().WithParameterName("contactRepository");
+        action8.Should().Throw<ArgumentNullException>().WithParameterName("eventPublisher");
+        action9.Should().Throw<ArgumentNullException>().WithParameterName("initialPayloadProvider");
     }
 
     [Test]

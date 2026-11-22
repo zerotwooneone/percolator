@@ -1,10 +1,15 @@
 using Percolator.Application.Ports;
+using Percolator.Domain.Channels.Model;
+using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 
 namespace Percolator.Application.Ingress;
 
@@ -25,6 +30,10 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
     private readonly IAppRouter _appRouter;
     private readonly IChannelLockService _channelLockService;
     private readonly IGroupKeyDistributionService _groupKeyDistributionService;
+    private readonly IChannelRepository _channelRepository;
+    private readonly IPeerContactRepository _contactRepository;
+    private readonly IDateTimeProvider _timeProvider;
+    private readonly IEventPublisher _eventPublisher;
 
     public InboundIngressPipeline(
         IIngressFilterService filterService,
@@ -34,7 +43,11 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
         ICryptoEngine cryptoEngine,
         IAppRouter appRouter,
         IChannelLockService channelLockService,
-        IGroupKeyDistributionService groupKeyDistributionService)
+        IGroupKeyDistributionService groupKeyDistributionService,
+        IChannelRepository channelRepository,
+        IPeerContactRepository contactRepository,
+        IDateTimeProvider timeProvider,
+        IEventPublisher eventPublisher)
     {
         _filterService = filterService ?? throw new ArgumentNullException(nameof(filterService));
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
@@ -44,6 +57,10 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
         _appRouter = appRouter ?? throw new ArgumentNullException(nameof(appRouter));
         _channelLockService = channelLockService ?? throw new ArgumentNullException(nameof(channelLockService));
         _groupKeyDistributionService = groupKeyDistributionService ?? throw new ArgumentNullException(nameof(groupKeyDistributionService));
+        _channelRepository = channelRepository ?? throw new ArgumentNullException(nameof(channelRepository));
+        _contactRepository = contactRepository ?? throw new ArgumentNullException(nameof(contactRepository));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
     }
 
     public async ValueTask<DomainResult> ProcessInboundAsync(InboundEnvelope envelope, CancellationToken ct = default)
@@ -163,7 +180,62 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
             await _sessionRepository.SaveSessionAsync(session, ct);
         }
 
-        return await DispatchPlaintextAsync(direct.ChannelId, direct.SenderIdentityId, direct.SenderDeviceId, plaintext, direct.ReceivedAtUtc, ct);
+        // Cryptographic turn activation: receiving an authenticated Double Ratchet message
+        // proves the remote peer decrypted our X3DH initiation and established the session.
+        // Activate any pending outbound channel and contact idempotently.
+        await TryActivatePendingOutboundChannelAndContactAsync(
+            direct.RecipientIdentityId,
+            direct.SenderIdentityId,
+            direct.ChannelId,
+            ct).ConfigureAwait(false);
+
+        return await DispatchPlaintextAsync(direct.ChannelId, direct.RecipientIdentityId, direct.SenderIdentityId, direct.SenderDeviceId, plaintext, direct.ReceivedAtUtc, ct);
+    }
+
+    private async Task TryActivatePendingOutboundChannelAndContactAsync(
+        PublicIdentityId recipientId,
+        PublicIdentityId senderId,
+        ChannelId channelId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var channel = await _channelRepository.GetDirectByIdAsync(channelId, ct).ConfigureAwait(false)
+                ?? await _channelRepository.GetDirectByPeerAsync(recipientId, senderId, ct).ConfigureAwait(false);
+
+            if (channel != null && channel.Status != DirectChannelStatus.Active)
+            {
+                channel.Activate(_timeProvider);
+                await _channelRepository.SaveDirectAsync(channel, ct).ConfigureAwait(false);
+
+                try
+                {
+                    foreach (var domainEvt in channel.DomainEvents)
+                    {
+                        var appEvt = domainEvt.ToApplicationEvent();
+                        if (appEvt != null)
+                        {
+                            await _eventPublisher.PublishAsync(appEvt, ct).ConfigureAwait(false);
+                        }
+                    }
+                }
+                finally
+                {
+                    channel.ClearDomainEvents();
+                }
+            }
+
+            var contact = await _contactRepository.GetByPeerIdAsync(recipientId, senderId, ct).ConfigureAwait(false);
+            if (contact != null && contact.State == ContactState.PendingOutbound)
+            {
+                contact.MarkOutboundAccepted(_timeProvider);
+                await _contactRepository.SaveAsync(contact, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Non-fatal: Ingress message dispatch proceeds even if activation check encounters an issue
+        }
     }
 
     private async ValueTask<DomainResult> ProcessGroupAsync(InboundGroupEnvelope group, CancellationToken ct)
@@ -230,11 +302,12 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
             await _groupReceiverSessionRepo.SaveReceiverSessionAsync(receiverSession, ct);
         }
 
-        return await DispatchPlaintextAsync(group.ChannelId, group.AuthorIdentityId, group.AuthorDeviceId, plaintext, group.ReceivedAtUtc, ct);
+        return await DispatchPlaintextAsync(group.ChannelId, group.RecipientIdentityId, group.AuthorIdentityId, group.AuthorDeviceId, plaintext, group.ReceivedAtUtc, ct);
     }
 
     private async ValueTask<DomainResult> DispatchPlaintextAsync(
         ChannelId channelId,
+        PublicIdentityId recipientId,
         PublicIdentityId senderId,
         Domain.Identities.ValueObjects.DeviceId senderDeviceId,
         byte[] plaintext,
@@ -251,6 +324,7 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
 
         var appContext = new InboundPayloadContext(
             channelId,
+            recipientId,
             senderId,
             senderDeviceId,
             appId,

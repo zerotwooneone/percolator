@@ -1,9 +1,13 @@
+namespace Percolator.Domain.Delivery.Ports;
+
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
-
-namespace Percolator.Application.Delivery.Ports;
 
 public sealed record RelayDirectoryEntry(
     PublicIdentityId RelayIdentityId,
@@ -63,4 +67,3 @@ public interface IRelayDirectory
         PublicIdentityId ownerIdentityId,
         CancellationToken ct = default);
 }
-

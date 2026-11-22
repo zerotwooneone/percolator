@@ -6,7 +6,9 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Connections;
 using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Invitations;
 using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -14,6 +16,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Infrastructure.Protos;
@@ -294,33 +297,22 @@ internal sealed class RelayProvisioningCoordinator
                 await RegisterMailboxAsync(initiator, relay, ct);
             }
 
-            // 3. Save the initiator's routing capability for the target FIRST so the
-            // pre-key provider can resolve the delivery capability from storage.
+            // 3. Connect via IOutboundConnectionWorkflow (unifies relay routing capability storage and handshake dispatch)
             var relayEndpoint = RelayEndpoint.FromHostAndPort(relay.BoundEndpoint.Host, relay.BoundPort);
 
             using (var scope = initiator.Services.CreateScope())
             {
-                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                var cap = new PeerMailboxRoutingCapability(
+                var workflow = scope.ServiceProvider.GetRequiredService<IOutboundConnectionWorkflow>();
+                var payload = new PeerInvitationPayload(
                     target.PublicIdentityId,
                     target.MailboxRoutingToken,
                     target.MailboxDeliveryToken,
-                    relayEndpoint,
-                    LastObservedAtUtc: DateTimeOffset.UtcNow);
-                await routingRepo.SaveAsync(cap, ct);
-            }
+                    new[] { relay.BoundEndpoint.Host },
+                    Percolator.Domain.Identities.ValueObjects.PortRange.Single((ushort)relay.BoundPort),
+                    relayEndpoint);
 
-            // 4. Connect to peer via IPeerConnectionService (fetches consumable prekey, initiates X3DH, provisions direct channel and contact)
-            using (var scope = initiator.Services.CreateScope())
-            {
-                var peerConnectionService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
-                var connectResult = await peerConnectionService.ConnectToPeerAsync(
-                    target.PublicIdentityId,
-                    DeviceId.Primary,
-                    relayEndpoint,
-                    ct).ConfigureAwait(false);
-
-                if (connectResult.IsFailure)
+                var connectResult = await workflow.ConnectAsync(payload, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+                if (!connectResult.IsSuccess)
                 {
                     if (connectResult.Error.Description?.Contains("Unable to consume") == true)
                     {

@@ -18,6 +18,7 @@ using Percolator.Desktop.Features.Transports.Models;
 using Percolator.Desktop.Features.Transports.Services;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.PluginSdk;

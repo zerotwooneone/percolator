@@ -54,6 +54,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         // are instantiated on-demand inside scoped dialog lifetimes via IWindowManager (ActivatorUtilities + IDialogContext).
         services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
         services.AddSingleton<ICurrentPersonaService, CurrentPersonaService>();
+        services.AddSingleton<Percolator.PluginSdk.INetworkEndpointDiscoveryPort, DesktopNetworkEndpointDiscoveryPort>();
 
         // Navigation and Left Rail state services (DESK-05)
         services.AddSingleton<IShellNavigationStateService, ShellNavigationStateService>();

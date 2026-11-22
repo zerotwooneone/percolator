@@ -193,6 +193,7 @@ public sealed class GroupInvitationService
                 {
                     var replayContext = new InboundPayloadContext(
                         record.ChannelId,
+                        responderId,
                         record.AuthorId,
                         DeviceId.Primary,
                         AppId.Chat,

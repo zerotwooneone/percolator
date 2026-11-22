@@ -34,6 +34,8 @@ public sealed class AppHostPipelineTests
     private NoOpChannelLockService _channelLockService = null!;
     private FakePayloadSender _payloadSender = null!;
     private GroupKeyDistributionService _groupKeyDistributionService = null!;
+    private InMemoryChannelRepository _channelRepo = null!;
+    private FakeEventPublisher _eventPublisher = null!;
     private InboundIngressPipeline _pipeline = null!;
 
     private PublicIdentityId _aliceId;
@@ -52,11 +54,12 @@ public sealed class AppHostPipelineTests
         _identityKeyStore = new InMemoryLocalIdentityKeyStore();
         _preKeyStore = new InMemoryPrivatePreKeyStore();
         _contactRepo = new InMemoryPeerContactRepository();
+        _channelRepo = new InMemoryChannelRepository();
+        _eventPublisher = new FakeEventPublisher();
         _pendingHandshakeRepo = new InMemoryPendingHandshakeRepository();
         _replayFilter = new FakeHandshakeReplayFilter();
         _timeProvider = new TestDateTimeProvider();
-        var eventPublisher = new FakeEventPublisher();
-        _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider, eventPublisher);
+        _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider, _eventPublisher);
         _outboxRepo = new InMemoryOutboxRepository();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _appRouter = new AppRouter();
@@ -75,7 +78,7 @@ public sealed class AppHostPipelineTests
             _cryptoEngine,
             _timeProvider,
             _appRouter,
-            eventPublisher);
+            _eventPublisher);
 
         _groupKeyDistributionService = new GroupKeyDistributionService(
             _senderKeyRepo,
@@ -92,7 +95,11 @@ public sealed class AppHostPipelineTests
             _cryptoEngine,
             _appRouter,
             _channelLockService,
-            _groupKeyDistributionService);
+            _groupKeyDistributionService,
+            _channelRepo,
+            _contactRepo,
+            _timeProvider,
+            _eventPublisher);
 
         _aliceId = PublicIdentityId.New();
         _aliceDeviceId = DeviceId.Primary;

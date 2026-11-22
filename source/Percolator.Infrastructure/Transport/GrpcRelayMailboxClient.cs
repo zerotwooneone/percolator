@@ -8,6 +8,7 @@ using Google.Protobuf;
 using Grpc.Core;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Infrastructure.Protos;
 

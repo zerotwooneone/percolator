@@ -797,3 +797,32 @@ public sealed class InMemoryRelayRegistrationRepository : IRelayRegistrationRepo
         return Task.CompletedTask;
     }
 }
+
+public sealed class InMemoryIdentityProfileRepository : IIdentityProfileRepository
+{
+    private readonly ConcurrentDictionary<PublicIdentityId, IdentityProfile> _profiles = new();
+
+    public Task<IdentityProfile?> GetByIdAsync(PublicIdentityId id, CancellationToken cancellationToken = default)
+    {
+        _profiles.TryGetValue(id, out var profile);
+        return Task.FromResult(profile);
+    }
+
+    public Task<IReadOnlyList<IdentityProfile>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<IdentityProfile>>(_profiles.Values.ToList());
+    }
+
+    public Task SaveAsync(IdentityProfile profile, CancellationToken cancellationToken = default)
+    {
+        _profiles[profile.Id] = profile;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(PublicIdentityId id, CancellationToken cancellationToken = default)
+    {
+        _profiles.TryRemove(id, out _);
+        return Task.CompletedTask;
+    }
+}
+

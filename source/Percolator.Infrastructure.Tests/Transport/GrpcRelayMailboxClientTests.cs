@@ -13,6 +13,7 @@ using Grpc.Core;
 using NUnit.Framework;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;

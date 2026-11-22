@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
 using Percolator.Application.Services;
 using Percolator.Application.Session.Ports;
@@ -16,6 +17,7 @@ using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Desktop.Features.Transports.Services;
@@ -113,6 +115,8 @@ public sealed class DesktopPeerConnectionService : IPeerConnectionService
             _timeProvider,
             _streamRegistry,
             sp.GetRequiredService<IPeerMailboxRoutingRepository>(),
-            sp.GetRequiredService<IPeerContactRepository>());
+            sp.GetRequiredService<IPeerContactRepository>(),
+            sp.GetRequiredService<IEventPublisher>(),
+            sp.GetRequiredService<IInitialHandshakePayloadProvider>());
     }
 }

@@ -1,4 +1,10 @@
-using System.Security.Cryptography;
+namespace Percolator.Application.Services;
+
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Handshake;
 using Percolator.Application.Ports;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
@@ -9,10 +15,9 @@ using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 using Percolator.PluginSdk.Profiles;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
-
-namespace Percolator.Application.Services;
 
 /// <summary>
 /// Host implementation of IPeerConnectionService exposed to plugins via PluginSdk.
@@ -29,6 +34,8 @@ public sealed class PeerConnectionService : IPeerConnectionService
     private readonly IStreamRegistryManagement _streamRegistry;
     private readonly IPeerMailboxRoutingRepository _routingRepository;
     private readonly IPeerContactRepository _contactRepository;
+    private readonly IEventPublisher _eventPublisher;
+    private readonly IInitialHandshakePayloadProvider _initialPayloadProvider;
 
     public PeerConnectionService(
         PublicIdentityId localIdentityId,
@@ -39,7 +46,9 @@ public sealed class PeerConnectionService : IPeerConnectionService
         IDateTimeProvider timeProvider,
         IStreamRegistryManagement streamRegistry,
         IPeerMailboxRoutingRepository routingRepository,
-        IPeerContactRepository contactRepository)
+        IPeerContactRepository contactRepository,
+        IEventPublisher eventPublisher,
+        IInitialHandshakePayloadProvider initialPayloadProvider)
     {
         _localIdentityId = localIdentityId;
         _localDeviceId = localDeviceId;
@@ -50,6 +59,8 @@ public sealed class PeerConnectionService : IPeerConnectionService
         _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
         _routingRepository = routingRepository ?? throw new ArgumentNullException(nameof(routingRepository));
         _contactRepository = contactRepository ?? throw new ArgumentNullException(nameof(contactRepository));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
+        _initialPayloadProvider = initialPayloadProvider ?? throw new ArgumentNullException(nameof(initialPayloadProvider));
     }
 
     public async Task<DomainResult<PeerConnectionResult>> ConnectToPeerAsync(
@@ -78,24 +89,37 @@ public sealed class PeerConnectionService : IPeerConnectionService
 
         var bundle = bundleResult.Value!;
 
-        // 2. Initiate pairwise X3DH handshake via HandshakeService
+        // 2. Ensure DirectChannel exists
+        var channelId = await EnsureDirectChannelAsync(targetPeerId, relayEndpoint, ct).ConfigureAwait(false);
+
+        // 3. Ensure PeerContact exists for the connected peer
+        await EnsureContactAsync(targetPeerId, bundle.IdentityKey, ct).ConfigureAwait(false);
+
+        // 4. Build initial 0-RTT capability payload via provider (cloaked: allowDirectEndpoint: false)
+        var initialPayloadResult = await _initialPayloadProvider.CreateInitialPayloadAsync(
+            _localIdentityId,
+            channelId,
+            allowDirectEndpoint: false,
+            ct).ConfigureAwait(false);
+
+        var (initialAppId, initialPayload) = initialPayloadResult.HasValue
+            ? (initialPayloadResult.Value.AppId, initialPayloadResult.Value.Payload.ToArray())
+            : ((AppId?)null, (byte[]?)null);
+
+        // 5. Initiate pairwise X3DH handshake via HandshakeService
         var handshakeResult = await _handshakeService.InitiateHandshakeAsync(
             _localIdentityId,
             _localDeviceId,
             targetPeerId,
             bundle,
+            initialAppId,
+            initialPayload,
             ct: ct).ConfigureAwait(false);
 
         if (!handshakeResult.IsSuccess)
         {
             return DomainResult<PeerConnectionResult>.Failure(handshakeResult.Error);
         }
-
-        // 3. Ensure DirectChannel exists
-        var channelId = await EnsureDirectChannelAsync(targetPeerId, ct).ConfigureAwait(false);
-
-        // 4. Ensure PeerContact exists for the connected peer
-        await EnsureContactAsync(targetPeerId, bundle.IdentityKey, ct).ConfigureAwait(false);
 
         return DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(channelId, bundle.DeviceId));
     }
@@ -116,17 +140,27 @@ public sealed class PeerConnectionService : IPeerConnectionService
 
         ArgumentNullException.ThrowIfNull(directEndpoint);
 
-        // 1. Register directEndpoint into stream registry
+        // 1. Register the direct endpoint into the StreamRegistry so transport dispatcher routes to it
         _streamRegistry.RegisterDirectEndpoint(targetPeerId, directEndpoint);
 
-        // 2. Construct and persist PeerMailboxRoutingCapability
-        var directRelayEndpoint = RelayEndpoint.FromHostAndPort(directEndpoint.Host, directEndpoint.Port);
+        // 2. Synthesize RelayEndpoint from direct URI for prekey retrieval over loopback/direct TCP
+        var endpointStr = $"{directEndpoint.Host}:{directEndpoint.Port}";
+        var endpointResult = RelayEndpoint.Create(endpointStr);
+        if (endpointResult.IsFailure)
+        {
+            return DomainResult<PeerConnectionResult>.Failure(endpointResult.Error);
+        }
+
+        var directRelayEndpoint = endpointResult.Value!;
+
+        // Also save direct routing capability to IPeerMailboxRoutingRepository for fallback resolution
         var routingCapability = new PeerMailboxRoutingCapability(
             targetPeerId,
             routingToken,
             deliveryToken,
             directRelayEndpoint,
             _timeProvider.UtcNow);
+
         await _routingRepository.SaveAsync(routingCapability, ct).ConfigureAwait(false);
 
         // 3. Fetch consumable PreKeyBundle using the direct relay endpoint
@@ -143,12 +177,31 @@ public sealed class PeerConnectionService : IPeerConnectionService
 
         var bundle = bundleResult.Value!;
 
-        // 4. Initiate pairwise X3DH handshake via HandshakeService
+        // 4. Ensure DirectChannel exists with relayEndpoint: null (direct P2P channel)
+        var channelId = await EnsureDirectChannelAsync(targetPeerId, relayEndpoint: null, ct).ConfigureAwait(false);
+
+        // 5. Ensure PeerContact exists for the connected peer
+        await EnsureContactAsync(targetPeerId, bundle.IdentityKey, ct).ConfigureAwait(false);
+
+        // 6. Build initial 0-RTT capability payload via provider (direct: allowDirectEndpoint: true)
+        var initialPayloadResult = await _initialPayloadProvider.CreateInitialPayloadAsync(
+            _localIdentityId,
+            channelId,
+            allowDirectEndpoint: true,
+            ct).ConfigureAwait(false);
+
+        var (initialAppId, initialPayload) = initialPayloadResult.HasValue
+            ? (initialPayloadResult.Value.AppId, initialPayloadResult.Value.Payload.ToArray())
+            : ((AppId?)null, (byte[]?)null);
+
+        // 7. Initiate pairwise X3DH handshake via HandshakeService
         var handshakeResult = await _handshakeService.InitiateHandshakeAsync(
             _localIdentityId,
             _localDeviceId,
             targetPeerId,
             bundle,
+            initialAppId,
+            initialPayload,
             ct: ct).ConfigureAwait(false);
 
         if (!handshakeResult.IsSuccess)
@@ -156,16 +209,10 @@ public sealed class PeerConnectionService : IPeerConnectionService
             return DomainResult<PeerConnectionResult>.Failure(handshakeResult.Error);
         }
 
-        // 5. Ensure DirectChannel exists
-        var channelId = await EnsureDirectChannelAsync(targetPeerId, ct).ConfigureAwait(false);
-
-        // 6. Ensure PeerContact exists for the connected peer
-        await EnsureContactAsync(targetPeerId, bundle.IdentityKey, ct).ConfigureAwait(false);
-
         return DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(channelId, bundle.DeviceId));
     }
 
-    private async Task<ChannelId> EnsureDirectChannelAsync(PublicIdentityId targetPeerId, CancellationToken ct)
+    private async Task<ChannelId> EnsureDirectChannelAsync(PublicIdentityId targetPeerId, RelayEndpoint? relayEndpoint, CancellationToken ct)
     {
         var existingChannel = await _channelRepository.GetDirectByPeerAsync(_localIdentityId, targetPeerId, ct).ConfigureAwait(false);
         if (existingChannel != null)
@@ -174,10 +221,33 @@ public sealed class PeerConnectionService : IPeerConnectionService
         }
 
         var channelId = ChannelId.DeterministicForDirect(_localIdentityId, targetPeerId);
-        var newChannelResult = DirectChannel.Create(channelId, _localIdentityId, targetPeerId, _timeProvider);
+        var newChannelResult = DirectChannel.Create(
+            channelId,
+            _localIdentityId,
+            targetPeerId,
+            _timeProvider,
+            DirectChannelStatus.PendingAcceptance,
+            relayEndpoint);
+
         if (newChannelResult.IsSuccess)
         {
-            await _channelRepository.SaveDirectAsync(newChannelResult.Value!, ct).ConfigureAwait(false);
+            var channel = newChannelResult.Value!;
+            await _channelRepository.SaveDirectAsync(channel, ct).ConfigureAwait(false);
+            try
+            {
+                foreach (var domainEvt in channel.DomainEvents)
+                {
+                    var appEvt = domainEvt.ToApplicationEvent();
+                    if (appEvt != null)
+                    {
+                        await _eventPublisher.PublishAsync(appEvt, ct).ConfigureAwait(false);
+                    }
+                }
+            }
+            finally
+            {
+                channel.ClearDomainEvents();
+            }
         }
 
         return channelId;
@@ -188,16 +258,11 @@ public sealed class PeerConnectionService : IPeerConnectionService
         var existingContact = await _contactRepository.GetByPeerIdAsync(_localIdentityId, targetPeerId, ct).ConfigureAwait(false);
         if (existingContact == null)
         {
-            var contact = new PeerContact(
-                _localIdentityId,
-                targetPeerId,
-                ContactNickname.Create(null, targetPeerId),
-                PeerTrustLevel.Tofu,
-                _timeProvider.UtcNow,
-                identityKey,
-                ContactState.Active);
-            await _contactRepository.SaveAsync(contact, ct).ConfigureAwait(false);
+            var contactResult = PeerContact.CreateOutboundRequest(_localIdentityId, targetPeerId, identityKey, _timeProvider);
+            if (contactResult.IsSuccess)
+            {
+                await _contactRepository.SaveAsync(contactResult.Value!, ct).ConfigureAwait(false);
+            }
         }
     }
 }
-

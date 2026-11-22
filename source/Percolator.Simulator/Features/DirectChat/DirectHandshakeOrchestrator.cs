@@ -41,7 +41,6 @@ internal sealed class DirectHandshakeOrchestrator
     private readonly ISimulatorStateBus _stateBus;
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorLogSink _logSink;
-    private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly IFlightRecorderStateService _flightRecorder;
 
     public DirectHandshakeOrchestrator(
@@ -49,14 +48,12 @@ internal sealed class DirectHandshakeOrchestrator
         ISimulatorStateBus stateBus,
         IStatusToastService toastService,
         ISimulatorLogSink logSink,
-        ProfileSyncCoordinator profileCoordinator,
         IFlightRecorderStateService flightRecorder)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
-        _profileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         _flightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));
     }
 
@@ -142,72 +139,13 @@ internal sealed class DirectHandshakeOrchestrator
 
             try
             {
-                var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
-                if (senderHost != null)
-                {
-                    var targetStreamRegistry = target.Services.GetRequiredService<IStreamRegistryManagement>();
-                    targetStreamRegistry.RegisterDirectEndpoint(senderHost.PublicIdentityId, senderHost.BoundEndpoint);
-
-                }
-
                 using var scope = target.Services.CreateScope();
-                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-
-                var existingRoute = await routingRepo.GetByPeerIdAsync(senderId, ct).ConfigureAwait(false);
-                if (existingRoute == null)
-                {
-                    if (senderHost != null && senderHost.HomeRelay != null)
-                    {
-                        var relayEndpoint = RelayEndpoint.FromHostAndPort(senderHost.HomeRelay.BoundEndpoint.Host, senderHost.HomeRelay.BoundPort);
-                        var cap = new PeerMailboxRoutingCapability(
-                            senderHost.PublicIdentityId,
-                            senderHost.MailboxRoutingToken,
-                            senderHost.MailboxDeliveryToken,
-                            relayEndpoint,
-                            timeProvider.UtcNow);
-                        await routingRepo.SaveAsync(cap, ct).ConfigureAwait(false);
-                    }
-                    else if (target.HomeRelay != null && target.HomeRelay.PeerDirectory != null)
-                    {
-                        var reg = await target.HomeRelay.PeerDirectory.GetPeerAsync(senderId, ct).ConfigureAwait(false);
-                        if (reg != null && reg.RoutingToken.HasValue && reg.DeliveryToken != null)
-                        {
-                            var relayEndpoint = RelayEndpoint.FromHostAndPort(target.HomeRelay.BoundEndpoint.Host, target.HomeRelay.BoundPort);
-                            var cap = new PeerMailboxRoutingCapability(
-                                senderId,
-                                reg.RoutingToken.Value,
-                                reg.DeliveryToken,
-                                relayEndpoint,
-                                timeProvider.UtcNow);
-                            await routingRepo.SaveAsync(cap, ct).ConfigureAwait(false);
-                        }
-                    }
-                }
-
                 var inboundWorkflow = scope.ServiceProvider.GetRequiredService<IInboundConnectionWorkflow>();
                 var acceptResult = await inboundWorkflow.AcceptRequestAsync(target.PublicIdentityId, senderId, ct);
                 if (!acceptResult.IsSuccess)
                 {
                     _toastService.ShowToast("Accept Failed", acceptResult.Error.Description, ToastSeverity.Error);
                     return false;
-                }
-
-                if (senderHost != null)
-                {
-                    if (senderHost.HomeRelay != null)
-                    {
-                        await senderHost.DrainMailboxAsync(ct);
-                    }
-
-                    _stateBus.Publish(new SimulatorStateSignal(
-                        senderHost.Id,
-                        SignalCategory.RatchetSessionChanged,
-                        Details: target.PublicIdentityId.ToString(),
-                        Payload: new HandshakeSignalPayload(target.PublicIdentityId, "Accept")));
-
-                    // Auto-Share Profile on Connect
-                    await _profileCoordinator.AutoShareProfileOnConnectAsync(target, senderHost, ct);
                 }
 
                 _logSink.Log(new SimulatorLogEntry(
@@ -218,7 +156,7 @@ internal sealed class DirectHandshakeOrchestrator
                     "Handshake",
                     $"Accepted handshake from {senderId}. Double Ratchet session established."));
 
-                _flightRecorder.RecordStep(new ApprovePendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString()));
+                _flightRecorder.RecordStep(new ApprovePendingHandshakeStep(target.DisplayName, senderId.ToString()));
                 _toastService.ShowToast("Handshake Accepted", "✓ Direct secure session established.", ToastSeverity.Success);
 
                 _stateBus.Publish(new SimulatorStateSignal(
@@ -271,8 +209,6 @@ internal sealed class DirectHandshakeOrchestrator
                     return false;
                 }
 
-                var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
-
                 _logSink.Log(new SimulatorLogEntry(
                     DateTimeOffset.UtcNow,
                     LogLevel.Information,
@@ -281,7 +217,7 @@ internal sealed class DirectHandshakeOrchestrator
                     "Handshake",
                     $"Rejected handshake from {senderId} (Blocked: {block})."));
 
-                _flightRecorder.RecordStep(new RejectPendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString(), block));
+                _flightRecorder.RecordStep(new RejectPendingHandshakeStep(target.DisplayName, senderId.ToString(), block));
 
                 _toastService.ShowToast(
                     block ? "Handshake Blocked" : "Handshake Rejected",

@@ -275,7 +275,8 @@ public sealed class TestIdentityNode
             profileDeliveryClient: ProfileDeliveryClient,
             profileManager: ProfileManager,
             cryptoEngine: CryptoEngine,
-            peerMailboxRoutingRepo: PeerMailboxRoutingRepo);
+            peerMailboxRoutingRepo: PeerMailboxRoutingRepo,
+            directEndpointRegistry: StreamRegistry);
         appRouter.RegisterHandler(chatHandler);
 
         // File Transfer Wiring
@@ -354,6 +355,16 @@ public sealed class TestIdentityNode
             wirePacker,
             routingCoordinator: RoutingCoordinator);
 
+        var appEndpointDiscovery = new LoopbackAppEndpointDiscoveryPort(new Uri($"tcp://127.0.0.1:{Port.Value}"));
+        var relayDirectory = new LoopbackRelayDirectory();
+        var initialPayloadProvider = new ChatInitialPayloadProvider(
+            _identityKeyStore,
+            relayDirectory,
+            appEndpointDiscovery,
+            CryptoEngine,
+            serializer,
+            TimeProvider);
+
         PeerConnectionService = new PeerConnectionService(
             IdentityId,
             DeviceId,
@@ -363,7 +374,9 @@ public sealed class TestIdentityNode
             TimeProvider,
             StreamRegistry,
             PeerMailboxRoutingRepo,
-            _contactRepo);
+            _contactRepo,
+            EventBus,
+            initialPayloadProvider);
 
         var discoveryClient = new LoopbackNearbyDiscoveryQueryClient(_networkSwitch);
         NearbyDiscovery = new NearbyPeerDiscoveryWorkflow(discoveryClient, PeerConnectionService);
@@ -377,7 +390,11 @@ public sealed class TestIdentityNode
             CryptoEngine,
             appRouter,
             channelLockService,
-            GroupKeyDistributionService);
+            GroupKeyDistributionService,
+            _channelRepo,
+            _contactRepo,
+            TimeProvider,
+            EventBus);
 
         OutboxWorker = new OutboxWorker(
             _outboxRepo,
@@ -780,7 +797,7 @@ public sealed class TestIdentityNode
         var framed = new byte[1 + body.Length];
         framed[0] = (byte)DiscoveryOpcode.RegisterVisibility;
         body.Span.CopyTo(framed.AsSpan(1));
-        var context = new InboundPayloadContext(ChannelId.New(), IdentityId, DeviceId, AppId.Discovery, framed, TimeProvider.UtcNow);
+        var context = new InboundPayloadContext(ChannelId.New(), relay.RelayIdentityId, IdentityId, DeviceId, AppId.Discovery, framed, TimeProvider.UtcNow);
         return await relay.HandleDiscoveryInboundAsync(context, ct).ConfigureAwait(false);
     }
 

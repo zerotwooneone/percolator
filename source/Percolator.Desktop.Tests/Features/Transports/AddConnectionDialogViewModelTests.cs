@@ -23,6 +23,7 @@ using Percolator.Desktop.Tests.Features.Chats;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
@@ -269,7 +270,6 @@ public sealed class AddConnectionDialogViewModelTests
         _dialogResult.PeerId.Should().Be(_testInvitationPayload.IdentityId);
         _dialogResult.Invitation.Should().Be(_testInvitationPayload);
         vm.ErrorMessage.Should().BeNull();
-        _fakeConversationService.RegisteredDirect.Should().ContainSingle(r => r.PeerId == _testInvitationPayload.IdentityId);
     }
 
     [Test]

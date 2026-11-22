@@ -248,6 +248,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<StreamRegistry>();
         services.AddSingleton<IStreamRegistry>(sp => sp.GetRequiredService<StreamRegistry>());
         services.AddSingleton<IStreamRegistryManagement>(sp => sp.GetRequiredService<StreamRegistry>());
+        services.AddSingleton<IDirectEndpointRegistry>(sp => sp.GetRequiredService<StreamRegistry>());
         services.AddSingleton<PeerTransportServerOptions>();
         services.AddSingleton<KestrelPeerTransportServer>();
         services.AddSingleton<IPeerTransportServer>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
@@ -405,7 +406,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<CallbackEndpointValidator>();
         services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
         services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
-        services.AddSingleton<INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
+        services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
         services.AddScoped<IDistributedTrackerPort, RelaySwarmTrackerClient>();
         services.AddScoped<ITransferSessionRepository, SqliteTransferSessionRepository>();
         services.AddScoped<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();

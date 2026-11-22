@@ -38,6 +38,11 @@ public sealed class PeerInvitationCodec : IPeerInvitationCodec
                 : $"{payload.PortRange.MinPort}-{payload.PortRange.MaxPort}");
         }
 
+        if (payload.RelayEndpoint != null)
+        {
+            sb.Append("&relay=").Append(Uri.EscapeDataString(payload.RelayEndpoint.Value));
+        }
+
         return sb.ToString();
     }
 
@@ -69,6 +74,16 @@ public sealed class PeerInvitationCodec : IPeerInvitationCodec
         foreach (var host in hosts)
         {
             writer.Write(host);
+        }
+
+        if (payload.RelayEndpoint != null)
+        {
+            writer.Write((byte)1);
+            writer.Write(payload.RelayEndpoint.Value);
+        }
+        else
+        {
+            writer.Write((byte)0);
         }
 
         return Convert.ToBase64String(ms.ToArray());
@@ -196,12 +211,22 @@ public sealed class PeerInvitationCodec : IPeerInvitationCodec
             }
         }
 
+        RelayEndpoint? relayEndpoint = null;
+        if (queryParams.TryGetValue("relay", out var relayStr) && !string.IsNullOrWhiteSpace(relayStr))
+        {
+            var epResult = RelayEndpoint.Create(relayStr);
+            if (epResult.IsSuccess)
+            {
+                relayEndpoint = epResult.Value;
+            }
+        }
+
         var identityId = PublicIdentityId.FromGuid(idGuid);
         var routingToken = BlindedRoutingToken.FromGuid(routeGuid);
         var deliveryToken = DeliveryToken.FromSpan(delivBytes);
 
         return DomainResult<PeerInvitationPayload>.Success(
-            new PeerInvitationPayload(identityId, routingToken, deliveryToken, endpointHosts, portRange));
+            new PeerInvitationPayload(identityId, routingToken, deliveryToken, endpointHosts, portRange, relayEndpoint));
     }
 
     private static DomainResult<PeerInvitationPayload> DecodeFromBase64(string base64String)
@@ -275,8 +300,23 @@ public sealed class PeerInvitationCodec : IPeerInvitationCodec
                 endpointHosts.Add(reader.ReadString());
             }
 
+            RelayEndpoint? relayEndpoint = null;
+            if (ms.Position < ms.Length)
+            {
+                var hasRelay = reader.ReadByte();
+                if (hasRelay == 1 && ms.Position < ms.Length)
+                {
+                    var relayStr = reader.ReadString();
+                    var epResult = RelayEndpoint.Create(relayStr);
+                    if (epResult.IsSuccess)
+                    {
+                        relayEndpoint = epResult.Value;
+                    }
+                }
+            }
+
             return DomainResult<PeerInvitationPayload>.Success(
-                new PeerInvitationPayload(identityId, routingToken, deliveryToken, endpointHosts, portRange));
+                new PeerInvitationPayload(identityId, routingToken, deliveryToken, endpointHosts, portRange, relayEndpoint));
         }
         catch (Exception ex)
         {

@@ -244,7 +244,7 @@ internal sealed class SwarmSimulationCoordinator
         // Discover loopback candidate via INetworkEndpointDiscoveryPort and initiate in-band transfer if ratchet session exists
         using (var initScope = initiator.Services.CreateScope())
         {
-            var endpointDiscovery = initScope.ServiceProvider.GetRequiredService<INetworkEndpointDiscoveryPort>();
+            var endpointDiscovery = initScope.ServiceProvider.GetRequiredService<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>();
             var candidates = await endpointDiscovery.DiscoverLocalCandidatesAsync(DirectWanPolicy.DisabledByDefault, ct);
             foreach (var candidate in candidates)
             {

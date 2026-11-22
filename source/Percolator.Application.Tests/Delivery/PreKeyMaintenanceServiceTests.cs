@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Model;

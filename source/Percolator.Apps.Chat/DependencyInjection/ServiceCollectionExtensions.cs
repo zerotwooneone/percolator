@@ -2,8 +2,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Ingress;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Apps.Chat.DependencyInjection;
 
@@ -14,6 +16,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAppPlugin, ChatPlugin>();
         services.AddSingleton<IAppIngressFilter, ChatIngressFilter>();
         services.AddScoped<IAppPayloadHandler, ChatPayloadHandler>();
+        services.AddScoped<IInitialHandshakePayloadProvider, ChatInitialPayloadProvider>();
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<ChatMediaService>();
         services.AddScoped<GroupInvitationService>();

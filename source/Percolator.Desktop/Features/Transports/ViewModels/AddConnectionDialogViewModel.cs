@@ -7,9 +7,10 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using Percolator.Application.Delivery.Ports;
 using IOutboundConnectionWorkflow = Percolator.Application.Connections.IOutboundConnectionWorkflow;
 using AppOutboundStatus = Percolator.Application.Connections.OutboundConnectionStatus;
-using Percolator.Application.Delivery.Ports;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Application.Invitations;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Common.Windowing;
@@ -179,7 +180,6 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
             if (workflowResult.Value!.Status == AppOutboundStatus.Connected)
             {
                 dialogStatus = OutboundConnectionStatus.Connected;
-                _conversationStateService.RegisterDirectConversation(payload.IdentityId, peerDisplayName);
             }
             else
             {
