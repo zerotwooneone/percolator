@@ -202,8 +202,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         var decryptResult = _profileManager.DecryptProfile(fetchResult.Value, profileKey, _cryptoEngine, dto.Revision);
         if (decryptResult.IsFailure)
         {
-            // Non-fatal: invalid or incompatible profile payload must not fail valid channel ingestion
-            return DomainResult.Success();
+            return DomainResult.Failure(decryptResult.Error);
         }
 
         var decrypted = decryptResult.Value;
