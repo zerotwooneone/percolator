@@ -12,7 +12,7 @@ This skill enforces zero-tolerance standards against AI code shortcuts in Percol
 
 ---
 
-## The 15 Invariants at a Glance
+## The 22 Invariants at a Glance
 
 | # | Anti-Shortcut Rule | Detection Heuristic | Required Invariant |
 | :-: | :--- | :--- | :--- |
@@ -32,6 +32,12 @@ This skill enforces zero-tolerance standards against AI code shortcuts in Percol
 | **14** | **No Coordinator State Backdoors** | `_groupMembers` dictionary in coordinator | The coordinator/harness must not maintain side-channel state dictionaries to spoon-feed state out-of-band to nodes. Node state transitions must occur solely through protocol messages or local storage. |
 | **15** | **Deterministic Signal Awaiting** | `await Task.Delay(150)` in scenario steps | Prohibit arbitrary sleep delays as synchronization substitutes. Await explicit reactive signals (`_stateBus.Signals`), outbox job completions, or deterministic task tokens. |
 | **16** | **Zero Captive Scope Facades (`IDbContextFactory` Standard)** | `Desktop*QueryService` creating `scope.ServiceProvider.GetService<Sql*>() ?? GetServices<I*>()` | Prohibit captive-dependency facade wrappers that create scopes and perform fallback resolution gymnastics. In desktop/client applications, inject `IDbContextFactory<TDbContext>` directly into query services/repositories so they can be registered as thread-safe Singletons without intermediate facades. |
+| **17** | **No `GlobalUsings.cs` Band-Aids** | Added `global using` directives in `GlobalUsings.cs` to mask moved/refactored types | Never mask broken imports with `global using` shims. Large symbol/namespace moves must update explicit `using` statements via a compiler-driven `dotnet build` loop. |
+| **18** | **Pure Persistence Adapters** | `IEventPublisher` injected into `*Repository` or publishing inside `SaveAsync` | Persistence repositories must only persist and rehydrate state. Application/outbox event publishing belongs strictly in Application orchestrators after all direct writes/steps commit. |
+| **19** | **Atomic Outbox Claiming & Zero Manual Dispatch Races** | Background `HostedService` + manual `Flush*` reading shared rows without atomic claim (`Pending -> InFlight`) | When introducing an `IHostedService` dispatcher (`OutboxDispatchHost`), delete manual `Flush*` entry points and enforce atomic DB claiming (`ClaimDuePendingJobsAsync`) so concurrent callers cannot double-dispatch. |
+| **20** | **CQRS Query Integrity (No N+1, Permissive Fallbacks, or String Key Queries)** | `await db.*` inside `foreach`, querying unowned tables on empty results, or comparing raw string URLs | Batch child lookups into single projections; enforce ownership boundaries with zero fallback queries into unowned tables; normalize Value Objects (`RelayEndpoint.Parse`) before comparison. |
+| **21** | **Immediate Deletion of Synthetic UI Fallbacks** | Preserving `ChannelId.New()` or fake channels when adding real CQRS read models | Delete synthetic entity/ID fabrication in the same step that delivers the real query/command model. Never keep dead/divergent UI fallback branches alive. |
+| **22** | **Deterministic Event-Driven Testing (Zero Masking Timers)** | Testing event-driven handlers with short poll intervals (`PollInterval = 50ms`) or `await Task.Delay(...)` | When testing event-driven `BackgroundService` loops, disable background polling (`PollInterval = Timeout.InfiniteTimeSpan`) and synchronize via `TaskCompletionSource`/`SemaphoreSlim` so broken subscriptions fail immediately. |
 
 ---
 
@@ -211,6 +217,100 @@ public sealed class SqlPeerContactQueryService : IPeerContactQueryService
 }
 ```
 
+### 17. No `GlobalUsings.cs` Band-Aids
+```csharp
+// BAD: Adding global usings across projects to avoid fixing broken references after moving types
+// Percolator.Application/GlobalUsings.cs
+global using Percolator.PluginSdk.Events;
+
+// GOOD: Update explicit using directives file-by-file driven by compiler errors
+// MyFile.cs
+using Percolator.PluginSdk.Events;
+```
+
+### 18. Pure Persistence Adapters (No Repository Event Publishing)
+```csharp
+// BAD: Repository publishing application events or notifying background workers inside SaveAsync
+public sealed class SqliteOutboxRepository : IOutboxRepository
+{
+    private readonly IEventPublisher _publisher;
+    public async Task SaveAsync(OutboxJob job, CancellationToken ct)
+    {
+        // ... persist job ...
+        await _publisher.PublishAsync(new OutboxJobEnqueuedEvent(job.JobId), ct); // RACE & HEXAGONAL VIOLATION
+    }
+}
+
+// GOOD: Repository only persists. Application orchestrator publishes after direct execution/commit
+public sealed class OutboundEgressPipeline
+{
+    public async Task<DomainResult> ProcessEgressAsync(...)
+    {
+        await _outboxRepo.SaveAsync(job, ct);
+        // ... attempt Phase 5 direct write if online ...
+        if (job.Status == OutboxJobStatus.Pending)
+        {
+            await _publisher.PublishAsync(new OutboxJobEnqueuedEvent(job.JobId), ct);
+        }
+    }
+}
+```
+
+### 19. Atomic Outbox Claiming & Zero Manual Dispatch Races
+```csharp
+// BAD: Manual FlushOutboxAsync runs concurrently with background worker reading same pending jobs
+await host.FlushOutboxAsync(); // Non-atomic dual-worker race condition
+
+// GOOD: OutboxDispatchHost is sole dispatcher; queries atomically claim due pending jobs
+var claimed = await _outboxRepo.ClaimDuePendingJobsAsync(batchSize, workerInstanceId, leaseDuration, ct);
+// All callers simply stage OutboxJob and let OutboxDispatchHost wake up via event
+```
+
+### 20. CQRS Query Integrity (No N+1, Permissive Fallbacks, or String Key Queries)
+```csharp
+// BAD: N+1 database queries, permissive fallback on empty results, and raw string comparison
+foreach (var ch in channels) {
+    var last = await db.ChatMessages.Where(m => m.ChannelId == ch.Id)...FirstOrDefaultAsync();
+}
+if (channels.Count == 0) {
+    // SECURITY BUG: queries all messages regardless of ownership fallback
+    return await db.ChatMessages...ToListAsync();
+}
+var match = relayEndpoint != null && ch.RelayEndpoint == relayEndpoint.ToString();
+
+// GOOD: Batch child queries in one round-trip, strict ownership boundary, normalized value objects
+var channelIds = channels.Select(c => c.Id).ToList();
+var latestMessages = await db.ChatMessages.AsNoTracking()
+    .Where(m => channelIds.Contains(m.ChannelId))
+    .GroupBy(m => m.ChannelId)
+    .Select(g => g.OrderByDescending(x => x.TimestampUnixMs).First())
+    .ToDictionaryAsync(m => m.ChannelId, ct);
+var match = relayEndpoint != null && RelayEndpoint.TryParse(ch.RelayEndpoint, out var ep) && ep == relayEndpoint;
+```
+
+### 21. Immediate Deletion of Synthetic UI Fallbacks
+```csharp
+// BAD: Retaining synthetic fallback channel IDs in UI service when wiring real CQRS query
+var channelId = summary?.ChannelId ?? ChannelId.New(); // Creates ghost channels
+
+// GOOD: Require valid channel from query service; fail fast or surface pending state cleanly
+var channelId = summary?.ChannelId ?? throw new InvalidOperationException($"No channel established for peer {peerId}.");
+```
+
+### 22. Deterministic Event-Driven Testing (Zero Masking Timers)
+```csharp
+// BAD: Short polling interval or Task.Delay masks missing event subscriptions in unit tests
+var options = new OutboxDispatchHostOptions { PollInterval = TimeSpan.FromMilliseconds(50) };
+await host.StartAsync();
+await Task.Delay(200); // Test passes because of polling timer even if event subscription failed!
+
+// GOOD: Disable polling loop; test event-driven wakeup deterministically with TCS / Semaphore
+var options = new OutboxDispatchHostOptions { PollInterval = Timeout.InfiniteTimeSpan };
+var processedTcs = new TaskCompletionSource<bool>();
+// Assert subscription triggers and finishes without reliance on timers
+await processedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+```
+
 ---
 
 ## Anti-Shortcut Pre-Flight Checklist
@@ -233,5 +333,12 @@ Before completing any task, ticket, or PR, verify:
 - [ ] **14. No Coordinator Backdoors**: No central coordinator dictionaries to side-channel state between nodes.
 - [ ] **15. Deterministic Awaiting**: Scenarios await explicit reactive signals, never `Task.Delay(N)`.
 - [ ] **16. Zero Captive Scope Facades**: Query services inject `IDbContextFactory<TDbContext>` directly; no `Desktop*QueryService` facades resolving concrete types via `IServiceScopeFactory`.
+- [ ] **17. No GlobalUsings Band-Aids**: Zero added `GlobalUsings.cs` shims; all moved types have explicit `using` statements.
+- [ ] **18. Pure Persistence Adapters**: Zero `IEventPublisher` in repositories; outbox/application events published from Application orchestrators.
+- [ ] **19. Atomic Outbox & Zero Manual Races**: Zero manual `FlushOutboxAsync`; `OutboxDispatchHost` owns dispatch and queries atomically claim jobs.
+- [ ] **20. CQRS Query Integrity**: No N+1 queries, zero fallback querying unowned tables, and Value Objects normalized before comparison.
+- [ ] **21. Zero Synthetic UI Fallbacks**: Zero `ChannelId.New()` or fabricated channel aggregates in UI state services.
+- [ ] **22. Deterministic Event Tests**: `PollInterval = Timeout.InfiniteTimeSpan` and zero `Task.Delay` when testing event-driven workers.
 - [ ] **Verification**: Run `dotnet run --project Percolator.Simulator\Percolator.Simulator.csproj -f net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator\Scenarios` (all pass).
 - [ ] **Regression**: Run all test projects (`dotnet test`) and verify 0 failures.
+
