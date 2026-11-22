@@ -76,8 +76,6 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
                             SignalCategory.ChatTranscriptChanged,
                             Details: host.PublicIdentityId.ToString()));
                     }
-
-                    await host.FlushOutboxAsync(ct).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

@@ -2,6 +2,7 @@ using Percolator.Domain.Channels.Events;
 using System.ComponentModel;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -16,6 +17,8 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
     public PublicIdentityId RemotePeerId { get; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset LastActivityUtc { get; private set; }
+    public DirectChannelStatus Status { get; private set; }
+    public RelayEndpoint? RelayEndpoint { get; private set; }
 
     private readonly List<ChannelPayload> _payloads = [];
     private readonly HashSet<PayloadId> _payloadIds = [];
@@ -25,20 +28,26 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         ChannelId id,
         PublicIdentityId ownerIdentityId,
         PublicIdentityId remotePeerId,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        DirectChannelStatus status = DirectChannelStatus.Active,
+        RelayEndpoint? relayEndpoint = null)
     {
         Id = id;
         OwnerIdentityId = ownerIdentityId;
         RemotePeerId = remotePeerId;
         CreatedAtUtc = createdAtUtc;
         LastActivityUtc = createdAtUtc;
+        Status = status;
+        RelayEndpoint = relayEndpoint;
     }
 
     public static DomainResult<DirectChannel> Create(
         ChannelId id,
         PublicIdentityId ownerIdentityId,
         PublicIdentityId remotePeerId,
-        IDateTimeProvider timeProvider)
+        IDateTimeProvider timeProvider,
+        DirectChannelStatus status = DirectChannelStatus.Active,
+        RelayEndpoint? relayEndpoint = null)
     {
         if (!id.IsValid)
         {
@@ -60,8 +69,20 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
             return DomainResult<DirectChannel>.Failure(new DomainError("SELF_CHANNEL_NOT_ALLOWED", "Owner cannot establish a direct channel with self."));
         }
 
-        var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, timeProvider.UtcNow);
+        var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, timeProvider.UtcNow, status, relayEndpoint);
         return DomainResult<DirectChannel>.Success(channel);
+    }
+
+    public DomainResult Activate(IDateTimeProvider timeProvider)
+    {
+        if (Status == DirectChannelStatus.Active)
+        {
+            return DomainResult.Success();
+        }
+
+        Status = DirectChannelStatus.Active;
+        LastActivityUtc = timeProvider.UtcNow;
+        return DomainResult.Success();
     }
 
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -71,14 +92,16 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         PublicIdentityId remotePeerId,
         DateTimeOffset createdAtUtc,
         DateTimeOffset lastActivityUtc,
-        IEnumerable<ChannelPayload>? payloads = null)
+        IEnumerable<ChannelPayload>? payloads = null,
+        DirectChannelStatus status = DirectChannelStatus.Active,
+        RelayEndpoint? relayEndpoint = null)
     {
         if (!id.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(id));
         if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
         if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
         if (ownerIdentityId == remotePeerId) throw new ArgumentException("Owner cannot establish a direct channel with self.", nameof(remotePeerId));
 
-        var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, createdAtUtc)
+        var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, createdAtUtc, status, relayEndpoint)
         {
             LastActivityUtc = lastActivityUtc
         };

@@ -264,7 +264,7 @@ internal sealed class SwarmSimulationCoordinator
                 var session = await ratchetRepo.GetSessionAsync(initiator.PublicIdentityId, r.PublicIdentityId, DeviceId.Primary, ct);
                 if (session != null)
                 {
-                    var channelId = ChannelIdUtility.DeterministicFor(initiator.PublicIdentityId, r.PublicIdentityId);
+                    var channelId = ChannelId.DeterministicForDirect(initiator.PublicIdentityId, r.PublicIdentityId);
                     var sourceRoot = RootDirectoryPath.Parse(presetsDir);
                     var sanitizedPath = SanitizedRelativePath.Parse(preset.RelativeFileName);
                     var initResult = await actionHandler.InitiateTransferAsync(
@@ -276,11 +276,7 @@ internal sealed class SwarmSimulationCoordinator
                         DirectWanPolicy.DisabledByDefault,
                         ct: ct);
 
-                    if (initResult.IsSuccess)
-                    {
-                        await initiator.FlushOutboxAsync(ct);
-                    }
-                    else
+                    if (!initResult.IsSuccess)
                     {
                         _logSink.Log(new SimulatorLogEntry(
                             DateTimeOffset.UtcNow,
@@ -417,11 +413,7 @@ internal sealed class SwarmSimulationCoordinator
             {
                 var destinationRoot = RootDirectoryPath.Parse(recipient.NodeDownloadsDirectory);
                 var acceptResult = await actionHandler.AcceptTransferAsync(transferSessionId, destinationRoot, ct: ct);
-                if (acceptResult.IsSuccess)
-                {
-                    await recipient.FlushOutboxAsync(ct);
-                }
-                else
+                if (!acceptResult.IsSuccess)
                 {
                     _logSink.Log(new SimulatorLogEntry(
                         DateTimeOffset.UtcNow,

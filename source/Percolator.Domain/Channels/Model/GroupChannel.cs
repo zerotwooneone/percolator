@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Percolator.Domain.Channels.Events;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -17,6 +18,7 @@ public sealed class GroupChannel : AggregateRoot<ChannelId>
     public EpochNumber CurrentEpoch { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset LastActivityUtc { get; private set; }
+    public RelayEndpoint? RelayEndpoint { get; private set; }
 
     private readonly List<ChannelMember> _members = [];
     private readonly Dictionary<PublicIdentityId, ChannelMember> _membersById = [];
@@ -30,27 +32,30 @@ public sealed class GroupChannel : AggregateRoot<ChannelId>
         ChannelId id,
         string name,
         EpochNumber initialEpoch,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        RelayEndpoint? relayEndpoint = null)
     {
         Id = id;
         Name = name;
         CurrentEpoch = initialEpoch;
         CreatedAtUtc = createdAtUtc;
         LastActivityUtc = createdAtUtc;
+        RelayEndpoint = relayEndpoint;
     }
 
     public static DomainResult<GroupChannel> CreateGenesis(
         ChannelId id,
         PublicIdentityId creatorId,
         string name,
-        IDateTimeProvider timeProvider)
+        IDateTimeProvider timeProvider,
+        RelayEndpoint? relayEndpoint = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return DomainResult<GroupChannel>.Failure(new DomainError("INVALID_NAME", "Channel name cannot be empty."));
         }
 
-        var group = new GroupChannel(id, name, EpochNumber.Genesis, timeProvider.UtcNow);
+        var group = new GroupChannel(id, name, EpochNumber.Genesis, timeProvider.UtcNow, relayEndpoint);
         var creatorMember = new ChannelMember(creatorId, ChannelRole.Admin, timeProvider.UtcNow);
         group._members.Add(creatorMember);
         group._membersById[creatorId] = creatorMember;
@@ -66,13 +71,14 @@ public sealed class GroupChannel : AggregateRoot<ChannelId>
         DateTimeOffset createdAtUtc,
         DateTimeOffset lastActivityUtc,
         IEnumerable<ChannelMember> members,
-        IEnumerable<ChannelPayload>? payloads = null)
+        IEnumerable<ChannelPayload>? payloads = null,
+        RelayEndpoint? relayEndpoint = null)
     {
         if (!id.IsValid) throw new ArgumentException("ChannelId cannot be empty.", nameof(id));
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Group name cannot be null or whitespace.", nameof(name));
         ArgumentNullException.ThrowIfNull(members);
 
-        var channel = new GroupChannel(id, name, epoch, createdAtUtc)
+        var channel = new GroupChannel(id, name, epoch, createdAtUtc, relayEndpoint)
         {
             LastActivityUtc = lastActivityUtc
         };

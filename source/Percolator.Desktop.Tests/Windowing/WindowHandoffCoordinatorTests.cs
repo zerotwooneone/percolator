@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Application.Session;
 using Percolator.Application.Session.Ports;
 using Percolator.Desktop.Common.Services;

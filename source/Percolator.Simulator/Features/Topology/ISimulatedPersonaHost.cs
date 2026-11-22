@@ -57,7 +57,6 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
     Task AssignHomeRelayAsync(ISimulatedRelayHost relay, CancellationToken ct = default);
 
     PreKeyBundle CreatePreKeyBundle(uint? oneTimeKeyId = null);
-    Task<DomainResult> FlushOutboxAsync(CancellationToken ct = default);
     Task<int> DrainMailboxAsync(CancellationToken ct = default);
     ValueTask<DomainResult> IngestGroupBroadcastAsync(byte[] framedPayload, CancellationToken ct = default);
 

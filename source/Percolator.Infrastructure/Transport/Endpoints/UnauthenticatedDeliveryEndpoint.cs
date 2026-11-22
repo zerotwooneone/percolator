@@ -1,5 +1,6 @@
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
+using Percolator.Application.Session.Ports;
 
 namespace Percolator.Infrastructure.Transport.Endpoints;
 
@@ -29,7 +30,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
     private readonly IIngressFilterService? _ingressFilter;
     private readonly ISealedEnvelopeUnwrapper? _unwrapper;
     private readonly IInboundIngressPipeline? _ingressPipeline;
-    private readonly PublicIdentityId? _localRecipientId;
+    private readonly IActiveIdentitySet? _activeIdentities;
 
     /// <summary>
     /// Primary constructor for persona hosts supporting direct delivery and relay endpoints.
@@ -42,7 +43,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         IIngressFilterService ingressFilter,
         ISealedEnvelopeUnwrapper unwrapper,
         IInboundIngressPipeline ingressPipeline,
-        PublicIdentityId? localRecipientId = null)
+        IActiveIdentitySet activeIdentities)
     {
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
@@ -51,7 +52,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         _ingressFilter = ingressFilter ?? throw new ArgumentNullException(nameof(ingressFilter));
         _unwrapper = unwrapper ?? throw new ArgumentNullException(nameof(unwrapper));
         _ingressPipeline = ingressPipeline ?? throw new ArgumentNullException(nameof(ingressPipeline));
-        _localRecipientId = localRecipientId;
+        _activeIdentities = activeIdentities ?? throw new ArgumentNullException(nameof(activeIdentities));
     }
 
     /// <summary>
@@ -77,7 +78,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         _ingressFilter = null;
         _unwrapper = null;
         _ingressPipeline = null;
-        _localRecipientId = null;
+        _activeIdentities = null;
     }
 
     public override async Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
@@ -91,7 +92,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             };
         }
 
-        if (_localRecipientId is not { } localRecipientId || _unwrapper == null || _ingressPipeline == null)
+        if (_unwrapper == null || _ingressPipeline == null || _activeIdentities == null)
         {
             return new DeliveryAckProto
             {
@@ -100,18 +101,37 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
             };
         }
 
-        var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory, localRecipientId);
-
-        if (!unwrapResult.IsSuccess)
+        var activeIdentities = _activeIdentities.Current;
+        if (activeIdentities.Count == 0)
         {
             return new DeliveryAckProto
             {
                 Success = false,
-                ErrorMessage = unwrapResult.Error!.Description
+                ErrorMessage = "No active local identities to receive direct delivery."
             };
         }
 
-        var envelope = unwrapResult.Value!;
+        InboundEnvelope? envelope = null;
+        DomainError? lastError = null;
+        foreach (var candidateId in activeIdentities)
+        {
+            var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory, candidateId);
+            if (unwrapResult.IsSuccess)
+            {
+                envelope = unwrapResult.Value;
+                break;
+            }
+            lastError = unwrapResult.Error;
+        }
+
+        if (envelope == null)
+        {
+            return new DeliveryAckProto
+            {
+                Success = false,
+                ErrorMessage = "Failed to unwrap direct delivery package."
+            };
+        }
         if (_ingressFilter != null)
         {
             var filterResult = await _ingressFilter.CheckIngressAllowedAsync(

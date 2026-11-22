@@ -232,6 +232,7 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("chat_channels");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.RelayEndpoint).HasMaxLength(256);
             entity.HasIndex(e => e.LastActivityUtc)
                 .HasDatabaseName("ix_chat_channel_activity");
             entity.HasIndex(e => new { e.Type, e.OwnerIdentityId, e.RemotePeerId })

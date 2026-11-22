@@ -47,6 +47,8 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
                 await _dbContext.Database.ExecuteSqlRawAsync(idempotent, ct);
             }
 
+            await ApplyPreKeySchemaUpgradesAsync(ct);
+
             return DomainResult.Success();
         }
         catch (Exception ex)
@@ -57,47 +59,73 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
 
     private async Task ApplyPreKeySchemaUpgradesAsync(CancellationToken ct)
     {
-        // relay_prekeys gains the publisher-assigned signed-prekey id used by
-        // GetPreKeyStatus/FetchPreKeyBundle reporting.
-        var relaySpkColumn = await _dbContext.Database
-            .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info('relay_prekeys') WHERE name='SignedPreKeyId'")
-            .FirstAsync(ct);
-        if (relaySpkColumn == 0)
+        var conn = _dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
         {
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "ALTER TABLE relay_prekeys ADD COLUMN SignedPreKeyId INTEGER NOT NULL DEFAULT 1;", ct);
+            await conn.OpenAsync(ct);
         }
 
-        // vault_signed_prekeys keeps multiple SPK generations — the legacy
-        // (OwnerIdentityId, DeviceId) PK permits only one row per device, so the
-        // table is rebuilt with KeyId in the PK when the column is absent.
-        var spkKeyColumn = await _dbContext.Database
-            .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info('vault_signed_prekeys') WHERE name='KeyId'")
-            .FirstAsync(ct);
-        var spkTable = await _dbContext.Database
-            .SqlQuery<int>($"SELECT COUNT(*) AS Value FROM sqlite_master WHERE type='table' AND name='vault_signed_prekeys'")
-            .FirstAsync(ct);
-        if (spkTable != 0 && spkKeyColumn == 0)
+        await using var cmd = conn.CreateCommand();
+
+        // 1. Check relay_prekeys SignedPreKeyId
+        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='relay_prekeys';";
+        var relayTableCount = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        if (relayTableCount > 0)
         {
-            await _dbContext.Database.ExecuteSqlRawAsync("""
-                CREATE TABLE "vault_signed_prekeys_new" (
-                    "OwnerIdentityId" TEXT NOT NULL,
-                    "DeviceId" INTEGER NOT NULL,
-                    "KeyId" INTEGER NOT NULL,
-                    "PrivateKey" BLOB NOT NULL,
-                    "PublicKey" BLOB NOT NULL,
-                    "Signature" BLOB NOT NULL,
-                    "IsCurrent" INTEGER NOT NULL,
-                    "CreatedAtUtc" TEXT NOT NULL,
-                    CONSTRAINT "PK_vault_signed_prekeys" PRIMARY KEY("OwnerIdentityId", "DeviceId", "KeyId"),
-                    CONSTRAINT "FK_vault_signed_prekeys_vault_identity_keys_OwnerIdentityId"
-                        FOREIGN KEY("OwnerIdentityId") REFERENCES "vault_identity_keys"("Id") ON DELETE CASCADE
-                );
-                INSERT INTO "vault_signed_prekeys_new" ("OwnerIdentityId","DeviceId","KeyId","PrivateKey","PublicKey","Signature","IsCurrent","CreatedAtUtc")
-                    SELECT "OwnerIdentityId","DeviceId",1,"PrivateKey","PublicKey","Signature",1,"CreatedAtUtc" FROM "vault_signed_prekeys";
-                DROP TABLE "vault_signed_prekeys";
-                ALTER TABLE "vault_signed_prekeys_new" RENAME TO "vault_signed_prekeys";
-                """, ct);
+            cmd.CommandText = "PRAGMA table_info('relay_prekeys');";
+            var relayCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    relayCols.Add(reader.GetString(1));
+                }
+            }
+
+            if (!relayCols.Contains("SignedPreKeyId"))
+            {
+                await _dbContext.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE relay_prekeys ADD COLUMN SignedPreKeyId INTEGER NOT NULL DEFAULT 1;", ct);
+            }
+        }
+
+        // 2. Check vault_signed_prekeys KeyId
+        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='vault_signed_prekeys';";
+        var spkTableCount = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        if (spkTableCount > 0)
+        {
+            cmd.CommandText = "PRAGMA table_info('vault_signed_prekeys');";
+            var spkCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    spkCols.Add(reader.GetString(1));
+                }
+            }
+
+            if (!spkCols.Contains("KeyId"))
+            {
+                await _dbContext.Database.ExecuteSqlRawAsync("""
+                    CREATE TABLE "vault_signed_prekeys_new" (
+                        "OwnerIdentityId" TEXT NOT NULL,
+                        "DeviceId" INTEGER NOT NULL,
+                        "KeyId" INTEGER NOT NULL,
+                        "PrivateKey" BLOB NOT NULL,
+                        "PublicKey" BLOB NOT NULL,
+                        "Signature" BLOB NOT NULL,
+                        "IsCurrent" INTEGER NOT NULL,
+                        "CreatedAtUtc" TEXT NOT NULL,
+                        CONSTRAINT "PK_vault_signed_prekeys" PRIMARY KEY("OwnerIdentityId", "DeviceId", "KeyId"),
+                        CONSTRAINT "FK_vault_signed_prekeys_vault_identity_keys_OwnerIdentityId"
+                            FOREIGN KEY("OwnerIdentityId") REFERENCES "vault_identity_keys"("Id") ON DELETE CASCADE
+                    );
+                    INSERT INTO "vault_signed_prekeys_new" ("OwnerIdentityId","DeviceId","KeyId","PrivateKey","PublicKey","Signature","IsCurrent","CreatedAtUtc")
+                        SELECT "OwnerIdentityId","DeviceId",1,"PrivateKey","PublicKey","Signature",1,"CreatedAtUtc" FROM "vault_signed_prekeys";
+                    DROP TABLE "vault_signed_prekeys";
+                    ALTER TABLE "vault_signed_prekeys_new" RENAME TO "vault_signed_prekeys";
+                    """, ct);
+            }
         }
     }
 }

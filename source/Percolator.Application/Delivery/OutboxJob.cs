@@ -65,7 +65,6 @@ public sealed class OutboxJob : AggregateRoot<Guid>
             timeProvider.UtcNow,
             maxAttempts);
 
-        job.AddDomainEvent(new OutboxJobEnqueuedEvent(job.Id, ownerIdentityId, timeProvider.UtcNow));
         return DomainResult<OutboxJob>.Success(job);
     }
 

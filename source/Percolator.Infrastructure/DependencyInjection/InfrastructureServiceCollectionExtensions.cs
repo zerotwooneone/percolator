@@ -23,6 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;
@@ -292,6 +293,7 @@ public static class InfrastructureServiceCollectionExtensions
         });
         services.AddScoped<IHandshakeService, HandshakeService>();
         services.AddScoped<IInboundIngressPipeline, InboundIngressPipeline>();
+        services.AddScoped<OutboxWorker>();
         services.AddScoped<MailboxDrainService>();
 
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
@@ -306,6 +308,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService(sp => new RelayGroupStreamWorker(
             sp.GetService<Func<CancellationToken, Task>>() ?? (async ct => await Task.Delay(Timeout.InfiniteTimeSpan, ct)),
             sp.GetRequiredService<RelayGroupStreamWorkerOptions>()));
+
+        // Outbox reactive pump
+        services.AddSingleton<OutboxDispatchHostOptions>();
+        services.AddHostedService<OutboxDispatchHost>();
 
         return services;
     }

@@ -334,14 +334,6 @@ internal sealed class RelayProvisioningCoordinator
                 }
             }
 
-            // 6. Flush initiator outbox -> dispatches envelope to Relay's UnauthenticatedDeliveryEndpoint.EnqueueMailbox
-            var flushResult = await initiator.FlushOutboxAsync(ct);
-            if (!flushResult.IsSuccess)
-            {
-                _toastService.ShowToast("Outbox Failed", flushResult.Error.Description, ToastSeverity.Warning);
-                return false;
-            }
-
             _logSink.Log(new SimulatorLogEntry(
                 DateTimeOffset.UtcNow,
                 LogLevel.Information,

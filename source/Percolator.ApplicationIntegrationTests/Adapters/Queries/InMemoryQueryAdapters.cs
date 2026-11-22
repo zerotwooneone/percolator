@@ -103,11 +103,16 @@ public sealed class InMemoryConversationListQueryService : IConversationListQuer
 
             summaries.Add(new ConversationSummaryReadModel(
                 channel.Id,
+                ConversationChannelKind.Direct,
+                peerId,
                 title,
                 lastMsg?.Content ?? string.Empty,
                 lastMsg?.TimestampUnixMs ?? (ulong)channel.CreatedAtUtc.ToUnixTimeMilliseconds(),
                 unreadCount,
-                lastMsg?.AuthorId));
+                lastMsg?.AuthorId,
+                channel.Status == Percolator.Domain.Channels.Model.DirectChannelStatus.PendingAcceptance,
+                channel.RelayEndpoint?.ToString(),
+                RelayIdentityId: null));
         }
 
         foreach (var group in _channelRepo.AllGroup)
@@ -126,14 +131,19 @@ public sealed class InMemoryConversationListQueryService : IConversationListQuer
 
             summaries.Add(new ConversationSummaryReadModel(
                 group.Id,
+                ConversationChannelKind.Group,
+                RemotePeerId: null,
                 group.Name,
                 lastMsg?.Content ?? string.Empty,
                 lastMsg?.TimestampUnixMs ?? (ulong)group.CreatedAtUtc.ToUnixTimeMilliseconds(),
                 unreadCount,
-                lastMsg?.AuthorId));
+                lastMsg?.AuthorId,
+                IsPendingAcceptance: false,
+                group.RelayEndpoint?.ToString(),
+                RelayIdentityId: null));
         }
 
-        return summaries.OrderByDescending(s => s.LastMessageTimestampUnixMs).ToList();
+        return summaries.OrderByDescending(s => s.LastActivityTimestampUnixMs).ToList();
     }
 }
 

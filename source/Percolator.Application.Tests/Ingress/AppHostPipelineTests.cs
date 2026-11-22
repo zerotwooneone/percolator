@@ -73,7 +73,8 @@ public sealed class AppHostPipelineTests
             _outboxRepo,
             _cryptoEngine,
             _timeProvider,
-            _appRouter);
+            _appRouter,
+            new FakeEventPublisher());
 
         _groupKeyDistributionService = new GroupKeyDistributionService(
             _senderKeyRepo,

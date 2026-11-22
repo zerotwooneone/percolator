@@ -1,4 +1,4 @@
-using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Domain.Identities;
 
 namespace Percolator.Application.Session.Events;

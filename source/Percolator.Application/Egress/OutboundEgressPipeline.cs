@@ -1,6 +1,8 @@
 using Percolator.Application.Delivery;
+using Percolator.Application.Delivery.Events;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -20,6 +22,7 @@ public sealed class OutboundEgressPipeline : IPayloadSender
     private readonly IStreamRegistry _streamRegistry;
     private readonly IDateTimeProvider _timeProvider;
     private readonly IChannelLockService _channelLockService;
+    private readonly IEventPublisher _eventPublisher;
 
     public OutboundEgressPipeline(
         IRatchetSessionRepository sessionRepo,
@@ -29,7 +32,8 @@ public sealed class OutboundEgressPipeline : IPayloadSender
         IOutboxRepository outboxRepo,
         IStreamRegistry streamRegistry,
         IDateTimeProvider timeProvider,
-        IChannelLockService channelLockService)
+        IChannelLockService channelLockService,
+        IEventPublisher eventPublisher)
     {
         _sessionRepo = sessionRepo ?? throw new ArgumentNullException(nameof(sessionRepo));
         _groupSenderKeyRepo = groupSenderKeyRepo ?? throw new ArgumentNullException(nameof(groupSenderKeyRepo));
@@ -39,6 +43,7 @@ public sealed class OutboundEgressPipeline : IPayloadSender
         _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _channelLockService = channelLockService ?? throw new ArgumentNullException(nameof(channelLockService));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
     }
 
     public async ValueTask<DomainResult> SendPayloadAsync(OutboundPayloadContext context, CancellationToken ct = default)
@@ -189,6 +194,12 @@ public sealed class OutboundEgressPipeline : IPayloadSender
                 job.RecordFailure(nextAttempt);
                 await _outboxRepo.SaveAsync(job, ct);
             }
+        }
+
+        if (job.Status == OutboxStatus.Pending)
+        {
+            await _eventPublisher.PublishAsync(
+                new OutboxJobEnqueuedEvent(job.Id, job.OwnerIdentityId, _timeProvider.UtcNow), ct);
         }
 
         return DomainResult.Success();

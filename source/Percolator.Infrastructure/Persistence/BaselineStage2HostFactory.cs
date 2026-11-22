@@ -1,6 +1,7 @@
 using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Infrastructure.Persistence;

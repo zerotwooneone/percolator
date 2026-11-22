@@ -1,5 +1,5 @@
 using Percolator.Application.Delivery.Events;
-using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 
 namespace Percolator.Infrastructure.Maintenance;
 

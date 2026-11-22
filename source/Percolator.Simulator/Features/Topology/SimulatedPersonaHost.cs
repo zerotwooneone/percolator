@@ -77,7 +77,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly ReactiveProperty<bool> _isListening = new(true);
     private readonly SemaphoreSlim _listeningGate = new(1, 1);
     private readonly SemaphoreSlim _drainGate = new(1, 1);
-    private readonly SemaphoreSlim _outboxGate = new(1, 1);
     private readonly string _nodeTempDirectory;
     private readonly EphemeralPrivateKey _identityPrivateKey;
     private readonly EphemeralPrivateKey _signedPreKeyPrivate;
@@ -282,27 +281,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                     _chaosController,
                     Id,
                     _logSink));
-            services.AddScoped<OutboxWorker>();
-            // 6. Direct Ingress for Kestrel Transport
-            // DRAIN-04: ISealedEnvelopeUnwrapper is shared (AddTransportInfrastructure,
-            // recipient-parameterized). Registering PublicIdentityId? supplies
-            // UnauthenticatedDeliveryEndpoint.localRecipientId for DeliverDirect ingress.
-            services.AddScoped(typeof(PublicIdentityId?), _ => PublicIdentityId);
-            services.AddScoped<IIngressFilterService, IngressFilterService>();
-            services.AddScoped<IInboundIngressPipeline>(sp =>
-            {
-                var inner = new InboundIngressPipeline(
-                    sp.GetRequiredService<IIngressFilterService>(),
-                    sp.GetRequiredService<IRatchetSessionRepository>(),
-                    sp.GetRequiredService<IGroupReceiverSessionRepository>(),
-                    sp.GetRequiredService<IHandshakeService>(),
-                    sp.GetRequiredService<ICryptoEngine>(),
-                    sp.GetRequiredService<IAppRouter>(),
-                    sp.GetRequiredService<IChannelLockService>(),
-                    sp.GetRequiredService<IGroupKeyDistributionService>());
-                var outboxWorker = sp.GetRequiredService<OutboxWorker>();
-                return new SimulatorOutboxFlushingIngressPipelineDecorator(inner, outboxWorker, _logSink, DisplayName);
-            });
         });
         _host = builder.Build();
         // 1. Create SQLite tables and seed identity/prekey stores BEFORE starting background hosted services
@@ -569,36 +547,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             OneTimePreKey: null,
             OneTimePreKeyId: 0);
     }
-    public async Task<DomainResult> FlushOutboxAsync(CancellationToken ct = default)
-    {
-        if (_host is null)
-        {
-            return DomainResult.Failure(new DomainError("HOST_NOT_STARTED", "Persona host is not started."));
-        }
-        await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            using var scope = _host.Services.CreateScope();
-        var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
-        await outboxWorker.ProcessBatchAsync(50, ct);
-        var outboxQuery = scope.ServiceProvider.GetRequiredService<IOutboxQueryService>();
-        var ownerJobs = await outboxQuery.GetJobsForOwnerAsync(PublicIdentityId, ct);
-        var failedOrRetrying = ownerJobs.FirstOrDefault(j =>
-            j.Status == OutboxStatus.Failed ||
-            (j.Status == OutboxStatus.Pending && j.RetryCount > 0));
-        if (failedOrRetrying != null)
-        {
-            return DomainResult.Failure(new DomainError(
-                "OUTBOX_DELIVERY_FAILED",
-                $"Outbox delivery to peer failed (Status: {failedOrRetrying.Status}, Retries: {failedOrRetrying.RetryCount}). Check Log Dock for details."));
-        }
-            return DomainResult.Success();
-        }
-        finally
-        {
-            try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
-        }
-    }
     public async Task<int> DrainMailboxAsync(CancellationToken ct = default)
     {
         if (!_isListening.CurrentValue || HomeRelay == null || _host == null || _disposed)
@@ -660,16 +608,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 await Task.Delay(25, ct).ConfigureAwait(false);
             }
 
-            await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
-                await outboxWorker.ProcessBatchAsync(50, ct);
-            }
-            finally
-            {
-                try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
-            }
             _stateBus.Publish(new SimulatorStateSignal(
                 Id,
                 SignalCategory.ChatTranscriptChanged,
@@ -748,16 +686,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 "GroupIngress",
                 $"Group broadcast ingress failed: {ingressResult.Error.Code} - {ingressResult.Error.Description}"));
             return DomainResult.Failure(ingressResult.Error);
-        }
-        await _outboxGate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var outboxWorker = scope.ServiceProvider.GetRequiredService<OutboxWorker>();
-            await outboxWorker.ProcessBatchAsync(50, ct);
-        }
-        finally
-        {
-            try { _outboxGate.Release(); } catch (ObjectDisposedException) { }
         }
         return DomainResult.Success();
     }
@@ -874,7 +802,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         _host?.Dispose();
         _listeningGate.Dispose();
         _drainGate.Dispose();
-        _outboxGate.Dispose();
         _masterKeyHandle.Dispose();
         _isListening.Dispose();
         _identityPrivateKey.Dispose();

@@ -61,7 +61,7 @@ internal sealed class RichChatActionCoordinator
 
         try
         {
-            var channelId = ChannelIdUtility.DeterministicFor(actor.PublicIdentityId, peer.PublicIdentityId);
+            var channelId = ChannelId.DeterministicForDirect(actor.PublicIdentityId, peer.PublicIdentityId);
             using var scope = actor.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
@@ -99,13 +99,6 @@ internal sealed class RichChatActionCoordinator
                 SignalCategory.ChatTranscriptChanged,
                 Details: peer.PublicIdentityId.ToString(),
                 Payload: new ChatTranscriptSignalPayload(peer.PublicIdentityId)));
-
-            var flushResult = await actor.FlushOutboxAsync(ct);
-            if (!flushResult.IsSuccess)
-            {
-                _toastService.ShowToast("Reaction Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
-                return false;
-            }
 
             if (route == DeliveryRoute.RelayedOneToOne && peer.HomeRelay != null)
             {
@@ -153,7 +146,7 @@ internal sealed class RichChatActionCoordinator
 
         try
         {
-            var channelId = ChannelIdUtility.DeterministicFor(author.PublicIdentityId, peer.PublicIdentityId);
+            var channelId = ChannelId.DeterministicForDirect(author.PublicIdentityId, peer.PublicIdentityId);
             using var scope = author.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
@@ -191,13 +184,6 @@ internal sealed class RichChatActionCoordinator
                 SignalCategory.ChatTranscriptChanged,
                 Details: peer.PublicIdentityId.ToString(),
                 Payload: new ChatTranscriptSignalPayload(peer.PublicIdentityId)));
-
-            var flushResult = await author.FlushOutboxAsync(ct);
-            if (!flushResult.IsSuccess)
-            {
-                _toastService.ShowToast("Edit Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
-                return false;
-            }
 
             if (route == DeliveryRoute.RelayedOneToOne && peer.HomeRelay != null)
             {
@@ -242,7 +228,7 @@ internal sealed class RichChatActionCoordinator
 
         try
         {
-            var channelId = ChannelIdUtility.DeterministicFor(requestedBy.PublicIdentityId, peer.PublicIdentityId);
+            var channelId = ChannelId.DeterministicForDirect(requestedBy.PublicIdentityId, peer.PublicIdentityId);
             using var scope = requestedBy.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
@@ -279,13 +265,6 @@ internal sealed class RichChatActionCoordinator
                 SignalCategory.ChatTranscriptChanged,
                 Details: peer.PublicIdentityId.ToString(),
                 Payload: new ChatTranscriptSignalPayload(peer.PublicIdentityId)));
-
-            var flushResult = await requestedBy.FlushOutboxAsync(ct);
-            if (!flushResult.IsSuccess)
-            {
-                _toastService.ShowToast("Delete Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
-                return false;
-            }
 
             if (route == DeliveryRoute.RelayedOneToOne && peer.HomeRelay != null)
             {

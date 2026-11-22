@@ -1,9 +1,11 @@
 using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Delivery.Events;
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
+using Percolator.PluginSdk.Events;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Model;
@@ -32,6 +34,7 @@ public sealed class HandshakeService : IHandshakeService
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IDateTimeProvider _timeProvider;
     private readonly IAppRouter _appRouter;
+    private readonly IEventPublisher _eventPublisher;
     private readonly ISessionWirePacker? _wirePacker;
     private readonly IRoutingCoordinator? _routingCoordinator;
 
@@ -47,6 +50,7 @@ public sealed class HandshakeService : IHandshakeService
         ICryptoEngine cryptoEngine,
         IDateTimeProvider timeProvider,
         IAppRouter appRouter,
+        IEventPublisher eventPublisher,
         ISessionWirePacker? wirePacker = null,
         IRoutingCoordinator? routingCoordinator = null)
     {
@@ -61,6 +65,7 @@ public sealed class HandshakeService : IHandshakeService
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _appRouter = appRouter ?? throw new ArgumentNullException(nameof(appRouter));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
         _wirePacker = wirePacker;
         _routingCoordinator = routingCoordinator;
     }
@@ -194,6 +199,8 @@ public sealed class HandshakeService : IHandshakeService
         if (jobResult.IsSuccess)
         {
             await _outboxRepo.SaveAsync(jobResult.Value!, ct);
+            await _eventPublisher.PublishAsync(
+                new OutboxJobEnqueuedEvent(jobResult.Value!.Id, ownerId, _timeProvider.UtcNow), ct);
         }
 
         return DomainResult<DirectRatchetSession>.Success(session);

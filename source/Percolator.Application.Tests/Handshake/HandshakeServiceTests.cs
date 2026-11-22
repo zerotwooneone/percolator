@@ -27,6 +27,7 @@ public sealed class HandshakeServiceTests
     private ApplicationTestCryptoEngine _cryptoEngine = null!;
     private TestDateTimeProvider _timeProvider = null!;
     private AppRouter _appRouter = null!;
+    private FakeEventPublisher _eventPublisher = null!;
     private HandshakeService _handshakeService = null!;
 
     private PublicIdentityId _aliceId;
@@ -52,6 +53,7 @@ public sealed class HandshakeServiceTests
         _outboxRepo = new InMemoryOutboxRepository();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _appRouter = new AppRouter();
+        _eventPublisher = new FakeEventPublisher();
 
         _handshakeService = new HandshakeService(
             _identityKeyStore,
@@ -64,7 +66,8 @@ public sealed class HandshakeServiceTests
             _outboxRepo,
             _cryptoEngine,
             _timeProvider,
-            _appRouter);
+            _appRouter,
+            _eventPublisher);
 
         _aliceId = PublicIdentityId.New();
         _aliceDeviceId = DeviceId.Primary;

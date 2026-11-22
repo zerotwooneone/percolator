@@ -1,5 +1,8 @@
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
+using Percolator.Application.Session;
+using Percolator.Application.Session.Ports;
+using Percolator.Infrastructure.Tests.Maintenance;
 
 namespace Percolator.Infrastructure.Tests.Transport.Endpoints;
 
@@ -128,6 +131,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
     private sealed class MockEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
     {
         public InboundEnvelope? ReturnEnvelope { get; set; }
+        public Func<Domain.Identities.PublicIdentityId, DomainResult<InboundEnvelope>>? UnwrapDirectHandler { get; set; }
 
         public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, Domain.Identities.PublicIdentityId recipientId)
         {
@@ -141,6 +145,11 @@ public sealed class UnauthenticatedDeliveryEndpointTests
 
         public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes, Domain.Identities.PublicIdentityId recipientId)
         {
+            if (UnwrapDirectHandler != null)
+            {
+                return UnwrapDirectHandler(recipientId);
+            }
+
             if (ReturnEnvelope != null)
             {
                 return DomainResult<InboundEnvelope>.Success(ReturnEnvelope);
@@ -192,6 +201,16 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         ack.ErrorMessage.Should().Be("Direct delivery is not supported on this endpoint.");
     }
 
+    private static IActiveIdentitySet CreateActiveIdentitySet(Domain.Identities.PublicIdentityId? identity = null)
+    {
+        var set = new ActiveIdentitySet(new FakeEventPublisher(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ActiveIdentitySet>.Instance);
+        if (identity.HasValue)
+        {
+            set.Add(identity.Value);
+        }
+        return set;
+    }
+
     [Test]
     public async Task DeliverDirect_ValidFramedEnvelope_InvokesIngressPipelineAndReturnsSuccess()
     {
@@ -206,7 +225,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             ingressFilter: filter,
             unwrapper: unwrapper,
             ingressPipeline: pipeline,
-            localRecipientId: Domain.Identities.PublicIdentityId.New());
+            activeIdentities: CreateActiveIdentitySet(Domain.Identities.PublicIdentityId.New()));
 
         var expectedEnvelope = new InboundGroupEnvelope(
             ChannelId.New(),
@@ -250,7 +269,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             ingressFilter: filter,
             unwrapper: unwrapper,
             ingressPipeline: pipeline,
-            localRecipientId: Domain.Identities.PublicIdentityId.New());
+            activeIdentities: CreateActiveIdentitySet(Domain.Identities.PublicIdentityId.New()));
 
         unwrapper.ReturnEnvelope = new InboundGroupEnvelope(
             ChannelId.New(),
@@ -290,7 +309,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             ingressFilter: new MockIngressFilterService(),
             unwrapper: unwrapper,
             ingressPipeline: pipeline,
-            localRecipientId: Domain.Identities.PublicIdentityId.New());
+            activeIdentities: CreateActiveIdentitySet(Domain.Identities.PublicIdentityId.New()));
 
         unwrapper.ReturnEnvelope = new InboundGroupEnvelope(
             ChannelId.New(),
@@ -326,7 +345,7 @@ public sealed class UnauthenticatedDeliveryEndpointTests
             ingressFilter: new MockIngressFilterService(),
             unwrapper: unwrapper,
             ingressPipeline: pipeline,
-            localRecipientId: Domain.Identities.PublicIdentityId.New());
+            activeIdentities: CreateActiveIdentitySet(Domain.Identities.PublicIdentityId.New()));
 
         var request = new SealedEnvelopeProto
         {
@@ -336,8 +355,57 @@ public sealed class UnauthenticatedDeliveryEndpointTests
         var ack = await endpoint.DeliverDirect(request, new TestServerCallContext());
 
         ack.Success.Should().BeFalse();
-        ack.ErrorMessage.Should().Be("Failed to unwrap sealed frame.");
+        ack.ErrorMessage.Should().Be("Failed to unwrap direct delivery package.");
         pipeline.LastProcessedEnvelope.Should().BeNull();
+    }
+
+    [Test]
+    public async Task DeliverDirect_MultipleActiveIdentities_FallsBackToMatchingIdentity()
+    {
+        var id1 = Domain.Identities.PublicIdentityId.New();
+        var id2 = Domain.Identities.PublicIdentityId.New();
+
+        var activeSet = CreateActiveIdentitySet();
+        activeSet.Add(id1);
+        activeSet.Add(id2);
+
+        var expectedEnvelope = new InboundDirectEnvelope(
+            Domain.Channels.ValueObjects.ChannelId.New(),
+            id2,
+            Domain.Identities.PublicIdentityId.New(),
+            DeviceId.Primary,
+            new Domain.Security.ValueObjects.RatchetHeader(Domain.Identities.ValueObjects.DhPublicKey.FromSpan(new byte[32]), 0, 0),
+            new byte[] { 1, 2, 3 },
+            DateTimeOffset.UtcNow);
+
+        var unwrapper = new MockEnvelopeUnwrapper
+        {
+            UnwrapDirectHandler = candidate =>
+                candidate == id2
+                    ? DomainResult<InboundEnvelope>.Success(expectedEnvelope)
+                    : DomainResult<InboundEnvelope>.Failure(new DomainError("UNWRAP_FAIL", "Failed for id1"))
+        };
+
+        var pipeline = new MockIngressPipeline();
+        var endpoint = new UnauthenticatedDeliveryEndpoint(
+            _profileRepo,
+            _preKeyRepo,
+            _chunkStore,
+            _capabilityStore,
+            ingressFilter: new MockIngressFilterService(),
+            unwrapper: unwrapper,
+            ingressPipeline: pipeline,
+            activeIdentities: activeSet);
+
+        var request = new SealedEnvelopeProto
+        {
+            EncryptedPackage = ByteString.CopyFrom(new byte[] { 0x53, 1, 2, 3 })
+        };
+
+        var ack = await endpoint.DeliverDirect(request, new TestServerCallContext());
+
+        ack.Success.Should().BeTrue();
+        pipeline.LastProcessedEnvelope.Should().Be(expectedEnvelope);
     }
 
     [Test]

@@ -33,6 +33,22 @@ public sealed class InMemoryOutboxRepository : IOutboxRepository
         return Task.FromResult(result);
     }
 
+    public Task<IReadOnlyList<OutboxJob>> ClaimDuePendingJobsAsync(int batchSize, string workerInstanceId, TimeSpan leaseDuration, CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var due = _jobs.Values
+            .Where(j => j.Status == OutboxStatus.Pending && j.NextAttemptAtUtc <= now)
+            .Take(batchSize)
+            .ToList();
+
+        foreach (var job in due)
+        {
+            job.MarkInFlight();
+        }
+
+        return Task.FromResult<IReadOnlyList<OutboxJob>>(due);
+    }
+
     public Task SaveAsync(OutboxJob job, CancellationToken ct = default)
     {
         _jobs[job.Id] = job;

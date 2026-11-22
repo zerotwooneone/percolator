@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
+using Percolator.Application.Session.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -105,6 +106,16 @@ public sealed class WindowsPeerGrpcTofuRoundTripTests
             => ValueTask.FromResult(DomainResult.Success());
     }
 
+    private sealed class StubActiveIdentitySet : IActiveIdentitySet
+    {
+        public IReadOnlyCollection<Domain.Identities.PublicIdentityId> Current { get; } = new[] { Domain.Identities.PublicIdentityId.New() };
+        public bool Contains(Domain.Identities.PublicIdentityId identityId) => true;
+        public ValueTask<bool> AddAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default) => ValueTask.FromResult(true);
+        public ValueTask<bool> RemoveAsync(Domain.Identities.PublicIdentityId identityId, CancellationToken ct = default) => ValueTask.FromResult(true);
+        public bool Add(Domain.Identities.PublicIdentityId identityId) => true;
+        public bool Remove(Domain.Identities.PublicIdentityId identityId) => true;
+    }
+
     [Test]
     public async Task KestrelPeerTransportServer_WithWindowsSChannelProvider_SuccessfullyCompletesTls13HandshakeAndGrpcCall()
     {
@@ -117,7 +128,7 @@ public sealed class WindowsPeerGrpcTofuRoundTripTests
         services.AddSingleton<IIngressFilterService, StubIngressFilterService>();
         services.AddSingleton<ISealedEnvelopeUnwrapper, StubEnvelopeUnwrapper>();
         services.AddSingleton<Percolator.Application.Ingress.IInboundIngressPipeline, StubIngressPipeline>();
-        services.AddSingleton(typeof(Domain.Identities.PublicIdentityId?), _ => Domain.Identities.PublicIdentityId.New());
+        services.AddSingleton<IActiveIdentitySet, StubActiveIdentitySet>();
         services.AddSingleton<UnauthenticatedDeliveryEndpoint>();
 
         var serviceProvider = services.BuildServiceProvider();

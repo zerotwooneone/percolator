@@ -35,20 +35,6 @@ using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Simulator.Features.DirectChat;
 
-internal static class ChannelIdUtility
-{
-    public static ChannelId DeterministicFor(PublicIdentityId a, PublicIdentityId b)
-    {
-        var (first, second) = a.Value.CompareTo(b.Value) < 0 ? (a, b) : (b, a);
-        Span<byte> combined = stackalloc byte[32];
-        first.TryWriteBytes(combined[..16]);
-        second.TryWriteBytes(combined[16..]);
-        Span<byte> hash = stackalloc byte[32];
-        SHA256.HashData(combined, hash);
-        return ChannelId.FromBytes(hash[..16]);
-    }
-}
-
 internal sealed class DirectHandshakeOrchestrator
 {
     private readonly ISimulatedWorldStateService _worldState;
@@ -112,14 +98,6 @@ internal sealed class DirectHandshakeOrchestrator
                 if (!connectResult.IsSuccess)
                 {
                     _toastService.ShowToast("Handshake Failed", connectResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-
-                // Immediately flush outbox to deliver handshake envelope via loopback gRPC TLS
-                var flushResult = await initiator.FlushOutboxAsync(ct);
-                if (!flushResult.IsSuccess)
-                {
-                    _toastService.ShowToast("Handshake Deferred", flushResult.Error.Description, ToastSeverity.Warning);
                     return false;
                 }
 
@@ -193,7 +171,7 @@ internal sealed class DirectHandshakeOrchestrator
                 }
 
                 // Ensure channel exists on target
-                var channelId = ChannelIdUtility.DeterministicFor(target.PublicIdentityId, senderId);
+                var channelId = ChannelId.DeterministicForDirect(target.PublicIdentityId, senderId);
                 var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
                 if (directChannel == null)
                 {
@@ -232,9 +210,6 @@ internal sealed class DirectHandshakeOrchestrator
                         }
                     }
                 }
-
-                // Flush outbox in case any reply packets were queued
-                await target.FlushOutboxAsync(ct);
 
                 if (senderHost != null)
                 {

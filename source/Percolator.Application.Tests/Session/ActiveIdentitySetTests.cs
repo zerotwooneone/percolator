@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Application.Session;
 using Percolator.Application.Session.Events;
 using Percolator.Application.Session.Ports;

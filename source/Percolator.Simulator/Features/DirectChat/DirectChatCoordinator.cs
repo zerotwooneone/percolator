@@ -79,7 +79,7 @@ internal sealed class DirectChatCoordinator
 
             try
             {
-                var channelId = ChannelIdUtility.DeterministicFor(sender.PublicIdentityId, recipientIdentityId);
+                var channelId = ChannelId.DeterministicForDirect(sender.PublicIdentityId, recipientIdentityId);
 
                 using var scope = sender.Services.CreateScope();
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
@@ -116,14 +116,6 @@ internal sealed class DirectChatCoordinator
                     SignalCategory.ChatTranscriptChanged,
                     Details: recipientIdentityId.ToString(),
                     Payload: new ChatTranscriptSignalPayload(recipientIdentityId)));
-
-                // Immediately flush outbox to deliver encrypted payload via loopback gRPC TLS or Relay mailbox
-                var flushResult = await sender.FlushOutboxAsync(ct);
-                if (!flushResult.IsSuccess)
-                {
-                    _toastService.ShowToast("Delivery Deferred", flushResult.Error.Description, ToastSeverity.Warning);
-                    return false;
-                }
 
                 var recipientHost = _worldState.FindPersonaHostByIdentity(recipientIdentityId);
                 if (recipientHost != null && route == DeliveryRoute.RelayedOneToOne && recipientHost.HomeRelay != null)
@@ -192,7 +184,7 @@ internal sealed class DirectChatCoordinator
                 var contactRepo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
                 var profileRepo = scope.ServiceProvider.GetRequiredService<IPeerProfileRepository>();
 
-                var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerIdentityId);
+                var channelId = ChannelId.DeterministicForDirect(host.PublicIdentityId, peerIdentityId);
                 var messages = await chatQuery.GetTranscriptAsync(channelId, ct);
 
                 var peerHost = _worldState.FindPersonaHostByIdentity(peerIdentityId);
@@ -277,7 +269,7 @@ internal sealed class DirectChatCoordinator
 
             try
             {
-                var channelId = ChannelIdUtility.DeterministicFor(reader.PublicIdentityId, senderIdentityId);
+                var channelId = ChannelId.DeterministicForDirect(reader.PublicIdentityId, senderIdentityId);
                 using var scope = reader.Services.CreateScope();
                 var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
@@ -297,9 +289,6 @@ internal sealed class DirectChatCoordinator
 
                 var result = await chatService.MarkAsReadAsync(command, ct);
                 if (!result.IsSuccess) return false;
-
-                var flushResult = await reader.FlushOutboxAsync(ct);
-                if (!flushResult.IsSuccess) return false;
 
                 var senderHost = _worldState.FindPersonaHostByIdentity(senderIdentityId);
                 if (route == DeliveryRoute.RelayedOneToOne && senderHost?.HomeRelay != null)

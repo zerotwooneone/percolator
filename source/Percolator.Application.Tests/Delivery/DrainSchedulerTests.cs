@@ -6,6 +6,7 @@ using Percolator.Application.Delivery.Events;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Application.Session;
 using Percolator.Application.Session.Ports;
 using Percolator.Application.Tests.TestDoubles;

@@ -13,6 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
+using Percolator.Application.Session;
+using Percolator.Application.Session.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -21,6 +23,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Tests.Fakes;
+using Percolator.Infrastructure.Tests.Maintenance;
 using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.PluginSdk;
@@ -117,7 +120,9 @@ public sealed class PeerGrpcTofuRoundTripTests
         services.AddSingleton<IIngressFilterService, StubIngressFilterService>();
         services.AddSingleton<ISealedEnvelopeUnwrapper, StubEnvelopeUnwrapper>();
         services.AddSingleton<Percolator.Application.Ingress.IInboundIngressPipeline, StubIngressPipeline>();
-        services.AddSingleton(typeof(Domain.Identities.PublicIdentityId?), _ => Domain.Identities.PublicIdentityId.New());
+        var activeIdentities = new ActiveIdentitySet(new FakeEventPublisher(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ActiveIdentitySet>.Instance);
+        activeIdentities.Add(Domain.Identities.PublicIdentityId.New());
+        services.AddSingleton<IActiveIdentitySet>(activeIdentities);
         services.AddSingleton<UnauthenticatedDeliveryEndpoint>();
 
         var serviceProvider = services.BuildServiceProvider();

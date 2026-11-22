@@ -880,7 +880,7 @@ internal sealed class ScenarioRunnerService
 
         using var scope = owner.Services.CreateScope();
         var chatQuery = scope.ServiceProvider.GetRequiredService<ISimulatorChatQueryService>();
-        var channelId = ChannelIdUtility.DeterministicFor(owner.PublicIdentityId, peer.PublicIdentityId);
+        var channelId = ChannelId.DeterministicForDirect(owner.PublicIdentityId, peer.PublicIdentityId);
         var transcript = await chatQuery.GetTranscriptAsync(channelId, ct);
         var lastIncoming = transcript.LastOrDefault(m => m.AuthorId == peer.PublicIdentityId);
         if (lastIncoming == null)

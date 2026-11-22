@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Application.Session.Events;
 using Percolator.Application.Session.Ports;
 using Percolator.Domain.Identities;

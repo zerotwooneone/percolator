@@ -126,11 +126,16 @@ public sealed class ConversationStateServiceTests
         var channelId = ChannelId.New();
         var convRead = new ConversationSummaryReadModel(
             channelId,
+            ConversationChannelKind.Direct,
+            _peerId,
             "Bob Chat",
             "Hey Alice",
             (ulong)_timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
             2,
-            _peerId);
+            _peerId,
+            IsPendingAcceptance: false,
+            RelayEndpoint: null,
+            RelayIdentityId: null);
 
         _conversationQueryMock
             .Setup(q => q.GetConversationsAsync(_personaId, It.IsAny<ulong>(), It.IsAny<CancellationToken>()))
@@ -147,6 +152,35 @@ public sealed class ConversationStateServiceTests
         conv.UnreadCount.Should().Be(2);
         conv.IsPendingOutbound.Should().BeFalse();
         conv.DeliveryStatus.Should().Be(ConversationDeliveryStatus.Connected);
+    }
+
+    [Test]
+    public async Task LoadConversationsForPersonaAsync_WhenPendingAcceptance_MapsPendingDeliveryStatus()
+    {
+        var channelId = ChannelId.New();
+        var convRead = new ConversationSummaryReadModel(
+            channelId,
+            ConversationChannelKind.Direct,
+            _peerId,
+            "Bob Chat",
+            "Handshake request",
+            (ulong)_timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
+            0,
+            _peerId,
+            IsPendingAcceptance: true,
+            RelayEndpoint: null,
+            RelayIdentityId: null);
+
+        _conversationQueryMock
+            .Setup(q => q.GetConversationsAsync(_personaId, It.IsAny<ulong>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ConversationSummaryReadModel> { convRead });
+
+        using var service = CreateService();
+        await service.LoadConversationsForPersonaAsync(_personaId);
+
+        service.Conversations.Should().ContainSingle();
+        var conv = service.Conversations.First();
+        conv.DeliveryStatus.Should().Be(ConversationDeliveryStatus.Pending);
     }
 
     [Test]

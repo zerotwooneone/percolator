@@ -173,7 +173,7 @@ public sealed class PeerConnectionService : IPeerConnectionService
             return existingChannel.Id;
         }
 
-        var channelId = DeriveDirectChannelId(_localIdentityId, targetPeerId);
+        var channelId = ChannelId.DeterministicForDirect(_localIdentityId, targetPeerId);
         var newChannelResult = DirectChannel.Create(channelId, _localIdentityId, targetPeerId, _timeProvider);
         if (newChannelResult.IsSuccess)
         {
@@ -181,17 +181,6 @@ public sealed class PeerConnectionService : IPeerConnectionService
         }
 
         return channelId;
-    }
-
-    private static ChannelId DeriveDirectChannelId(PublicIdentityId a, PublicIdentityId b)
-    {
-        var (first, second) = a.Value.CompareTo(b.Value) < 0 ? (a, b) : (b, a);
-        Span<byte> combined = stackalloc byte[32];
-        first.TryWriteBytes(combined[..16]);
-        second.TryWriteBytes(combined[16..]);
-        Span<byte> hash = stackalloc byte[32];
-        SHA256.HashData(combined, hash);
-        return ChannelId.FromBytes(hash[..16]);
     }
 
     private async Task EnsureContactAsync(PublicIdentityId targetPeerId, IdentityKey identityKey, CancellationToken ct)

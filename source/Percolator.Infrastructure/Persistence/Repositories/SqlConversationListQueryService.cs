@@ -7,7 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 
 public sealed class SqlConversationListQueryService : IConversationListQueryService
@@ -35,11 +37,10 @@ public sealed class SqlConversationListQueryService : IConversationListQueryServ
             var currentUserGuid = currentUserId.Value;
             byte[] currentUserBytes = currentUserId.ToByteArray();
 
-            // 1. Identify channels accessible to current user
-            var directChannelIds = await db.ChatChannels
+            // 1. Identify direct and group channels accessible to current user
+            var directChannels = await db.ChatChannels
                 .AsNoTracking()
-                .Where(c => c.OwnerIdentityId == currentUserGuid || c.RemotePeerId == currentUserGuid)
-                .Select(c => c.Id)
+                .Where(c => c.Type == 0 && (c.OwnerIdentityId == currentUserGuid || c.RemotePeerId == currentUserGuid))
                 .ToListAsync(ct).ConfigureAwait(false);
 
             var groupChannelIds = await db.ChatChannelMembers
@@ -48,92 +49,200 @@ public sealed class SqlConversationListQueryService : IConversationListQueryServ
                 .Select(m => m.ChannelId)
                 .ToListAsync(ct).ConfigureAwait(false);
 
-            var userChannelIds = directChannelIds.Union(groupChannelIds).Distinct().ToList();
+            var groupChannels = await db.ChatChannels
+                .AsNoTracking()
+                .Where(c => c.Type == 1 && groupChannelIds.Contains(c.Id))
+                .ToListAsync(ct).ConfigureAwait(false);
 
-            // If no channels exist in ChatChannels yet, check channels with messages involving current user
-            if (userChannelIds.Count == 0)
-            {
-                userChannelIds = await db.ChatMessages
-                    .AsNoTracking()
-                    .Where(m => m.AuthorId == currentUserBytes)
-                    .Select(m => m.ChannelId)
-                    .Distinct()
-                    .ToListAsync(ct).ConfigureAwait(false);
-            }
+            var channels = directChannels.Concat(groupChannels).ToDictionary(c => c.Id);
 
-            if (userChannelIds.Count == 0)
+            if (channels.Count == 0)
             {
                 return (IReadOnlyList<ConversationSummaryReadModel>)Array.Empty<ConversationSummaryReadModel>();
             }
 
-            // 2. Fetch channel metadata
-            var channels = await db.ChatChannels
+            // 2. Batch lookup for contacts, profiles, routing, and relays
+            var peerGuids = channels.Values
+                .Where(c => c.Type == 0)
+                .Select(c => c.OwnerIdentityId == currentUserGuid ? c.RemotePeerId : c.OwnerIdentityId)
+                .Where(g => g.HasValue)
+                .Select(g => g!.Value)
+                .Distinct()
+                .ToList();
+
+            var contacts = await db.PeerContacts
                 .AsNoTracking()
-                .Where(c => userChannelIds.Contains(c.Id))
-                .ToDictionaryAsync(c => c.Id, ct).ConfigureAwait(false);
+                .Where(c => c.OwnerIdentityId == currentUserGuid && peerGuids.Contains(c.RemotePeerId))
+                .ToDictionaryAsync(c => c.RemotePeerId, ct).ConfigureAwait(false);
 
-            // 3. For each channel, find the latest message and unread count
-            var summaries = new List<ConversationSummaryReadModel>(userChannelIds.Count);
+            var profiles = await db.PeerProfiles
+                .AsNoTracking()
+                .Where(p => peerGuids.Contains(p.PeerId))
+                .ToDictionaryAsync(p => p.PeerId, ct).ConfigureAwait(false);
 
-            foreach (var channelId in userChannelIds)
-            {
-                var latest = await db.ChatMessages
+            var routings = await db.PeerMailboxRouting
+                .AsNoTracking()
+                .Where(r => peerGuids.Contains(r.PeerId))
+                .ToDictionaryAsync(r => r.PeerId, ct).ConfigureAwait(false);
+
+            var relays = await db.RelayRegistrations
+                .AsNoTracking()
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            var channelIdList = channels.Keys.ToList();
+            var unexpiredMessages = await db.ChatMessages
+                .AsNoTracking()
+                .Where(m => channelIdList.Contains(m.ChannelId) &&
+                            (m.ExpiresAtUnixMs == null || (long)m.ExpiresAtUnixMs > (long)currentTimestampMs))
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            var latestByChannel = unexpiredMessages
+                .GroupBy(m => m.ChannelId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.TimestampUnixMs).First());
+
+            var unreadCountByChannel = unexpiredMessages
+                .Where(m => m.ReadAtUnixMs == null && !m.AuthorId.AsSpan().SequenceEqual(currentUserBytes))
+                .GroupBy(m => m.ChannelId)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            var candidateAttachmentMessageIds = latestByChannel.Values
+                .Where(m => string.IsNullOrEmpty(m.Content) && !m.IsTombstone)
+                .Select(m => m.Id)
+                .ToList();
+
+            var attachmentMessageIds = candidateAttachmentMessageIds.Count > 0
+                ? (await db.ChatAttachments
                     .AsNoTracking()
-                    .Where(m => m.ChannelId == channelId &&
-                                (m.ExpiresAtUnixMs == null || (long)m.ExpiresAtUnixMs > (long)currentTimestampMs))
-                    .OrderByDescending(m => m.TimestampUnixMs)
-                    .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+                    .Where(a => candidateAttachmentMessageIds.Contains(a.MessageId))
+                    .Select(a => a.MessageId)
+                    .Distinct()
+                    .ToListAsync(ct).ConfigureAwait(false)).ToHashSet()
+                : new HashSet<Guid>();
 
-                if (latest == null)
-                {
-                    continue;
-                }
+            // 3. Project each channel into ConversationSummaryReadModel (retaining 0-message channels)
+            var summaries = new List<ConversationSummaryReadModel>(channels.Count);
 
-                channels.TryGetValue(channelId, out var channel);
-                string title = !string.IsNullOrWhiteSpace(channel?.Name)
-                    ? channel.Name
-                    : channelId.ToString();
+            foreach (var channel in channels.Values)
+            {
+                var kind = channel.Type == 1 ? ConversationChannelKind.Group : ConversationChannelKind.Direct;
+                Domain.Identities.PublicIdentityId? remotePeerId = null;
+                string title;
+                bool isPendingAcceptance = false;
+                string? relayEndpoint = channel.RelayEndpoint;
 
-                string snippet;
-                if (latest.IsTombstone)
+                if (kind == ConversationChannelKind.Direct)
                 {
-                    snippet = "This message was deleted";
-                }
-                else if (!string.IsNullOrEmpty(latest.Content))
-                {
-                    snippet = latest.Content;
+                    var remoteGuid = channel.OwnerIdentityId == currentUserGuid ? channel.RemotePeerId : channel.OwnerIdentityId;
+                    if (remoteGuid.HasValue)
+                    {
+                        remotePeerId = new Domain.Identities.PublicIdentityId(remoteGuid.Value);
+                    }
+
+                    if (remoteGuid.HasValue && contacts.TryGetValue(remoteGuid.Value, out var contact) &&
+                        !string.IsNullOrWhiteSpace(contact.Nickname) &&
+                        !contact.Nickname.Equals(remoteGuid.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        title = contact.Nickname;
+                    }
+                    else if (remoteGuid.HasValue && profiles.TryGetValue(remoteGuid.Value, out var profile) &&
+                             !string.IsNullOrWhiteSpace(profile.DisplayName))
+                    {
+                        title = profile.DisplayName;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(channel.Name))
+                    {
+                        title = channel.Name;
+                    }
+                    else if (remoteGuid.HasValue)
+                    {
+                        title = $"Peer {remoteGuid.Value:N}"[..12];
+                    }
+                    else
+                    {
+                        title = channel.Id.ToString();
+                    }
+
+                    isPendingAcceptance = (DirectChannelStatus)channel.Status == DirectChannelStatus.PendingAcceptance;
+
+                    if (string.IsNullOrWhiteSpace(relayEndpoint) && remoteGuid.HasValue &&
+                        routings.TryGetValue(remoteGuid.Value, out var routing) &&
+                        !string.IsNullOrWhiteSpace(routing.RelayEndpoint))
+                    {
+                        relayEndpoint = routing.RelayEndpoint;
+                    }
                 }
                 else
                 {
-                    bool hasAttachment = await db.ChatAttachments
-                        .AsNoTracking()
-                        .AnyAsync(a => a.MessageId == latest.Id, ct).ConfigureAwait(false);
-                    snippet = hasAttachment ? "[Attachment]" : string.Empty;
+                    title = !string.IsNullOrWhiteSpace(channel.Name) ? channel.Name : "Group";
+                    isPendingAcceptance = false;
                 }
 
-                // Unread count: unexpired messages not read and not sent by current user
-                int unreadCount = await db.ChatMessages
-                    .AsNoTracking()
-                    .Where(m => m.ChannelId == channelId &&
-                                (m.ExpiresAtUnixMs == null || (long)m.ExpiresAtUnixMs > (long)currentTimestampMs) &&
-                                m.ReadAtUnixMs == null &&
-                                m.AuthorId != currentUserBytes)
-                    .CountAsync(ct).ConfigureAwait(false);
+                Domain.Identities.PublicIdentityId? relayIdentityId = null;
+                if (!string.IsNullOrWhiteSpace(relayEndpoint))
+                {
+                    var targetEpResult = RelayEndpoint.Create(relayEndpoint);
+                    if (targetEpResult.IsSuccess)
+                    {
+                        var targetEp = targetEpResult.Value!;
+                        var matchedRelay = relays.FirstOrDefault(r =>
+                        {
+                            var regEpResult = RelayEndpoint.Create(r.Endpoint);
+                            return regEpResult.IsSuccess && regEpResult.Value == targetEp;
+                        });
+                        if (matchedRelay != null)
+                        {
+                            relayIdentityId = new Domain.Identities.PublicIdentityId(matchedRelay.RelayIdentityId);
+                        }
+                    }
+                }
 
-                Domain.Identities.PublicIdentityId? lastAuthorId = latest.AuthorId.Length == 16
-                    ? Domain.Identities.PublicIdentityId.FromBytes(latest.AuthorId)
-                    : null;
+                latestByChannel.TryGetValue(channel.Id, out var latest);
+
+                string snippet = string.Empty;
+                Domain.Identities.PublicIdentityId? lastAuthorId = null;
+
+                if (latest != null)
+                {
+                    if (latest.IsTombstone)
+                    {
+                        snippet = "This message was deleted";
+                    }
+                    else if (!string.IsNullOrEmpty(latest.Content))
+                    {
+                        snippet = latest.Content;
+                    }
+                    else
+                    {
+                        bool hasAttachment = attachmentMessageIds.Contains(latest.Id);
+                        snippet = hasAttachment ? "[Attachment]" : string.Empty;
+                    }
+
+                    lastAuthorId = latest.AuthorId.Length == 16
+                        ? Domain.Identities.PublicIdentityId.FromBytes(latest.AuthorId)
+                        : null;
+                }
+
+                int unreadCount = unreadCountByChannel.TryGetValue(channel.Id, out int cnt) ? cnt : 0;
+                ulong channelActivityMs = (ulong)Math.Max(0L, channel.LastActivityUtc.ToUnixTimeMilliseconds());
+                ulong lastActivityTimestamp = latest?.TimestampUnixMs ?? channelActivityMs;
 
                 summaries.Add(new ConversationSummaryReadModel(
-                    ChannelId.FromGuid(channelId),
+                    ChannelId.FromGuid(channel.Id),
+                    kind,
+                    remotePeerId,
                     title,
                     snippet,
-                    latest.TimestampUnixMs,
+                    lastActivityTimestamp,
                     unreadCount,
-                    lastAuthorId));
+                    lastAuthorId,
+                    isPendingAcceptance,
+                    relayEndpoint,
+                    relayIdentityId));
             }
 
-            return (IReadOnlyList<ConversationSummaryReadModel>)summaries.OrderByDescending(s => s.LastMessageTimestampUnixMs).ToList();
+            return (IReadOnlyList<ConversationSummaryReadModel>)summaries
+                .OrderByDescending(s => s.LastActivityTimestampUnixMs)
+                .ToList();
         });
     }
 }

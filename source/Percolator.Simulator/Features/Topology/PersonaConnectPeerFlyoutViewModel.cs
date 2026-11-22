@@ -94,8 +94,6 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
                     return;
                 }
 
-                await _host.FlushOutboxAsync().ConfigureAwait(false);
-
                 _toastService.ShowToast(
                     "Connected",
                     $"Direct connection initiated to {payload.IdentityId.Value.ToString()[..8]}.",
@@ -134,8 +132,6 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
                         ErrorMessage = connResult.Error.Description;
                         return;
                     }
-
-                    await _host.FlushOutboxAsync().ConfigureAwait(false);
 
                     _toastService.ShowToast(
                         "Connected",

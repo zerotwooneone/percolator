@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
@@ -100,7 +101,7 @@ internal sealed class AutopilotPongResponder : IDisposable
 
                 foreach (var peerId in activeContactIds)
                 {
-                    var channelId = ChannelIdUtility.DeterministicFor(host.PublicIdentityId, peerId);
+                    var channelId = ChannelId.DeterministicForDirect(host.PublicIdentityId, peerId);
                     var messages = await chatQuery.GetTranscriptAsync(channelId);
                     var candidate = messages
                         .Where(m => m.AuthorId != host.PublicIdentityId)

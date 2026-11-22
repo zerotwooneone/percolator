@@ -1,4 +1,4 @@
-namespace Percolator.Application.Ports;
+namespace Percolator.PluginSdk.Events;
 
 public sealed record EventDispatchError(
     IApplicationEvent Event,

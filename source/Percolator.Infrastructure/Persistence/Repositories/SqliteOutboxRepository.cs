@@ -17,6 +17,7 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
 {
     private static long _globalSequenceNumber = DateTimeOffset.UtcNow.Ticks;
     private readonly PercolatorDbContext _dbContext;
+
     public SqliteOutboxRepository(PercolatorDbContext dbContext)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
@@ -51,6 +52,40 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
             .ToListAsync(ct);
         return entities.Select(MapEntityToDomain).ToList();
     }
+    public async Task<IReadOnlyList<OutboxJob>> ClaimDuePendingJobsAsync(int batchSize, string workerInstanceId, TimeSpan leaseDuration, CancellationToken ct = default)
+    {
+        if (batchSize <= 0) return Array.Empty<OutboxJob>();
+        var now = DateTimeOffset.UtcNow;
+        var pendingStatus = (int)OutboxStatus.Pending;
+        var inFlightStatus = (int)OutboxStatus.InFlight;
+
+        await using var tx = await _dbContext.Database.BeginTransactionAsync(ct);
+        var entities = await _dbContext.OpsOutboxJobs
+            .Where(j => (j.Status == pendingStatus && j.NextAttemptAtUtc != null && j.NextAttemptAtUtc <= now)
+                     || (j.Status == inFlightStatus && j.NextAttemptAtUtc != null && j.NextAttemptAtUtc <= now))
+            .OrderBy(j => j.NextAttemptAtUtc)
+            .ThenBy(j => j.SequenceNumber)
+            .Take(batchSize)
+            .ToListAsync(ct);
+
+        if (entities.Count == 0)
+        {
+            await tx.RollbackAsync(ct);
+            return Array.Empty<OutboxJob>();
+        }
+
+        var leaseExpiry = now.Add(leaseDuration);
+        foreach (var entity in entities)
+        {
+            entity.Status = inFlightStatus;
+            entity.NextAttemptAtUtc = leaseExpiry;
+        }
+
+        await _dbContext.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+
+        return entities.Select(MapEntityToDomain).ToList();
+    }
     public async Task SaveAsync(OutboxJob job, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(job);
@@ -63,7 +98,8 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
         var routeJson = SerializeRoute(job.Route);
         var ownerGuid = job.OwnerIdentityId.Value;
         var recipientGuid = job.RecipientIdentityId.HasValue ? job.RecipientIdentityId.Value.Value : (Guid?)null;
-        if (existing == null)
+        bool isNew = existing == null;
+        if (isNew)
         {
             var entity = new OpsOutboxJobEntity
             {
@@ -83,7 +119,7 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
             };
             await _dbContext.OpsOutboxJobs.AddAsync(entity, ct);
         }
-        else
+        else if (existing != null)
         {
             existing.OwnerIdentityId = ownerGuid;
             existing.ChannelId = job.ChannelId.Value;

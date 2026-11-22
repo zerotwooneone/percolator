@@ -135,37 +135,19 @@ public sealed class ConversationStateService : IConversationStateService
                 // Add loaded conversations from chat service
                 foreach (var conv in conversations)
                 {
-                    var peerId = conv.LastAuthorId ?? personaId;
+                    var peerId = conv.RemotePeerId ?? (conv.Kind == ConversationChannelKind.Direct ? conv.LastAuthorId ?? personaId : new PublicIdentityId(conv.ChannelId.Value));
+                    var routeType = conv.RelayIdentityId != null ? ConversationRouteType.Relayed : ConversationRouteType.DirectP2P;
                     _conversationsList.Add(new ConversationSummaryModel(
                         conv.ChannelId,
                         peerId,
                         conv.Title,
-                        ConversationRouteType.DirectP2P,
-                        relayId: null,
+                        routeType,
+                        relayId: conv.RelayIdentityId,
                         lastMessageSnippet: conv.LastMessageSnippet,
-                        lastActivityUtc: DateTimeOffset.FromUnixTimeMilliseconds((long)conv.LastMessageTimestampUnixMs),
+                        lastActivityUtc: DateTimeOffset.FromUnixTimeMilliseconds((long)conv.LastActivityTimestampUnixMs),
                         unreadCount: conv.UnreadCount,
                         isPendingOutbound: false,
-                        deliveryStatus: ConversationDeliveryStatus.Connected));
-                }
-
-                // For established contacts that don't have a chat thread in conversations list yet, surface them as Direct P2P conversations
-                foreach (var contact in contacts.Where(c => c.State == ContactState.Active))
-                {
-                    if (!_conversationsList.Any(c => c.PeerOrGroupId == contact.IdentityId))
-                    {
-                        _conversationsList.Add(new ConversationSummaryModel(
-                            ChannelId.New(),
-                            contact.IdentityId,
-                            contact.DisplayName,
-                            ConversationRouteType.DirectP2P,
-                            relayId: null,
-                            lastMessageSnippet: "Direct peer connection active.",
-                            lastActivityUtc: contact.AddedAtUtc,
-                            unreadCount: 0,
-                            isPendingOutbound: false,
-                            deliveryStatus: ConversationDeliveryStatus.Connected));
-                    }
+                        deliveryStatus: conv.IsPendingAcceptance ? ConversationDeliveryStatus.Pending : ConversationDeliveryStatus.Connected));
                 }
 
                 // Restore pending outbound items

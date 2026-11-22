@@ -176,4 +176,37 @@ public class SqliteOutboxRepositoryTests
         summary!.Id.Should().Be(jobId);
         summary.Status.Should().Be(OutboxStatus.Delivered);
     }
+
+    [Test]
+    public async Task ClaimDuePendingJobsAsync_AtomicallyLeasesPendingJobs()
+    {
+        // Arrange
+        var jobId = Guid.NewGuid();
+        var job = OutboxJob.Rehydrate(
+            jobId,
+            ChannelId.New(),
+            Domain.Identities.PublicIdentityId.New(),
+            null,
+            new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null),
+            Encoding.UTF8.GetBytes("Payload"),
+            OutboxStatus.Pending,
+            retryCount: 0,
+            maxAttempts: 5,
+            createdAtUtc: DateTimeOffset.UtcNow,
+            nextAttemptAtUtc: DateTimeOffset.UtcNow.AddMinutes(-5));
+
+        await _repository.SaveAsync(job);
+
+        // Act
+        var claimed = await _repository.ClaimDuePendingJobsAsync(10, "worker-1", TimeSpan.FromMinutes(2));
+
+        // Assert
+        claimed.Should().HaveCount(1);
+        claimed[0].Id.Should().Be(jobId);
+        claimed[0].Status.Should().Be(OutboxStatus.InFlight);
+
+        // A second concurrent claim finds no due jobs
+        var secondClaim = await _repository.ClaimDuePendingJobsAsync(10, "worker-2", TimeSpan.FromMinutes(2));
+        secondClaim.Should().BeEmpty();
+    }
 }

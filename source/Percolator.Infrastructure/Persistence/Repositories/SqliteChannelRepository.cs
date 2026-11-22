@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence.Entities;
 
@@ -41,7 +42,9 @@ public sealed class SqliteChannelRepository : IChannelRepository
             new Domain.Identities.PublicIdentityId(entity.RemotePeerId.Value),
             entity.CreatedAtUtc,
             entity.LastActivityUtc,
-            payloads);
+            payloads,
+            (DirectChannelStatus)entity.Status,
+            !string.IsNullOrWhiteSpace(entity.RelayEndpoint) ? RelayEndpoint.Parse(entity.RelayEndpoint) : null);
     }
 
     public async Task<DirectChannel?> GetDirectByPeerAsync(Domain.Identities.PublicIdentityId ownerId, Domain.Identities.PublicIdentityId remotePeerId, CancellationToken cancellationToken = default)
@@ -70,7 +73,9 @@ public sealed class SqliteChannelRepository : IChannelRepository
             remotePeerId,
             entity.CreatedAtUtc,
             entity.LastActivityUtc,
-            payloads);
+            payloads,
+            (DirectChannelStatus)entity.Status,
+            !string.IsNullOrWhiteSpace(entity.RelayEndpoint) ? RelayEndpoint.Parse(entity.RelayEndpoint) : null);
     }
 
     public async Task<GroupChannel?> GetGroupByIdAsync(ChannelId id, CancellationToken cancellationToken = default)
@@ -105,7 +110,8 @@ public sealed class SqliteChannelRepository : IChannelRepository
             entity.CreatedAtUtc,
             entity.LastActivityUtc,
             members,
-            payloads);
+            payloads,
+            !string.IsNullOrWhiteSpace(entity.RelayEndpoint) ? RelayEndpoint.Parse(entity.RelayEndpoint) : null);
     }
 
     public async Task<IReadOnlyList<GroupChannel>> GetAllGroupsForOwnerAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken cancellationToken = default)
@@ -145,7 +151,9 @@ public sealed class SqliteChannelRepository : IChannelRepository
                 epoch,
                 entity.CreatedAtUtc,
                 entity.LastActivityUtc,
-                members));
+                members,
+                payloads: null,
+                relayEndpoint: !string.IsNullOrWhiteSpace(entity.RelayEndpoint) ? RelayEndpoint.Parse(entity.RelayEndpoint) : null));
         }
 
         return result;
@@ -173,13 +181,17 @@ public sealed class SqliteChannelRepository : IChannelRepository
                 RemotePeerId = remoteGuid,
                 CurrentEpoch = null,
                 CreatedAtUtc = channel.CreatedAtUtc,
-                LastActivityUtc = channel.LastActivityUtc
+                LastActivityUtc = channel.LastActivityUtc,
+                Status = (int)channel.Status,
+                RelayEndpoint = channel.RelayEndpoint?.ToString()
             };
             await _dbContext.ChatChannels.AddAsync(entity, cancellationToken);
         }
         else
         {
             existing.LastActivityUtc = channel.LastActivityUtc;
+            existing.Status = (int)channel.Status;
+            existing.RelayEndpoint = channel.RelayEndpoint?.ToString();
         }
 
         await SyncPayloadsAsync(channelIdGuid, channel.Payloads, cancellationToken);
@@ -206,7 +218,9 @@ public sealed class SqliteChannelRepository : IChannelRepository
                 RemotePeerId = null,
                 CurrentEpoch = channel.CurrentEpoch.Value,
                 CreatedAtUtc = channel.CreatedAtUtc,
-                LastActivityUtc = channel.LastActivityUtc
+                LastActivityUtc = channel.LastActivityUtc,
+                Status = 0,
+                RelayEndpoint = channel.RelayEndpoint?.ToString()
             };
             await _dbContext.ChatChannels.AddAsync(entity, cancellationToken);
         }
@@ -215,6 +229,7 @@ public sealed class SqliteChannelRepository : IChannelRepository
             existing.Name = channel.Name;
             existing.CurrentEpoch = channel.CurrentEpoch.Value;
             existing.LastActivityUtc = channel.LastActivityUtc;
+            existing.RelayEndpoint = channel.RelayEndpoint?.ToString();
         }
 
         // Sync members

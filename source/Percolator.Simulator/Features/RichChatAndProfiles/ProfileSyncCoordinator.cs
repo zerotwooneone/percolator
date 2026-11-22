@@ -168,7 +168,7 @@ internal sealed class ProfileSyncCoordinator
             var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
             var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
 
-            var channelId = ChannelIdUtility.DeterministicFor(sender.PublicIdentityId, recipient.PublicIdentityId);
+            var channelId = ChannelId.DeterministicForDirect(sender.PublicIdentityId, recipient.PublicIdentityId);
             var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
             if (directChannel == null)
             {
@@ -239,8 +239,6 @@ internal sealed class ProfileSyncCoordinator
                     $"Failed to share profile capability with '{recipient.DisplayName}': {shareResult.Error.Description}"));
                 return false;
             }
-
-            await sender.FlushOutboxAsync(ct);
 
             if (route == DeliveryRoute.RelayedOneToOne && recipient.HomeRelay != null)
             {

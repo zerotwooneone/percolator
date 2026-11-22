@@ -7,6 +7,8 @@ using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
 using Percolator.Application.Services;
+using Percolator.Infrastructure.Events;
+using Percolator.PluginSdk.Events;
 using Percolator.Application2IntegrationTests.Adapters;
 using Percolator.Application2IntegrationTests.Adapters.Queries;
 using Percolator.Application2IntegrationTests.Fakes;
@@ -109,6 +111,7 @@ public sealed class TestIdentityNode
     public LoopbackStreamRegistry StreamRegistry { get; }
     public ITransportDispatcher TransportDispatcher { get; }
     public RoutingCoordinator RoutingCoordinator { get; }
+    public InMemoryEventBus EventBus { get; } = new(Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
 
     // CQRS Query Ports
     public IChatMessageQueryService ChatQueries { get; }
@@ -253,7 +256,8 @@ public sealed class TestIdentityNode
             _outboxRepo,
             StreamRegistry,
             TimeProvider,
-            channelLockService);
+            channelLockService,
+            EventBus);
 
         // Application Routing & Ingress
         var appRouter = new AppRouter();
@@ -345,6 +349,7 @@ public sealed class TestIdentityNode
             CryptoEngine,
             TimeProvider,
             appRouter,
+            EventBus,
             wirePacker,
             routingCoordinator: RoutingCoordinator);
 

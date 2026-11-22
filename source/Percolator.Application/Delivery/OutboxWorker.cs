@@ -21,15 +21,12 @@ public sealed class OutboxWorker
 
     public async Task<int> ProcessBatchAsync(int batchSize = 50, CancellationToken ct = default)
     {
-        var dueJobs = await _repository.GetDuePendingJobsAsync(_timeProvider.UtcNow, batchSize, ct);
+        var dueJobs = await _repository.ClaimDuePendingJobsAsync(batchSize, Guid.NewGuid().ToString("N"), TimeSpan.FromMinutes(1), ct);
         int processedCount = 0;
 
         foreach (var job in dueJobs)
         {
             if (ct.IsCancellationRequested) break;
-
-            job.MarkInFlight();
-            await _repository.SaveAsync(job, ct);
 
             var sendResult = await _dispatcher.SendAsync(job, ct);
             if (sendResult.IsSuccess)

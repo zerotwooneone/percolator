@@ -46,8 +46,6 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         _hostMock = new Mock<ISimulatedPersonaHost>(MockBehavior.Strict);
         _hostMock.SetupGet(h => h.Id).Returns(_hostNodeId);
         _hostMock.SetupGet(h => h.PublicIdentityId).Returns(_hostIdentityId);
-        _hostMock.Setup(h => h.FlushOutboxAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DomainResult.Success());
 
         _worldStateMock = new Mock<ISimulatedWorldStateService>(MockBehavior.Strict);
         _codec = new PeerInvitationCodec();
@@ -62,7 +60,7 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     }
 
     [Test]
-    public async Task ConnectAsync_WithValidDirectInvitation_InitiatesWorkflowAndFlushesOutbox()
+    public async Task ConnectAsync_WithValidDirectInvitation_InitiatesWorkflow()
     {
         var payload = new PeerInvitationPayload(
             _targetIdentityId,
@@ -97,7 +95,6 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
             It.Is<PeerInvitationPayload>(p => p.IdentityId == _targetIdentityId),
             It.IsAny<TimeSpan>(),
             It.IsAny<CancellationToken>()), Times.Once);
-        _hostMock.Verify(h => h.FlushOutboxAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

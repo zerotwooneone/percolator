@@ -124,7 +124,7 @@ namespace Percolator.Domain.Common
     public interface IDomainEvent { global::System.Guid EventId { get; } global::System.DateTimeOffset OccurredOnUtc { get; } }
 }
 
-namespace Percolator.Application2.Ports
+namespace Percolator.PluginSdk.Events
 {
     public interface IApplicationEvent { global::System.Guid EventId { get; } global::System.DateTimeOffset OccurredOnUtc { get; } }
 }
@@ -135,16 +135,16 @@ namespace Demo
     public sealed record EventB(global::System.Guid EventId, global::System.DateTimeOffset OccurredOnUtc) : Percolator.Domain.Common.IDomainEvent;
 
     [Percolator.SourceGenerators.MapFromDomainEvent(typeof(EventA))]
-    public sealed partial record AppEventA : Percolator.Application2.Ports.IApplicationEvent;
+    public sealed partial record AppEventA : Percolator.PluginSdk.Events.IApplicationEvent;
 
     [Percolator.SourceGenerators.MapFromDomainEvent(typeof(EventB))]
-    public sealed partial record AppEventB : Percolator.Application2.Ports.IApplicationEvent;
+    public sealed partial record AppEventB : Percolator.PluginSdk.Events.IApplicationEvent;
 }
 ");
 
         diagnostics.Should().BeEmpty();
         var extensions = sources.Single(s => s.Contains("class DomainEventMapperExtensions", StringComparison.Ordinal));
-        extensions.Should().Contain("public static global::Percolator.Application2.Ports.IApplicationEvent? ToApplicationEvent(this global::Percolator.Domain.Common.IDomainEvent domainEvent)");
+        extensions.Should().Contain("public static global::Percolator.PluginSdk.Events.IApplicationEvent? ToApplicationEvent(this global::Percolator.Domain.Common.IDomainEvent domainEvent)");
         extensions.Should().Contain("global::Demo.EventA e => global::Demo.AppEventA.FromDomain(e),");
         extensions.Should().Contain("global::Demo.EventB e => global::Demo.AppEventB.FromDomain(e),");
     }
@@ -202,6 +202,34 @@ namespace Demo
 
         diagnostics.Should().ContainSingle(d => d.Id == "PERC204");
         diagnostics[0].GetMessage().Should().Contain("must be declared as a record");
+    }
+
+    [Test]
+    public void Generator_WithGuidIdPartialRecordDomainEvent_UnboxesGuidIdCorrectly()
+    {
+        var (sources, diagnostics, _) = RunGenerator(@"
+namespace Percolator.Domain.Common
+{
+    public interface IDomainEvent { global::System.Guid EventId { get; } global::System.DateTimeOffset OccurredOnUtc { get; } }
+}
+
+namespace Demo
+{
+    public readonly record struct ChannelId(global::System.Guid Value);
+
+    public sealed record ChannelCreatedDomainEvent(
+        global::System.Guid EventId,
+        global::System.DateTimeOffset OccurredOnUtc,
+        ChannelId ChannelId) : Percolator.Domain.Common.IDomainEvent;
+
+    [Percolator.SourceGenerators.MapFromDomainEvent(typeof(ChannelCreatedDomainEvent))]
+    public sealed partial record ChannelCreatedApplicationEvent;
+}
+");
+
+        diagnostics.Should().BeEmpty();
+        var generated = sources.Single(s => s.Contains("partial record ChannelCreatedApplicationEvent", StringComparison.Ordinal));
+        generated.Should().Contain("ChannelId = domainEvent.ChannelId.Value,");
     }
 
     private static (List<string> GeneratedSources, ImmutableArray<Diagnostic> Diagnostics, Compilation OutputCompilation) RunGenerator(string userSource)

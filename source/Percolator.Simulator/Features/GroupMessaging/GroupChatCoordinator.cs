@@ -172,7 +172,7 @@ internal sealed class GroupChatCoordinator : IDisposable
             {
                 if (member.PublicIdentityId == admin.PublicIdentityId) continue;
 
-                var directChannelId = ChannelIdUtility.DeterministicFor(admin.PublicIdentityId, member.PublicIdentityId);
+                var directChannelId = ChannelId.DeterministicForDirect(admin.PublicIdentityId, member.PublicIdentityId);
                 var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
                 var route = (streamRegistry.GetDirectEndpoint(member.PublicIdentityId) == null && member.HomeRelay != null)
                     ? DeliveryRoute.RelayedOneToOne
@@ -218,8 +218,6 @@ internal sealed class GroupChatCoordinator : IDisposable
                     }
                 }
             }
-
-            await admin.FlushOutboxAsync(ct);
         }
 
         foreach (var member in members)
@@ -272,7 +270,7 @@ internal sealed class GroupChatCoordinator : IDisposable
             return false;
         }
 
-        var directChannelId = ChannelIdUtility.DeterministicFor(persona.PublicIdentityId, invitation.InviterId);
+        var directChannelId = ChannelId.DeterministicForDirect(persona.PublicIdentityId, invitation.InviterId);
         var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
         var route = (streamRegistry.GetDirectEndpoint(invitation.InviterId) == null && persona.HomeRelay != null)
             ? DeliveryRoute.RelayedOneToOne
@@ -336,8 +334,6 @@ internal sealed class GroupChatCoordinator : IDisposable
                 DeviceId.Primary,
                 otherMemberIds,
                 ct);
-
-            await persona.FlushOutboxAsync(ct);
 
             foreach (var memberId in otherMemberIds)
             {
@@ -431,8 +427,6 @@ internal sealed class GroupChatCoordinator : IDisposable
             return false;
         }
 
-        await sender.FlushOutboxAsync(ct);
-
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,
             LogLevel.Information,
@@ -483,8 +477,6 @@ internal sealed class GroupChatCoordinator : IDisposable
                 sent++;
             }
         }
-
-        await sender.FlushOutboxAsync(ct);
 
         _logSink.Log(new SimulatorLogEntry(
             DateTimeOffset.UtcNow,
@@ -574,7 +566,7 @@ internal sealed class GroupChatCoordinator : IDisposable
             foreach (var existingMemberId in existingMemberIds)
             {
                 var existingHost = _worldState.FindPersonaHostByIdentity(existingMemberId);
-                var directChannelId = ChannelIdUtility.DeterministicFor(admin.PublicIdentityId, existingMemberId);
+                var directChannelId = ChannelId.DeterministicForDirect(admin.PublicIdentityId, existingMemberId);
                 var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
                 var route = (streamRegistry.GetDirectEndpoint(existingMemberId) == null && existingHost?.HomeRelay != null)
                     ? DeliveryRoute.RelayedOneToOne
@@ -598,7 +590,7 @@ internal sealed class GroupChatCoordinator : IDisposable
             var inviteService = adminScope.ServiceProvider.GetRequiredService<GroupInvitationService>();
             ulong expiryMs = (ulong)_virtualClock.UtcNow.AddDays(7).ToUnixTimeMilliseconds();
             var allMemberIds = groupChannel.Members.Select(m => m.Id).ToList();
-            var directInviteChannelId = ChannelIdUtility.DeterministicFor(admin.PublicIdentityId, newMember.PublicIdentityId);
+            var directInviteChannelId = ChannelId.DeterministicForDirect(admin.PublicIdentityId, newMember.PublicIdentityId);
             var inviteDto = new GroupInvitationDto(
                 InvitationId.New(),
                 channelId,
@@ -621,8 +613,6 @@ internal sealed class GroupChatCoordinator : IDisposable
                 inviteRoute,
                 ct);
 
-            await admin.FlushOutboxAsync(ct);
-
             foreach (var existingMemberId in existingMemberIds)
             {
                 var existingHost = _worldState.FindPersonaHostByIdentity(existingMemberId);
@@ -641,7 +631,6 @@ internal sealed class GroupChatCoordinator : IDisposable
                         DeviceId.Primary,
                         [newMember.PublicIdentityId],
                         ct);
-                    await existingHost.FlushOutboxAsync(ct);
                 }
             }
 
@@ -762,7 +751,7 @@ internal sealed class GroupChatCoordinator : IDisposable
             foreach (var targetId in noticeTargetIds)
             {
                 var targetHost = _worldState.FindPersonaHostByIdentity(targetId);
-                var directChannelId = ChannelIdUtility.DeterministicFor(admin.PublicIdentityId, targetId);
+                var directChannelId = ChannelId.DeterministicForDirect(admin.PublicIdentityId, targetId);
                 var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
                 var route = (streamRegistry.GetDirectEndpoint(targetId) == null && targetHost?.HomeRelay != null)
                     ? DeliveryRoute.RelayedOneToOne
@@ -780,8 +769,6 @@ internal sealed class GroupChatCoordinator : IDisposable
 
             // Forward Secrecy: Rotate Admin's sender key and distribute ONLY to remaining members
             await RotateAndDistributeHostSenderKeyAsync(adminScope.ServiceProvider, channelId, admin.PublicIdentityId, remainingMemberIds, ct);
-
-            await admin.FlushOutboxAsync(ct);
 
             foreach (var targetId in noticeTargetIds)
             {
@@ -805,8 +792,6 @@ internal sealed class GroupChatCoordinator : IDisposable
             {
                 await RotateAndDistributeHostSenderKeyAsync(memberScope.ServiceProvider, channelId, memberId, peerIds, ct);
             }
-
-            await memberHost.FlushOutboxAsync(ct);
 
             foreach (var peerId in peerIds)
             {

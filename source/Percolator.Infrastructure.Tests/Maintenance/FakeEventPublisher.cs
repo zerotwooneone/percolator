@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 
 namespace Percolator.Infrastructure.Tests.Maintenance;
 

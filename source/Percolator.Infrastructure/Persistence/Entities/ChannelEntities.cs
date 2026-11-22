@@ -12,6 +12,8 @@ public sealed class ChatChannelEntity
     public uint? CurrentEpoch { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset LastActivityUtc { get; set; }
+    public int Status { get; set; } // 0 = Active, 1 = PendingAcceptance
+    public string? RelayEndpoint { get; set; }
 }
 
 public sealed class ChatChannelMemberEntity

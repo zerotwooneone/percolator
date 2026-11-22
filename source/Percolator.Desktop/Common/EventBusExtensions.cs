@@ -1,6 +1,6 @@
 using System;
 using System.Threading.Tasks;
-using Percolator.Application.Ports;
+using Percolator.PluginSdk.Events;
 using R3;
 
 namespace Percolator.Desktop.Common;
