@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Percolator.Domain.Common;
+using Percolator.Domain.Identities.Events;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 
@@ -103,7 +104,55 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
             primaryPublicKey,
             ContactState.PendingApproval);
 
+        contact.AddDomainEvent(new InboundContactRequestReceivedDomainEvent(
+            ownerIdentityId,
+            remotePeerId,
+            primaryPublicKey,
+            timeProvider.UtcNow));
+
         return DomainResult<PeerContact>.Success(contact);
+    }
+
+    public DomainResult ReopenInboundRequest(
+        IdentityKey primaryPublicKey,
+        string? proposedNickname,
+        IDateTimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        if (primaryPublicKey == null)
+        {
+            return DomainResult.Failure(new DomainError("NULL_PUBLIC_KEY", "Primary public key cannot be null."));
+        }
+
+        if (TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Contact is blocked."));
+        }
+
+        if (State == ContactState.PendingApproval)
+        {
+            return DomainResult.Success();
+        }
+
+        if (State != ContactState.Rejected)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_CONTACT_STATE", $"Cannot reopen contact request from state '{State}'."));
+        }
+
+        State = ContactState.PendingApproval;
+        PrimaryPublicKey = primaryPublicKey;
+        if (!string.IsNullOrWhiteSpace(proposedNickname))
+        {
+            Nickname = ContactNickname.Create(proposedNickname, RemotePeerId);
+        }
+
+        AddDomainEvent(new InboundContactRequestReceivedDomainEvent(
+            OwnerIdentityId,
+            RemotePeerId,
+            primaryPublicKey,
+            timeProvider.UtcNow));
+
+        return DomainResult.Success();
     }
 
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -153,8 +202,9 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
         return DomainResult.Success();
     }
 
-    public DomainResult Approve(PeerTrustLevel initialTrust = PeerTrustLevel.Tofu)
+    public DomainResult Approve(PeerTrustLevel initialTrust, IDateTimeProvider timeProvider)
     {
+        ArgumentNullException.ThrowIfNull(timeProvider);
         if (State == ContactState.Active)
         {
             return DomainResult.Success();
@@ -167,16 +217,30 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
 
         State = ContactState.Active;
         TrustLevel = initialTrust;
+
+        AddDomainEvent(new ContactRequestApprovedDomainEvent(
+            OwnerIdentityId,
+            RemotePeerId,
+            TrustLevel,
+            timeProvider.UtcNow));
+
         return DomainResult.Success();
     }
 
-    public DomainResult Reject(bool block = false)
+    public DomainResult Reject(bool block, IDateTimeProvider timeProvider)
     {
+        ArgumentNullException.ThrowIfNull(timeProvider);
         State = ContactState.Rejected;
         if (block)
         {
             TrustLevel = PeerTrustLevel.Blocked;
         }
+
+        AddDomainEvent(new ContactRequestRejectedDomainEvent(
+            OwnerIdentityId,
+            RemotePeerId,
+            block,
+            timeProvider.UtcNow));
 
         return DomainResult.Success();
     }

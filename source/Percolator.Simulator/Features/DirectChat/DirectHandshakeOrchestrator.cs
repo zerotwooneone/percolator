@@ -151,35 +151,9 @@ internal sealed class DirectHandshakeOrchestrator
                 }
 
                 using var scope = target.Services.CreateScope();
-                var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
-                var handshakeService = scope.ServiceProvider.GetRequiredService<IHandshakeService>();
                 var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                var channelRepo = scope.ServiceProvider.GetRequiredService<IChannelRepository>();
-
-                var approveResult = await contactCoord.ApproveRequestAsync(target.PublicIdentityId, senderId, PeerTrustLevel.Tofu, ct);
-                if (!approveResult.IsSuccess)
-                {
-                    _toastService.ShowToast("Accept Failed", approveResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-
-                var completeResult = await handshakeService.CompletePendingHandshakeAsync(target.PublicIdentityId, senderId, ct);
-                if (!completeResult.IsSuccess)
-                {
-                    _toastService.ShowToast("Accept Failed", completeResult.Error.Description, ToastSeverity.Error);
-                    return false;
-                }
-
-                // Ensure channel exists on target
-                var channelId = ChannelId.DeterministicForDirect(target.PublicIdentityId, senderId);
-                var directChannel = await channelRepo.GetDirectByIdAsync(channelId, ct);
-                if (directChannel == null)
-                {
-                    var channel = DirectChannel.Create(channelId, target.PublicIdentityId, senderId, timeProvider).Value!;
-                    await channelRepo.SaveDirectAsync(channel, ct);
-                }
-
                 var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
+
                 var existingRoute = await routingRepo.GetByPeerIdAsync(senderId, ct).ConfigureAwait(false);
                 if (existingRoute == null)
                 {
@@ -211,6 +185,14 @@ internal sealed class DirectHandshakeOrchestrator
                     }
                 }
 
+                var inboundWorkflow = scope.ServiceProvider.GetRequiredService<IInboundConnectionWorkflow>();
+                var acceptResult = await inboundWorkflow.AcceptRequestAsync(target.PublicIdentityId, senderId, ct);
+                if (!acceptResult.IsSuccess)
+                {
+                    _toastService.ShowToast("Accept Failed", acceptResult.Error.Description, ToastSeverity.Error);
+                    return false;
+                }
+
                 if (senderHost != null)
                 {
                     if (senderHost.HomeRelay != null)
@@ -238,12 +220,6 @@ internal sealed class DirectHandshakeOrchestrator
 
                 _flightRecorder.RecordStep(new ApprovePendingHandshakeStep(target.DisplayName, senderHost?.DisplayName ?? senderId.ToString()));
                 _toastService.ShowToast("Handshake Accepted", "✓ Direct secure session established.", ToastSeverity.Success);
-
-                _stateBus.Publish(new SimulatorStateSignal(
-                    target.Id,
-                    SignalCategory.PendingHandshakeChanged,
-                    Details: senderId.ToString(),
-                    Payload: new HandshakeSignalPayload(senderId, "Accept")));
 
                 _stateBus.Publish(new SimulatorStateSignal(
                     target.Id,
@@ -284,26 +260,15 @@ internal sealed class DirectHandshakeOrchestrator
             try
             {
                 using var scope = target.Services.CreateScope();
-                var contactCoord = scope.ServiceProvider.GetRequiredService<IContactRequestCoordinator>();
-                var pendingRepo = scope.ServiceProvider.GetRequiredService<IPendingHandshakeRepository>();
-                var dbContext = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
+                var workflow = scope.ServiceProvider.GetRequiredService<IInboundConnectionWorkflow>();
+                var result = block
+                    ? await workflow.BlockRequestAsync(target.PublicIdentityId, senderId, ct)
+                    : await workflow.RejectRequestAsync(target.PublicIdentityId, senderId, ct);
 
-                await contactCoord.RejectRequestAsync(target.PublicIdentityId, senderId, block, ct);
-                await pendingRepo.DeletePendingHandshakeAsync(target.PublicIdentityId, senderId, ct);
-
-                // If rejected without blocking, remove the Rejected contact record so future handshakes can be re-requested cleanly
-                if (!block)
+                if (!result.IsSuccess)
                 {
-                    var rejectedEntity = await dbContext.PeerContacts
-                        .FirstOrDefaultAsync(
-                            c => c.OwnerIdentityId == target.PublicIdentityId.Value &&
-                                 c.RemotePeerId == senderId.Value,
-                            ct);
-                    if (rejectedEntity != null)
-                    {
-                        dbContext.PeerContacts.Remove(rejectedEntity);
-                        await dbContext.SaveChangesAsync(ct);
-                    }
+                    _toastService.ShowToast("Reject Failed", result.Error.Description, ToastSeverity.Error);
+                    return false;
                 }
 
                 var senderHost = _worldState.FindPersonaHostByIdentity(senderId);
@@ -322,12 +287,6 @@ internal sealed class DirectHandshakeOrchestrator
                     block ? "Handshake Blocked" : "Handshake Rejected",
                     $"Handshake from {senderId} has been {(block ? "blocked" : "rejected")}.",
                     ToastSeverity.Warning);
-
-                _stateBus.Publish(new SimulatorStateSignal(
-                    target.Id,
-                    SignalCategory.PendingHandshakeChanged,
-                    Details: senderId.ToString(),
-                    Payload: new HandshakeSignalPayload(senderId, block ? "Block" : "Reject")));
 
                 return true;
             }

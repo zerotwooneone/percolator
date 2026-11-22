@@ -419,7 +419,7 @@ flowchart TD
 
 ---
 
-### [DESK-07-B] Inbound Handshake Consent Pipeline, Inbound DirectChannel Creation & Decorator Removal
+### [x] [DESK-07-B] Inbound Handshake Consent Pipeline, Inbound DirectChannel Creation & Decorator Removal (COMPLETED)
 * **QMS Traceability**: `DEP-DESKTOP-UNSOLICITED-CONSENT-GATE` (allocates `SYS-CONTACT-CONSENT-GATE`), `DEP-DESKTOP-PEER-BLOCK-UI-SILENCE` (allocates `SYS-PEER-BLOCK-SILENT-DROP`), `DEP-DESKTOP-CRYPTO-BOUNDARY`
 * **Detailed Design**: `DEC-PULL-BASED-CONSENT-STAGING`, `INV-APP-EVENT-BUS-DECOUPLING`, `INV-RECORD-EVENT-ENFORCEMENT`, `INV-DESKTOP-STATEFUL-PROJECTIONS`, `INV-DESKTOP-THREAD-DISCIPLINE`
 * **Governing Specs**: `[UISS-001]` to `[UISS-005]`, `[VM-003]`, `[VM-006]`, `[R3-004]`, `[R3-005]`, `[R3-006]`, `anti-shortcut-discipline` Rules 1, 3, 6, 8, 10

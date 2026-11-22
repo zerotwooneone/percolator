@@ -55,7 +55,8 @@ public sealed class AppHostPipelineTests
         _pendingHandshakeRepo = new InMemoryPendingHandshakeRepository();
         _replayFilter = new FakeHandshakeReplayFilter();
         _timeProvider = new TestDateTimeProvider();
-        _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider);
+        var eventPublisher = new FakeEventPublisher();
+        _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider, eventPublisher);
         _outboxRepo = new InMemoryOutboxRepository();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _appRouter = new AppRouter();
@@ -74,7 +75,7 @@ public sealed class AppHostPipelineTests
             _cryptoEngine,
             _timeProvider,
             _appRouter,
-            new FakeEventPublisher());
+            eventPublisher);
 
         _groupKeyDistributionService = new GroupKeyDistributionService(
             _senderKeyRepo,

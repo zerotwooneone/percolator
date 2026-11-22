@@ -320,7 +320,8 @@ public sealed class TestIdentityNode
 
         ContactRequestCoordinator = new ContactRequestCoordinator(
             _contactRepo,
-            TimeProvider);
+            TimeProvider,
+            EventBus);
 
         GroupKeyDistributionService = new GroupKeyDistributionService(
             _groupSenderKeyRepo,

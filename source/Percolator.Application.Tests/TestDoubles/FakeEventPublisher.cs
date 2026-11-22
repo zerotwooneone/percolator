@@ -12,4 +12,6 @@ public sealed class FakeEventPublisher : IEventPublisher
         _publishedEvents.Add(@event);
         return ValueTask.CompletedTask;
     }
+
+    public void Clear() => _publishedEvents.Clear();
 }

@@ -266,13 +266,8 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 }
                 return new SimulatorNotifyingAppRouterDecorator(inner, _stateBus, Id);
             });
-            // Decorate IHandshakeService so incoming handshakes notify ISimulatorStateBus (PendingHandshakeChanged)
-            services.AddScoped<HandshakeService>();
-            services.AddScoped<IHandshakeService>(sp =>
-                new SimulatorNotifyingHandshakeDecorator(
-                    sp.GetRequiredService<HandshakeService>(),
-                    _stateBus,
-                    Id));
+            services.AddScoped<IHandshakeService, HandshakeService>();
+            services.AddScoped<IInboundConnectionWorkflow, InboundConnectionWorkflow>();
             // Decorate ITransportDispatcher for non-invasive egress chaos & fault injection
             services.AddScoped<TransportDispatcher>();
             services.AddScoped<ITransportDispatcher>(sp =>

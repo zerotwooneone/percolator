@@ -70,11 +70,19 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         }
 
         var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, timeProvider.UtcNow, status, relayEndpoint);
+        channel.AddDomainEvent(new DirectChannelCreatedDomainEvent(id, ownerIdentityId, remotePeerId, status, relayEndpoint, timeProvider.UtcNow));
         return DomainResult<DirectChannel>.Success(channel);
     }
 
-    public DomainResult Activate(IDateTimeProvider timeProvider)
+    public DomainResult Activate(IDateTimeProvider timeProvider, RelayEndpoint? relayEndpoint = null)
     {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+
+        if (relayEndpoint != null)
+        {
+            RelayEndpoint = relayEndpoint;
+        }
+
         if (Status == DirectChannelStatus.Active)
         {
             return DomainResult.Success();
@@ -82,6 +90,14 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
 
         Status = DirectChannelStatus.Active;
         LastActivityUtc = timeProvider.UtcNow;
+        AddDomainEvent(new DirectChannelCreatedDomainEvent(
+            Id,
+            OwnerIdentityId,
+            RemotePeerId,
+            Status,
+            RelayEndpoint,
+            timeProvider.UtcNow));
+
         return DomainResult.Success();
     }
 

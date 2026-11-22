@@ -10,10 +10,13 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
+using Percolator.Application.Channels.Events;
 using Percolator.Application.Ports;
+using Percolator.Application.Profiles.Events;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Ports;
+using Percolator.PluginSdk.Events;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -279,10 +282,30 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         // Subscribe to cross-host reactive signals
         if (_host != null)
         {
-            _stateBus.Signals
-                .Where(s => s.NodeId == NodeId && s.Category == SignalCategory.PendingHandshakeChanged)
-                .Subscribe(_ => RefreshPendingHandshakes())
-                .AddTo(ref Disposables);
+            var eventSubscriber = _host.Services.GetRequiredService<IEventSubscriber>();
+            eventSubscriber.Subscribe<InboundContactRequestReceivedEvent>((evt, ct) =>
+            {
+                if (evt.OwnerIdentityId == _host.PublicIdentityId) RefreshPendingHandshakes();
+                return ValueTask.CompletedTask;
+            }).AddTo(ref Disposables);
+
+            eventSubscriber.Subscribe<ContactRequestApprovedEvent>((evt, ct) =>
+            {
+                if (evt.OwnerIdentityId == _host.PublicIdentityId) RefreshPendingHandshakes();
+                return ValueTask.CompletedTask;
+            }).AddTo(ref Disposables);
+
+            eventSubscriber.Subscribe<ContactRequestRejectedEvent>((evt, ct) =>
+            {
+                if (evt.OwnerIdentityId == _host.PublicIdentityId) RefreshPendingHandshakes();
+                return ValueTask.CompletedTask;
+            }).AddTo(ref Disposables);
+
+            eventSubscriber.Subscribe<DirectChannelCreatedEvent>((evt, ct) =>
+            {
+                if (evt.OwnerIdentityId == _host.PublicIdentityId) RefreshConversations();
+                return ValueTask.CompletedTask;
+            }).AddTo(ref Disposables);
 
             _stateBus.Signals
                 .Where(s => (s.NodeId == NodeId ||

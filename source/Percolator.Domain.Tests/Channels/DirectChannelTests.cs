@@ -30,7 +30,15 @@ public class DirectChannelTests
         var result = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.Id.Should().Be(_channelId);
+        result.Value!.Id.Should().Be(_channelId);
+        result.Value.DomainEvents.Should().ContainSingle(e => e is DirectChannelCreatedDomainEvent)
+            .Which.Should().BeOfType<DirectChannelCreatedDomainEvent>()
+            .Which.Should().Match<DirectChannelCreatedDomainEvent>(e =>
+                e.ChannelId == _channelId &&
+                e.OwnerIdentityId == _ownerId &&
+                e.RemotePeerId == _peerId &&
+                e.Status == DirectChannelStatus.Active &&
+                e.RelayEndpoint == null);
     }
 
     [Test]

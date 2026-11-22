@@ -7,11 +7,13 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Application.Ports;
+using Percolator.Application.Profiles.Events;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.Logging;
@@ -554,8 +556,9 @@ internal sealed class ScenarioRunnerService
         var targetListening = target.IsListening.CurrentValue;
 
         Task signalTask = targetListening
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == target.Id && s.Category == SignalCategory.PendingHandshakeChanged)
+            ? target.Services.GetRequiredService<IEventSubscriber>()
+                .ObserveEvent<InboundContactRequestReceivedEvent>()
+                .Where(e => e.OwnerIdentityId == target.PublicIdentityId)
                 .FirstAsync(cancellationToken: ct)
             : Task.CompletedTask;
 
@@ -628,8 +631,9 @@ internal sealed class ScenarioRunnerService
         var targetListening = target.IsListening.CurrentValue;
 
         Task signalTask = targetListening
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == target.Id && s.Category == SignalCategory.PendingHandshakeChanged)
+            ? target.Services.GetRequiredService<IEventSubscriber>()
+                .ObserveEvent<InboundContactRequestReceivedEvent>()
+                .Where(e => e.OwnerIdentityId == target.PublicIdentityId)
                 .FirstAsync(cancellationToken: ct)
             : Task.CompletedTask;
 
@@ -1578,8 +1582,9 @@ internal sealed class ScenarioRunnerService
         var candidateListening = candidate.IsListening.CurrentValue;
 
         Task signalTask = candidateListening
-            ? _stateBus.Signals
-                .Where(s => s.NodeId == candidate.Id && s.Category == SignalCategory.PendingHandshakeChanged)
+            ? candidate.Services.GetRequiredService<IEventSubscriber>()
+                .ObserveEvent<InboundContactRequestReceivedEvent>()
+                .Where(e => e.OwnerIdentityId == candidate.PublicIdentityId)
                 .FirstAsync(cancellationToken: ct)
             : Task.CompletedTask;
 

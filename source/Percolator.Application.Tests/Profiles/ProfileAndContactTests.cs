@@ -1,4 +1,5 @@
 using Percolator.Application.Profiles;
+using Percolator.Application.Profiles.Events;
 using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
@@ -17,6 +18,7 @@ public sealed class ProfileAndContactTests
     private ProfileManager _profileManager = null!;
     private ContactRequestCoordinator _contactCoordinator = null!;
 
+    private FakeEventPublisher _eventPublisher = null!;
     private PublicIdentityId _aliceId;
     private PublicIdentityId _bobId;
     private IdentityKey _bobIdentityKey = null!;
@@ -28,7 +30,8 @@ public sealed class ProfileAndContactTests
         _contactRepo = new InMemoryPeerContactRepository();
         _timeProvider = new TestDateTimeProvider();
         _profileManager = new ProfileManager(new TestProfileMetadataSerializer());
-        _contactCoordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider);
+        _eventPublisher = new FakeEventPublisher();
+        _contactCoordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider, _eventPublisher);
 
         _aliceId = PublicIdentityId.New();
         _bobId = PublicIdentityId.New();
@@ -135,5 +138,86 @@ public sealed class ProfileAndContactTests
         contact.State.Should().Be(ContactState.Active);
         contact.TrustLevel.Should().Be(PeerTrustLevel.Verified);
         contact.Nickname.Value.Should().Be("Bob");
+    }
+
+    [Test]
+    public async Task InboundRequest_PublishesInboundContactRequestReceivedEvent()
+    {
+        var result = await _contactCoordinator.HandleInboundRequestAsync(_aliceId, _bobId, _bobIdentityKey, "Bob");
+        result.IsSuccess.Should().BeTrue();
+
+        _eventPublisher.PublishedEvents.Should().ContainSingle(e => e is InboundContactRequestReceivedEvent)
+            .Which.Should().BeOfType<InboundContactRequestReceivedEvent>()
+            .Which.Should().Match<InboundContactRequestReceivedEvent>(e =>
+                e.OwnerIdentityId == _aliceId &&
+                e.RemotePeerId == _bobId &&
+                e.PrimaryPublicKey.Equals(_bobIdentityKey));
+    }
+
+    [Test]
+    public async Task ApproveRequest_PublishesContactRequestApprovedEvent()
+    {
+        await _contactCoordinator.HandleInboundRequestAsync(_aliceId, _bobId, _bobIdentityKey, "Bob");
+        _eventPublisher.Clear();
+
+        var result = await _contactCoordinator.ApproveRequestAsync(_aliceId, _bobId, PeerTrustLevel.Verified);
+        result.IsSuccess.Should().BeTrue();
+
+        _eventPublisher.PublishedEvents.Should().ContainSingle(e => e is ContactRequestApprovedEvent)
+            .Which.Should().BeOfType<ContactRequestApprovedEvent>()
+            .Which.Should().Match<ContactRequestApprovedEvent>(e =>
+                e.OwnerIdentityId == _aliceId &&
+                e.RemotePeerId == _bobId &&
+                e.TrustLevel == PeerTrustLevel.Verified);
+    }
+
+    [Test]
+    public async Task RejectRequest_PublishesContactRequestRejectedEvent()
+    {
+        await _contactCoordinator.HandleInboundRequestAsync(_aliceId, _bobId, _bobIdentityKey, "Bob");
+        _eventPublisher.Clear();
+
+        var result = await _contactCoordinator.RejectRequestAsync(_aliceId, _bobId, block: true);
+        result.IsSuccess.Should().BeTrue();
+
+        _eventPublisher.PublishedEvents.Should().ContainSingle(e => e is ContactRequestRejectedEvent)
+            .Which.Should().BeOfType<ContactRequestRejectedEvent>()
+            .Which.Should().Match<ContactRequestRejectedEvent>(e =>
+                e.OwnerIdentityId == _aliceId &&
+                e.RemotePeerId == _bobId &&
+                e.IsBlocked == true);
+    }
+
+    [Test]
+    public async Task ReopenInboundRequest_WhenPreviouslyRejected_ReopensAndPublishesEvent()
+    {
+        await _contactCoordinator.HandleInboundRequestAsync(_aliceId, _bobId, _bobIdentityKey, "Bob");
+        await _contactCoordinator.RejectRequestAsync(_aliceId, _bobId, block: false);
+        _eventPublisher.Clear();
+
+        var reopenResult = await _contactCoordinator.HandleInboundRequestAsync(
+            _aliceId, _bobId, _bobIdentityKey, "Bob (Reopened)");
+
+        reopenResult.IsSuccess.Should().BeTrue();
+        var stored = await _contactRepo.GetByPeerIdAsync(_aliceId, _bobId);
+        stored!.State.Should().Be(ContactState.PendingApproval);
+        stored.Nickname.Value.Should().Be("Bob (Reopened)");
+
+        _eventPublisher.PublishedEvents.Should().ContainSingle(e => e is InboundContactRequestReceivedEvent);
+    }
+
+    [Test]
+    public async Task ReopenInboundRequest_WhenBlocked_FailsSilentlyWithContactBlocked()
+    {
+        await _contactCoordinator.HandleInboundRequestAsync(_aliceId, _bobId, _bobIdentityKey, "Bob");
+        await _contactCoordinator.RejectRequestAsync(_aliceId, _bobId, block: true);
+        _eventPublisher.Clear();
+
+        var reopenResult = await _contactCoordinator.HandleInboundRequestAsync(
+            _aliceId, _bobId, _bobIdentityKey, "Bob");
+
+        reopenResult.IsSuccess.Should().BeFalse();
+        reopenResult.Error.Code.Should().Be("CONTACT_BLOCKED");
+        _eventPublisher.PublishedEvents.Should().BeEmpty();
     }
 }

@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using NUnit.Framework;
+using Percolator.Application.Channels.Events;
 using Percolator.Application.Invitations;
 using Percolator.Application.Ports;
 using Percolator.Apps.Chat.Features.Messaging;
@@ -36,6 +37,7 @@ public sealed class ConversationStateServiceTests
     private FakeOutboundPendingRetryWorker _fakeRetryWorker = null!;
     private Mock<ICurrentPersonaService> _currentPersonaMock = null!;
     private Subject<ActivePersonaModel?> _currentPersonaChanged = null!;
+    private Percolator.Infrastructure.Events.InMemoryEventBus _eventBus = null!;
     private FakeTimeProvider _timeProvider = null!;
 
     private PublicIdentityId _personaId;
@@ -51,6 +53,7 @@ public sealed class ConversationStateServiceTests
         _fakeRetryWorker = new FakeOutboundPendingRetryWorker();
         _currentPersonaMock = new Mock<ICurrentPersonaService>();
         _currentPersonaChanged = new Subject<ActivePersonaModel?>();
+        _eventBus = new Percolator.Infrastructure.Events.InMemoryEventBus(NullLogger<Percolator.Infrastructure.Events.InMemoryEventBus>.Instance);
         _timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
 
         _personaId = PublicIdentityId.New();
@@ -87,6 +90,7 @@ public sealed class ConversationStateServiceTests
     {
         _currentPersonaChanged.Dispose();
         _fakeRetryWorker.Dispose();
+        _eventBus.Dispose();
     }
 
     private ConversationStateService CreateService()
@@ -96,6 +100,7 @@ public sealed class ConversationStateServiceTests
             _contactQueryMock.Object,
             _fakeRetryWorker,
             _currentPersonaMock.Object,
+            _eventBus,
             NullLogger<ConversationStateService>.Instance,
             _timeProvider);
     }
@@ -105,12 +110,13 @@ public sealed class ConversationStateServiceTests
     {
         var logger = NullLogger<ConversationStateService>.Instance;
 
-        Action act1 = () => new ConversationStateService(null!, _contactQueryMock.Object, _fakeRetryWorker, _currentPersonaMock.Object, logger, _timeProvider);
-        Action act2 = () => new ConversationStateService(_conversationQueryMock.Object, null!, _fakeRetryWorker, _currentPersonaMock.Object, logger, _timeProvider);
-        Action act3 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, null!, _currentPersonaMock.Object, logger, _timeProvider);
-        Action act4 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, _fakeRetryWorker, null!, logger, _timeProvider);
-        Action act5 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, _fakeRetryWorker, _currentPersonaMock.Object, null!, _timeProvider);
-        Action act6 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, _fakeRetryWorker, _currentPersonaMock.Object, logger, null!);
+        Action act1 = () => new ConversationStateService(null!, _contactQueryMock.Object, _fakeRetryWorker, _currentPersonaMock.Object, _eventBus, logger, _timeProvider);
+        Action act2 = () => new ConversationStateService(_conversationQueryMock.Object, null!, _fakeRetryWorker, _currentPersonaMock.Object, _eventBus, logger, _timeProvider);
+        Action act3 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, null!, _currentPersonaMock.Object, _eventBus, logger, _timeProvider);
+        Action act4 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, _fakeRetryWorker, null!, _eventBus, logger, _timeProvider);
+        Action act5 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, _fakeRetryWorker, _currentPersonaMock.Object, null!, logger, _timeProvider);
+        Action act6 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, _fakeRetryWorker, _currentPersonaMock.Object, _eventBus, null!, _timeProvider);
+        Action act7 = () => new ConversationStateService(_conversationQueryMock.Object, _contactQueryMock.Object, _fakeRetryWorker, _currentPersonaMock.Object, _eventBus, logger, null!);
 
         act1.Should().Throw<ArgumentNullException>();
         act2.Should().Throw<ArgumentNullException>();
@@ -118,6 +124,7 @@ public sealed class ConversationStateServiceTests
         act4.Should().Throw<ArgumentNullException>();
         act5.Should().Throw<ArgumentNullException>();
         act6.Should().Throw<ArgumentNullException>();
+        act7.Should().Throw<ArgumentNullException>();
     }
 
     [Test]
@@ -251,5 +258,140 @@ public sealed class ConversationStateServiceTests
         conv.DisplayName.Should().Be("Charlie Direct");
         conv.RouteType.Should().Be(ConversationRouteType.DirectP2P);
         conv.DeliveryStatus.Should().Be(ConversationDeliveryStatus.Connected);
+    }
+
+    [Test]
+    public async Task EventSubscriber_DirectChannelCreatedEvent_TriggersReload()
+    {
+        using var service = CreateService();
+
+        var evt = new Percolator.Application.Channels.Events.DirectChannelCreatedEvent
+        {
+            ChannelId = ChannelId.New(),
+            OwnerIdentityId = _personaId,
+            RemotePeerId = PublicIdentityId.New(),
+            Status = Domain.Channels.Model.DirectChannelStatus.Active
+        };
+
+        await _eventBus.PublishAsync(evt);
+
+        _conversationQueryMock.Verify(
+            q => q.GetConversationsAsync(_personaId, It.IsAny<ulong>(), It.IsAny<CancellationToken>()),
+            Times.AtLeast(2));
+    }
+
+    [Test]
+    public async Task EventSubscriber_BurstOfDirectChannelCreatedEvents_CoalescesViaThrottleFirstLast()
+    {
+        using var service = CreateService();
+        // Initial constructor load triggers 1 call.
+        _conversationQueryMock.Verify(
+            q => q.GetConversationsAsync(_personaId, It.IsAny<ulong>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        for (int i = 0; i < 5; i++)
+        {
+            await _eventBus.PublishAsync(new DirectChannelCreatedEvent
+            {
+                ChannelId = ChannelId.New(),
+                OwnerIdentityId = _personaId,
+                RemotePeerId = PublicIdentityId.New(),
+                Status = Domain.Channels.Model.DirectChannelStatus.Active
+            });
+            _timeProvider.Advance(TimeSpan.FromMilliseconds(5));
+        }
+
+        // Leading edge fired once; subsequent burst events are coalesced during 50ms window.
+        _conversationQueryMock.Verify(
+            q => q.GetConversationsAsync(_personaId, It.IsAny<ulong>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+
+        // Advancing past 50ms window triggers the single coalesced trailing reload.
+        _timeProvider.Advance(TimeSpan.FromMilliseconds(35));
+
+        _conversationQueryMock.Verify(
+            q => q.GetConversationsAsync(_personaId, It.IsAny<ulong>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3));
+    }
+
+    [Test]
+    public async Task EventSubscriber_SlowInFlightReload_IsCancelledByTrailingSwitchAndPersonaLock()
+    {
+        var callCount = 0;
+        var secondCallTcs = new TaskCompletionSource<IReadOnlyList<ConversationSummaryReadModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thirdCallTcs = new TaskCompletionSource<IReadOnlyList<ConversationSummaryReadModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken secondCallToken = default;
+        CancellationToken thirdCallToken = default;
+
+        _conversationQueryMock
+            .Setup(q => q.GetConversationsAsync(_personaId, It.IsAny<ulong>(), It.IsAny<CancellationToken>()))
+            .Returns((PublicIdentityId _, ulong _, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return Task.FromResult<IReadOnlyList<ConversationSummaryReadModel>>(Array.Empty<ConversationSummaryReadModel>());
+                }
+
+                if (callCount == 2)
+                {
+                    secondCallToken = ct;
+                    return secondCallTcs.Task;
+                }
+
+                thirdCallToken = ct;
+                return thirdCallTcs.Task;
+            });
+
+        using var service = CreateService();
+
+        // Event 1: triggers leading edge reload (call #2, in-flight).
+        await _eventBus.PublishAsync(new DirectChannelCreatedEvent
+        {
+            ChannelId = ChannelId.New(),
+            OwnerIdentityId = _personaId,
+            RemotePeerId = PublicIdentityId.New(),
+            Status = Domain.Channels.Model.DirectChannelStatus.Active
+        });
+
+        secondCallToken.CanBeCanceled.Should().BeTrue();
+        secondCallToken.IsCancellationRequested.Should().BeFalse();
+
+        // Event 2 inside 50ms window queues trailing reload.
+        _timeProvider.Advance(TimeSpan.FromMilliseconds(10));
+        await _eventBus.PublishAsync(new DirectChannelCreatedEvent
+        {
+            ChannelId = ChannelId.New(),
+            OwnerIdentityId = _personaId,
+            RemotePeerId = PublicIdentityId.New(),
+            Status = Domain.Channels.Model.DirectChannelStatus.Active
+        });
+
+        // Advancing past 50ms fires trailing emission; AwaitOperation.Switch cancels call #2 and starts call #3.
+        _timeProvider.Advance(TimeSpan.FromMilliseconds(50));
+        secondCallToken.IsCancellationRequested.Should().BeTrue();
+        thirdCallToken.IsCancellationRequested.Should().BeFalse();
+
+        // Locking vault cancels call #3 and prevents stale completion from populating state.
+        _currentPersonaChanged.OnNext(null);
+        thirdCallToken.IsCancellationRequested.Should().BeTrue();
+
+        thirdCallTcs.SetResult(new[]
+        {
+            new ConversationSummaryReadModel(
+                ChannelId.New(),
+                ConversationChannelKind.Direct,
+                _peerId,
+                "Stale Chat",
+                "Should never appear",
+                (ulong)_timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
+                1,
+                _peerId,
+                IsPendingAcceptance: false,
+                RelayEndpoint: null,
+                RelayIdentityId: null)
+        });
+
+        service.Conversations.Should().BeEmpty();
     }
 }

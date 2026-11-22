@@ -1,3 +1,4 @@
+using Percolator.Domain.Identities.Events;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Tests.TestDoubles;
@@ -202,7 +203,7 @@ public class PeerContactTests
     }
 
     [Test]
-    public void Approve_TransitionsFromPendingToActive_AndSetsTrustLevel()
+    public void Approve_TransitionsFromPendingToActive_AndSetsTrustLevel_AndEmitsDomainEvent()
     {
         var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
         var contact = PeerContact.CreateInboundRequest(
@@ -210,17 +211,21 @@ public class PeerContactTests
             PublicIdentityId.New(),
             _primaryPeerKey,
             "Bob",
-            timeProvider).Value;
+            timeProvider).Value!;
 
-        var approveResult = contact.Approve(PeerTrustLevel.Tofu);
+        contact.DomainEvents.Should().ContainSingle(e => e is InboundContactRequestReceivedDomainEvent);
+        contact.ClearDomainEvents();
+
+        var approveResult = contact.Approve(PeerTrustLevel.Tofu, timeProvider);
 
         approveResult.IsSuccess.Should().BeTrue();
         contact.State.Should().Be(ContactState.Active);
         contact.TrustLevel.Should().Be(PeerTrustLevel.Tofu);
+        contact.DomainEvents.Should().ContainSingle(e => e is ContactRequestApprovedDomainEvent);
     }
 
     [Test]
-    public void Reject_TransitionsStateToRejected_AndOptionallyBlocks()
+    public void Reject_TransitionsStateToRejected_AndOptionallyBlocks_AndEmitsDomainEvent()
     {
         var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
         var contact = PeerContact.CreateInboundRequest(
@@ -228,13 +233,18 @@ public class PeerContactTests
             PublicIdentityId.New(),
             _primaryPeerKey,
             "Bob",
-            timeProvider).Value;
+            timeProvider).Value!;
 
-        var rejectResult = contact.Reject(block: true);
+        contact.ClearDomainEvents();
+
+        var rejectResult = contact.Reject(block: true, timeProvider);
 
         rejectResult.IsSuccess.Should().BeTrue();
         contact.State.Should().Be(ContactState.Rejected);
         contact.TrustLevel.Should().Be(PeerTrustLevel.Blocked);
+        contact.DomainEvents.Should().ContainSingle(e => e is ContactRequestRejectedDomainEvent)
+            .Which.Should().BeOfType<ContactRequestRejectedDomainEvent>()
+            .Which.IsBlocked.Should().BeTrue();
     }
 
     [Test]
@@ -246,13 +256,54 @@ public class PeerContactTests
             PublicIdentityId.New(),
             _primaryPeerKey,
             "Bob",
-            timeProvider).Value;
+            timeProvider).Value!;
 
-        contact.Reject(block: true);
-        var approveResult = contact.Approve(PeerTrustLevel.Tofu);
+        contact.Reject(block: true, timeProvider);
+        var approveResult = contact.Approve(PeerTrustLevel.Tofu, timeProvider);
 
         approveResult.IsFailure.Should().BeTrue();
         approveResult.Error.Code.Should().Be("CONTACT_BLOCKED");
+    }
+
+    [Test]
+    public void ReopenInboundRequest_WhenPreviouslyRejected_ReopensAndEmitsDomainEvent()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var contact = PeerContact.CreateInboundRequest(
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            _primaryPeerKey,
+            "Bob",
+            timeProvider).Value!;
+
+        contact.Reject(block: false, timeProvider);
+        contact.ClearDomainEvents();
+
+        var reopenResult = contact.ReopenInboundRequest(_primaryPeerKey, "Bob (Reopened)", timeProvider);
+
+        reopenResult.IsSuccess.Should().BeTrue();
+        contact.State.Should().Be(ContactState.PendingApproval);
+        contact.Nickname.Value.Should().Be("Bob (Reopened)");
+        contact.DomainEvents.Should().ContainSingle(e => e is InboundContactRequestReceivedDomainEvent);
+    }
+
+    [Test]
+    public void ReopenInboundRequest_WhenBlocked_ReturnsContactBlockedError()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var contact = PeerContact.CreateInboundRequest(
+            PublicIdentityId.New(),
+            PublicIdentityId.New(),
+            _primaryPeerKey,
+            "Bob",
+            timeProvider).Value!;
+
+        contact.Reject(block: true, timeProvider);
+
+        var reopenResult = contact.ReopenInboundRequest(_primaryPeerKey, "Bob", timeProvider);
+
+        reopenResult.IsFailure.Should().BeTrue();
+        reopenResult.Error.Code.Should().Be("CONTACT_BLOCKED");
     }
 
     [Test]

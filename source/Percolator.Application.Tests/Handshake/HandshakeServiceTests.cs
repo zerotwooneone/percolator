@@ -45,15 +45,15 @@ public sealed class HandshakeServiceTests
         _identityKeyStore = new InMemoryLocalIdentityKeyStore();
         _preKeyStore = new InMemoryPrivatePreKeyStore();
         _contactRepo = new InMemoryPeerContactRepository();
+        _eventPublisher = new FakeEventPublisher();
         _timeProvider = new TestDateTimeProvider();
-        _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider);
+        _coordinator = new ContactRequestCoordinator(_contactRepo, _timeProvider, _eventPublisher);
         _sessionRepo = new InMemoryRatchetSessionRepository();
         _pendingHandshakeRepo = new InMemoryPendingHandshakeRepository();
         _replayFilter = new FakeHandshakeReplayFilter();
         _outboxRepo = new InMemoryOutboxRepository();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _appRouter = new AppRouter();
-        _eventPublisher = new FakeEventPublisher();
 
         _handshakeService = new HandshakeService(
             _identityKeyStore,
