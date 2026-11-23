@@ -237,6 +237,122 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         NotifySubscribers(routingToken, envelope);
     }
 
+    public async ValueTask<DomainResult> EnqueueEnvelopeAsync(
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        bool isAuthorized = await VerifyDeliveryTokenAsync(routingToken, deliveryToken, ct).ConfigureAwait(false);
+        if (!isAuthorized)
+        {
+            return DomainResult.Failure(new DomainError("PERMISSION_DENIED", "Invalid delivery token capability."));
+        }
+
+        var routing = routingToken.ToByteArray();
+        await _enqueueLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var db = _contextFactory.CreateDbContext();
+            var existingEnvelopes = await db.RelayQueuedEnvelopes
+                .AsNoTracking()
+                .Where(e => e.RoutingToken == routing)
+                .Select(e => e.EnvelopePayload.Length)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            long currentTotalBytes = existingEnvelopes.Sum(len => (long)len);
+            if (currentTotalBytes + envelope.Ciphertext.Length > maxMailboxBytes)
+            {
+                return DomainResult.Failure(new DomainError("MAILBOX_QUOTA_EXCEEDED", "Envelope size exceeds relay mailbox quota."));
+            }
+
+            var record = new RelayQueuedEnvelopeRecord(
+                MailboxQueueId.Parse(Guid.NewGuid().ToString("N")),
+                envelope.Ciphertext.ToArray(),
+                envelope.EnqueuedAtUtc);
+
+            var entity = new RelayQueuedEnvelopeEntity
+            {
+                QueueId = record.QueueId.Value,
+                RoutingToken = routing,
+                EnvelopePayload = record.EnvelopePayload.ToArray(),
+                EnqueuedAtUtc = record.EnqueuedAtUtc
+            };
+
+            db.RelayQueuedEnvelopes.Add(entity);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            NotifySubscribers(routingToken, record);
+            return DomainResult.Success();
+        }
+        finally
+        {
+            _enqueueLock.Release();
+        }
+    }
+
+    public async ValueTask<DomainResult> EnqueueAuthenticatedInitialAsync(
+        BlindedRoutingToken routingToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        var routing = routingToken.ToByteArray();
+
+        await _enqueueLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var db = _contextFactory.CreateDbContext();
+            var exists = await db.RelayMailboxCapabilities
+                .AsNoTracking()
+                .AnyAsync(c => c.RoutingToken == routing, ct)
+                .ConfigureAwait(false);
+
+            if (!exists)
+            {
+                return DomainResult.Failure(new DomainError("MAILBOX_NOT_FOUND", "Recipient mailbox not found."));
+            }
+
+            var existingEnvelopes = await db.RelayQueuedEnvelopes
+                .AsNoTracking()
+                .Where(e => e.RoutingToken == routing)
+                .Select(e => e.EnvelopePayload.Length)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            long currentTotalBytes = existingEnvelopes.Sum(len => (long)len);
+            if (currentTotalBytes + envelope.Ciphertext.Length > maxMailboxBytes)
+            {
+                return DomainResult.Failure(new DomainError("MAILBOX_QUOTA_EXCEEDED", "Envelope size exceeds relay mailbox quota."));
+            }
+
+            var record = new RelayQueuedEnvelopeRecord(
+                MailboxQueueId.Parse(Guid.NewGuid().ToString("N")),
+                envelope.Ciphertext.ToArray(),
+                envelope.EnqueuedAtUtc);
+
+            var entity = new RelayQueuedEnvelopeEntity
+            {
+                QueueId = record.QueueId.Value,
+                RoutingToken = routing,
+                EnvelopePayload = record.EnvelopePayload.ToArray(),
+                EnqueuedAtUtc = record.EnqueuedAtUtc
+            };
+
+            db.RelayQueuedEnvelopes.Add(entity);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            NotifySubscribers(routingToken, record);
+            return DomainResult.Success();
+        }
+        finally
+        {
+            _enqueueLock.Release();
+        }
+    }
+
     public async ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(
         BlindedRoutingToken routingToken,
         CancellationToken ct = default)

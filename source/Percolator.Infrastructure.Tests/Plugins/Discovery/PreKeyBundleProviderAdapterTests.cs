@@ -1,21 +1,19 @@
-using Percolator.PluginSdk.Profiles;
-
-namespace Percolator.Infrastructure.Tests.Plugins.Discovery;
-
 using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Tasks;
-using FluentAssertions;
-using NUnit.Framework;
+using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Adapters;
+using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
+
+namespace Percolator.Infrastructure.Tests.Plugins.Discovery;
 
 [TestFixture]
 public sealed class PreKeyBundleProviderAdapterTests
@@ -27,6 +25,20 @@ public sealed class PreKeyBundleProviderAdapterTests
 
         public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Bundle != null && Bundle.RoutingToken == routingToken && Bundle.DeviceId == deviceId ? Bundle : null);
+
+        public Task<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?> ConsumePreKeyBundleAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
+        {
+            if (Bundle != null && Bundle.RoutingToken == routingToken && Bundle.DeviceId == deviceId)
+            {
+                var consumed = Bundle.ConsumeBundle();
+                if (consumed.IsSuccess)
+                {
+                    SaveCalled = true;
+                    return Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(consumed.Value);
+                }
+            }
+            return Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(null);
+        }
 
         public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(Bundle != null && Bundle.RoutingToken == routingToken ? new[] { Bundle } : Array.Empty<RelayHostedPreKeyBundle>());
@@ -74,6 +86,58 @@ public sealed class PreKeyBundleProviderAdapterTests
             Task.CompletedTask;
     }
 
+    private sealed class StubPeerGrpcChannelFactory : IPeerGrpcChannelFactory
+    {
+        public Grpc.Net.Client.GrpcChannel GetOrCreateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated) =>
+            throw new NotSupportedException();
+
+        public void InvalidateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated) { }
+
+        public int EvictIdleChannels() => 0;
+
+        public int GetActiveChannelCount(ChannelPoolKind poolKind) => 0;
+
+        public int ActiveChannelCount => 0;
+
+        public void Dispose() { }
+    }
+
+    private sealed class StubRelayDirectory : IRelayDirectory
+    {
+        public Task<IReadOnlyList<RelayDirectoryEntry>> ListAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<RelayDirectoryEntry>>(Array.Empty<RelayDirectoryEntry>());
+
+        public Task<DomainResult<RelayDirectoryEntry>> CreateLocalRelayHostAsync(
+            PublicIdentityId relayIdentityId, string displayName, RelayEndpoint endpoint,
+            IEnumerable<PublicIdentityId> initialLinkedOwnerIds, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+
+        public Task<DomainResult<RelayDirectoryEntry>> RegisterRemoteRelayAsync(
+            PublicIdentityId relayIdentityId, RelayEndpoint endpoint, CertificatePin? pinnedCertificate = null, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+
+        public Task<DomainResult<RelayMailboxBinding>> LinkIdentityAsync(
+            PublicIdentityId relayIdentityId, PublicIdentityId ownerIdentityId, BlindedRoutingToken? routingToken = null,
+            DeliveryToken? drainToken = null, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+
+        public Task<DomainResult> UnlinkIdentityAsync(PublicIdentityId relayIdentityId, PublicIdentityId ownerIdentityId, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+
+        public Task<DomainResult> SetMailboxBindingStatusAsync(
+            PublicIdentityId relayIdentityId, PublicIdentityId ownerIdentityId, RelayLinkStatus status, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+
+        public Task<DomainResult<MailboxTokenTriad>> GetMailboxTokensAsync(PublicIdentityId ownerIdentityId, PublicIdentityId relayIdentityId, CancellationToken ct = default) =>
+            Task.FromResult(DomainResult<MailboxTokenTriad>.Failure(new DomainError("NOT_FOUND", "Not found")));
+
+        public Task<DomainResult> EnsureMailboxProvisionedAsync(PublicIdentityId relayIdentityId, PublicIdentityId ownerIdentityId, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+
+        public Task<DomainResult> ProvisionLinkedMailboxesAsync(PublicIdentityId ownerIdentityId, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+    }
+
     [Test]
     public async Task FetchConsumableBundleAsync_FromLocalRepository_ConsumesAndSavesBundle()
     {
@@ -103,7 +167,7 @@ public sealed class PreKeyBundleProviderAdapterTests
                 RelayEndpoint.FromHostAndPort("localhost", 50051),
                 LastObservedAtUtc: DateTimeOffset.UtcNow)
         };
-        var adapter = new PreKeyBundleProviderAdapter(preKeyRepository: repo, routingRepository: routingRepo);
+        var adapter = new PreKeyBundleProviderAdapter(routingRepo, new StubPeerGrpcChannelFactory(), new StubRelayDirectory(), repo);
 
         var result = await adapter.FetchConsumableBundleAsync(peerId, DeviceId.Primary);
 
@@ -119,7 +183,8 @@ public sealed class PreKeyBundleProviderAdapterTests
     {
         var peerId = Domain.Identities.PublicIdentityId.New();
         var repo = new InMemoryPreKeyRepo();
-        var adapter = new PreKeyBundleProviderAdapter(preKeyRepository: repo);
+        var routingRepo = new InMemoryRoutingRepo();
+        var adapter = new PreKeyBundleProviderAdapter(routingRepo, new StubPeerGrpcChannelFactory(), new StubRelayDirectory(), repo);
 
         var result = await adapter.FetchConsumableBundleAsync(peerId, DeviceId.Primary);
 
@@ -132,8 +197,7 @@ public sealed class PreKeyBundleProviderAdapterTests
     {
         var peerId = Domain.Identities.PublicIdentityId.New();
         var routingRepo = new InMemoryRoutingRepo(); // empty
-        var adapter = new PreKeyBundleProviderAdapter(
-            routingRepository: routingRepo);
+        var adapter = new PreKeyBundleProviderAdapter(routingRepo, new StubPeerGrpcChannelFactory(), new StubRelayDirectory());
 
         var relayEndpoint = RelayEndpoint.FromHostAndPort("localhost", 50051);
         var result = await adapter.FetchConsumableBundleAsync(peerId, DeviceId.Primary, relayEndpoint);

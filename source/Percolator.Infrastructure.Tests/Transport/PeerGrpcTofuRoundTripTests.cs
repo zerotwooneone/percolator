@@ -49,6 +49,9 @@ public sealed class PeerGrpcTofuRoundTripTests
         public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
             => Task.FromResult<RelayHostedPreKeyBundle?>(null);
 
+        public Task<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?> ConsumePreKeyBundleAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
+            => Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(null);
+
         public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<RelayHostedPreKeyBundle>>(Array.Empty<RelayHostedPreKeyBundle>());
 
@@ -77,37 +80,6 @@ public sealed class PeerGrpcTofuRoundTripTests
             => ValueTask.CompletedTask;
     }
 
-    private sealed class StubIngressFilterService : IIngressFilterService
-    {
-        public ValueTask<DomainResult> CheckIngressAllowedAsync(
-            Domain.Identities.PublicIdentityId recipientId,
-            Domain.Identities.PublicIdentityId senderId,
-            CancellationToken ct = default) =>
-            ValueTask.FromResult(DomainResult.Success());
-    }
-
-    private sealed class StubEnvelopeUnwrapper : ISealedEnvelopeUnwrapper
-    {
-        public DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, Domain.Identities.PublicIdentityId recipientId)
-            => UnwrapDirect(envelope.Ciphertext, recipientId);
-
-        public DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes, Domain.Identities.PublicIdentityId recipientId)
-            => DomainResult<InboundEnvelope>.Success(new InboundDirectEnvelope(
-                Domain.Channels.ValueObjects.ChannelId.New(),
-                recipientId,
-                Domain.Identities.PublicIdentityId.New(),
-                DeviceId.Primary,
-                new Domain.Security.ValueObjects.RatchetHeader(Domain.Identities.ValueObjects.DhPublicKey.FromSpan(new byte[32]), 0, 0),
-                payloadBytes.ToArray(),
-                DateTimeOffset.UtcNow));
-    }
-
-    private sealed class StubIngressPipeline : Percolator.Application.Ingress.IInboundIngressPipeline
-    {
-        public ValueTask<DomainResult> ProcessInboundAsync(InboundEnvelope envelope, CancellationToken ct = default)
-            => ValueTask.FromResult(DomainResult.Success());
-    }
-
     [Test]
     public async Task KestrelPeerTransportServer_AcceptsClientConnectionOverTofuTls13()
     {
@@ -117,16 +89,17 @@ public sealed class PeerGrpcTofuRoundTripTests
         services.AddSingleton<IRelayPreKeyRepository, StubRelayPreKeyRepository>();
         services.AddSingleton<ILocalChunkStore, StubLocalChunkStore>();
         services.AddSingleton<IRelayMailboxCapabilityStore, FakeRelayMailboxCapabilityStore>();
-        services.AddSingleton<IIngressFilterService, StubIngressFilterService>();
-        services.AddSingleton<ISealedEnvelopeUnwrapper, StubEnvelopeUnwrapper>();
-        services.AddSingleton<Percolator.Application.Ingress.IInboundIngressPipeline, StubIngressPipeline>();
-        var activeIdentities = new ActiveIdentitySet(new FakeEventPublisher(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ActiveIdentitySet>.Instance);
-        activeIdentities.Add(Domain.Identities.PublicIdentityId.New());
-        services.AddSingleton<IActiveIdentitySet>(activeIdentities);
+        services.AddSingleton<IRelayHostingPolicyProvider>(new RelayHostingPolicyHolder(RelayHostingPolicy.Default));
         services.AddSingleton<UnauthenticatedDeliveryEndpoint>();
 
         var serviceProvider = services.BuildServiceProvider();
         var certProvider = serviceProvider.GetRequiredService<ITransportCertificateProvider>();
+
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryToken = DeliveryToken.FromSpan(new byte[32]);
+        var drainToken = DeliveryToken.FromSpan(new byte[32]);
+        var store = serviceProvider.GetRequiredService<IRelayMailboxCapabilityStore>();
+        await store.RegisterAsync(routingToken, deliveryToken, drainToken);
 
         await using var server = new KestrelPeerTransportServer(certProvider, serviceProvider, new PeerTransportServerOptions());
 
@@ -142,12 +115,17 @@ public sealed class PeerGrpcTofuRoundTripTests
 
         var client = new UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceClient(channel);
 
-        var request = new SealedEnvelopeProto
+        var request = new EnqueueMailboxRequestProto
         {
-            EncryptedPackage = ByteString.CopyFrom(new byte[] { 0x01, 0x02, 0x03 })
+            RecipientRoutingToken = ByteString.CopyFrom(routingToken.ToByteArray()),
+            DeliveryToken = ByteString.CopyFrom(deliveryToken.Span),
+            Envelope = new SealedEnvelopeProto
+            {
+                EncryptedPackage = ByteString.CopyFrom(new byte[] { 0x01, 0x02, 0x03 })
+            }
         };
 
-        var response = await client.DeliverDirectAsync(request);
+        var response = await client.EnqueueMailboxAsync(request);
 
         response.Should().NotBeNull();
         response.Success.Should().BeTrue();

@@ -13,7 +13,6 @@ public interface IPeerTransportServer : IAsyncDisposable
     Task StartAsync(
         IPAddress? bindAddress = null,
         PortNumber? preferredPort = null,
-        bool mapRelayEndpoints = false,
         CancellationToken ct = default);
     Task StopAsync(CancellationToken ct = default);
 }

@@ -7,12 +7,8 @@ option csharp_namespace = "Percolator.Infrastructure.Protos";
 import "google/protobuf/timestamp.proto";
 
 service UnauthenticatedDeliveryService {
-    // Sealed sender envelope ingress
-    rpc DeliverDirect (SealedEnvelopeProto) returns (DeliveryAckProto);
-    rpc EnqueueMailbox (SealedEnvelopeProto) returns (EnqueueAckProto);
-
-    // Pre-key bundle capability ingress
-    rpc FetchPreKeyBundle (FetchPreKeyBundleRequest) returns (FetchPreKeyBundleResponse);
+    // Post-approval unauthenticated Sealed Sender mailbox ingress
+    rpc EnqueueMailbox (EnqueueMailboxRequestProto) returns (EnqueueMailboxResponseProto);
 
     // Unauthenticated profile hosting ingress
     rpc GetProfile (ProfileFetchRequestProto) returns (ProfileFetchResponseProto);
@@ -31,14 +27,15 @@ message SealedEnvelopeProto {
     google.protobuf.Timestamp expires_at_utc = 4;
 }
 
-message DeliveryAckProto {
-    bool success = 1;
-    string error_message = 2;
+message EnqueueMailboxRequestProto {
+    bytes recipient_routing_token = 1; // 16-byte BlindedRoutingToken
+    bytes delivery_token = 2;          // 32-byte DeliveryToken (mandatory)
+    SealedEnvelopeProto envelope = 3;
 }
 
-message EnqueueAckProto {
-    bool accepted = 1;
-    google.protobuf.Timestamp expires_at_utc = 2;
+message EnqueueMailboxResponseProto {
+    bool success = 1;
+    string error_message = 2;
 }
 
 message ProfileFetchRequestProto {
@@ -92,18 +89,4 @@ message BlindBlobUploadResponseProto {
     bool success = 1;
     string error_message = 2;
     string blob_uri = 3;
-}
-
-message FetchPreKeyBundleRequest {
-    bytes recipient_routing_token = 1;
-    bytes delivery_token = 2;      // Capability token preventing anonymous OPK starvation
-}
-
-message FetchPreKeyBundleResponse {
-    bytes identity_key = 1;
-    bytes signed_prekey = 2;
-    bytes prekey_signature = 3;
-    uint32 signed_prekey_id = 4;
-    optional bytes one_time_prekey = 5;
-    optional uint32 one_time_prekey_id = 6;
 }

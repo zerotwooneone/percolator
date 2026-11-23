@@ -1,4 +1,6 @@
 using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Hosting;
+using Percolator.Domain.Delivery.Hosting;
 using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Infrastructure.Tests.Composition;
@@ -128,10 +130,14 @@ public sealed class DependencyInjectionTests
 
         // 7. Transport & Routing
         sp.GetRequiredService<IIngressFilterService>().Should().NotBeNull();
-        sp.GetRequiredService<IStreamRegistry>().Should().NotBeNull();
         sp.GetRequiredService<ITransportDispatcher>().Should().NotBeNull();
         sp.GetRequiredService<ISealedEnvelopeUnwrapper>().Should().NotBeNull();
         sp.GetRequiredService<IRelayMailboxClient>().Should().NotBeNull();
+        sp.GetRequiredService<IRelayHostingPolicyProvider>().Should().NotBeNull();
+        sp.GetRequiredService<ILocalRelayAssociationRepository>().Should().NotBeNull();
+        sp.GetRequiredService<IPendingMailboxRegistrationRepository>().Should().NotBeNull();
+        sp.GetRequiredService<IExchangeRegistrationModerationService>().Should().NotBeNull();
+        sp.GetRequiredService<IAuthenticatedMemberRateLimiter>().Should().NotBeNull();
 
         // 8. Discovery & Profile Delivery
         sp.GetRequiredService<INearbyDiscoveryQueryClientPort>().Should().NotBeNull();
@@ -143,7 +149,6 @@ public sealed class DependencyInjectionTests
         // 9. Blob Storage
         sp.GetRequiredService<IBlobCryptoService>().Should().NotBeNull();
         sp.GetRequiredService<IRelayBlobClient>().Should().NotBeNull();
-        sp.GetRequiredService<IPeerStreamBlobClient>().Should().NotBeNull();
         sp.GetRequiredService<ILocalChunkStore>().Should().NotBeNull();
         sp.GetRequiredService<IChannelRelayResolver>().Should().NotBeNull();
         sp.GetRequiredService<IBlobStorageService>().Should().NotBeNull();

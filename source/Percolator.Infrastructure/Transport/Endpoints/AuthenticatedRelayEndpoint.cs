@@ -3,6 +3,7 @@ namespace Percolator.Infrastructure.Transport.Endpoints;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Channels;
@@ -10,10 +11,12 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.AspNetCore.Http;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -24,15 +27,27 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
     private readonly IRelayMailboxCapabilityStore _capabilityStore;
     private readonly IRelayPreKeyRepository _preKeyRepository;
     private readonly ICryptoEngine _cryptoEngine;
+    private readonly IRelayHostingPolicyProvider _policyProvider;
+    private readonly ILocalRelayAssociationRepository _localAssociationRepo;
+    private readonly IPendingMailboxRegistrationRepository _pendingRegistrationRepo;
+    private readonly IAuthenticatedMemberRateLimiter _rateLimiter;
 
     public AuthenticatedRelayEndpoint(
         IRelayMailboxCapabilityStore capabilityStore,
         IRelayPreKeyRepository preKeyRepository,
-        ICryptoEngine cryptoEngine)
+        ICryptoEngine cryptoEngine,
+        IRelayHostingPolicyProvider policyProvider,
+        ILocalRelayAssociationRepository localAssociationRepo,
+        IPendingMailboxRegistrationRepository pendingRegistrationRepo,
+        IAuthenticatedMemberRateLimiter rateLimiter)
     {
         _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
+        _policyProvider = policyProvider ?? throw new ArgumentNullException(nameof(policyProvider));
+        _localAssociationRepo = localAssociationRepo ?? throw new ArgumentNullException(nameof(localAssociationRepo));
+        _pendingRegistrationRepo = pendingRegistrationRepo ?? throw new ArgumentNullException(nameof(pendingRegistrationRepo));
+        _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
     }
 
     public override async Task<RegisterMailboxResponse> RegisterMailbox(RegisterMailboxRequest request, ServerCallContext context)
@@ -45,8 +60,76 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token, delivery token, and drain token are required."));
         }
 
+        var policy = _policyProvider.GetPolicy();
+        var routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
+        HttpContext? httpContext = null;
+        try
+        {
+            httpContext = context.GetHttpContext();
+        }
+        catch (InvalidOperationException)
+        {
+            // Non-ASP.NET Core ServerCallContext (e.g. test harness)
+        }
+        var remoteIp = httpContext?.Connection?.RemoteIpAddress;
+        bool isLoopback = remoteIp != null && IPAddress.IsLoopback(remoteIp);
+
+        // 1. AutoApproveLocalhost fast-path: pre-associated local Personas over loopback auto-approve
+        if (policy.AutoApproveLocalhost && isLoopback && await _localAssociationRepo.IsAuthorizedAsync(routingToken, context.CancellationToken))
+        {
+            return await ProvisionMailboxAsync(request, routingToken, context);
+        }
+
+        // 2. Closed registration strategy -> silently hang up
+        if (policy.RegistrationStrategy == RelayRegistrationStrategy.Closed)
+        {
+            httpContext?.Abort();
+            throw new RpcException(new Status(StatusCode.Unavailable, string.Empty));
+        }
+
+        // 3. Rejected or Blocked applicants -> silently hang up
+        var pending = await _pendingRegistrationRepo.GetByApplicantRoutingTokenAsync(routingToken, context.CancellationToken);
+        if (pending != null && (pending.Status == RegistrationModerationStatus.Rejected || pending.Status == RegistrationModerationStatus.Blocked))
+        {
+            httpContext?.Abort();
+            throw new RpcException(new Status(StatusCode.Unavailable, string.Empty));
+        }
+
+        // 4. ApprovalRequired strategy
+        if (policy.RegistrationStrategy == RelayRegistrationStrategy.ApprovalRequired)
+        {
+            if (pending != null && pending.Status == RegistrationModerationStatus.Approved)
+            {
+                return await ProvisionMailboxAsync(request, routingToken, context);
+            }
+
+            // Stage into PendingMailboxRegistrations
+            var registration = new PendingMailboxRegistration(
+                PublicIdentityId.New(),
+                routingToken,
+                RegistrationModerationStatus.PendingApproval,
+                DateTimeOffset.UtcNow);
+
+            await _pendingRegistrationRepo.SaveAsync(registration, context.CancellationToken);
+
+            return new RegisterMailboxResponse
+            {
+                Success = true,
+                RegistrationStatus = RegistrationStatusProto.RegistrationStatusPendingApproval
+            };
+        }
+
+        // 5. Open strategy
+        return await ProvisionMailboxAsync(request, routingToken, context);
+    }
+
+    private async Task<RegisterMailboxResponse> ProvisionMailboxAsync(
+        RegisterMailboxRequest request,
+        BlindedRoutingToken routingToken,
+        ServerCallContext context)
+    {
         var regResult = await _capabilityStore.RegisterVerifiedAsync(
-            BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray()),
+            routingToken,
             DeliveryToken.FromSpan(request.AuthorizedDeliveryToken.Span),
             DeliveryToken.FromSpan(request.DrainToken.Span),
             request.ExistingDrainToken.IsEmpty
@@ -59,7 +142,11 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             throw new RpcException(new Status(StatusCode.PermissionDenied, regResult.Error.Description));
         }
 
-        return new RegisterMailboxResponse { Success = true };
+        return new RegisterMailboxResponse
+        {
+            Success = true,
+            RegistrationStatus = RegistrationStatusProto.RegistrationStatusApproved
+        };
     }
 
     public override async Task ConnectMailboxStream(
@@ -116,9 +203,17 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             return;
         }
 
-        // Verify HMAC-SHA256(drainToken, nonce)
-        using var hmac = new HMACSHA256(drainToken.Span.ToArray());
-        byte[] expectedHmac = hmac.ComputeHash(nonce);
+        byte[] drainTokenBytes = drainToken.Span.ToArray();
+        byte[] expectedHmac;
+        try
+        {
+            using var hmac = new HMACSHA256(drainTokenBytes);
+            expectedHmac = hmac.ComputeHash(nonce);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(drainTokenBytes);
+        }
 
         if (!CryptographicOperations.FixedTimeEquals(expectedHmac, authResp.ChallengeHmac.Span))
         {
@@ -135,9 +230,6 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         });
 
         // 3. Setup live stream & send initial queued envelopes without destroying them prematurely.
-        // The live channel is bounded (HAZ-INGRESS-RESOURCE-EXHAUSTION): the capability
-        // store persists before notifying subscribers, so a full channel drops only the
-        // live notification — the envelope still arrives on the next connect's replay.
         var liveChannel = Channel.CreateBounded<RelayQueuedEnvelopeRecord>(
             new BoundedChannelOptions(256)
             {
@@ -148,109 +240,94 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
         using var subscription = _capabilityStore.SubscribeMailbox(routingToken, liveChannel.Writer);
 
-        var initialEnvelopes = await _capabilityStore.GetEnvelopesAsync(routingToken, context.CancellationToken);
-        var initialQueueIds = new HashSet<MailboxQueueId>();
-
-        foreach (var env in initialEnvelopes)
+        var queued = await _capabilityStore.GetEnvelopesAsync(routingToken, context.CancellationToken);
+        foreach (var envelope in queued)
         {
-            initialQueueIds.Add(env.QueueId);
-            await responseStream.WriteAsync(new MailboxStreamServerMessage { Envelope = ToProto(env) });
+            await responseStream.WriteAsync(new MailboxStreamServerMessage { Envelope = ToProto(envelope) });
         }
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        // 4. Run read loop & write loop concurrently
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
 
-        var readClientAcksTask = Task.Run(async () =>
+        var readTask = Task.Run(async () =>
         {
-            while (await requestStream.MoveNext(cts.Token).ConfigureAwait(false))
+            try
             {
-                var msg = requestStream.Current;
-                if (msg.PayloadCase == MailboxStreamClientMessage.PayloadOneofCase.Ack &&
-                    msg.Ack != null &&
-                    msg.Ack.Acknowledged &&
-                    !string.IsNullOrEmpty(msg.Ack.QueueId))
+                while (await requestStream.MoveNext(linkedCts.Token))
                 {
-                    var ackQueueId = MailboxQueueId.Create(msg.Ack.QueueId);
-                    if (ackQueueId.IsSuccess)
+                    var msg = requestStream.Current;
+                    if (msg.PayloadCase == MailboxStreamClientMessage.PayloadOneofCase.Ack &&
+                        msg.Ack.Acknowledged &&
+                        !string.IsNullOrWhiteSpace(msg.Ack.QueueId))
                     {
-                        await _capabilityStore.AcknowledgeEnvelopeAsync(
-                            routingToken,
-                            ackQueueId.Value!,
-                            cts.Token).ConfigureAwait(false);
+                        var queueId = MailboxQueueId.Parse(msg.Ack.QueueId);
+                        await _capabilityStore.AcknowledgeEnvelopeAsync(routingToken, queueId, linkedCts.Token);
                     }
                 }
             }
-        }, cts.Token);
+            catch (OperationCanceledException) { }
+        });
 
-        var writeServerLiveEnvelopesTask = Task.Run(async () =>
+        var writeTask = Task.Run(async () =>
         {
-            while (await liveChannel.Reader.WaitToReadAsync(cts.Token).ConfigureAwait(false))
+            try
             {
-                while (liveChannel.Reader.TryRead(out var liveEnv))
+                while (await liveChannel.Reader.WaitToReadAsync(linkedCts.Token))
                 {
-                    // Avoid duplicate if envelope was already sent as part of initial offline batch
-                    if (initialQueueIds.Count > 0 && initialQueueIds.Remove(liveEnv.QueueId))
+                    while (liveChannel.Reader.TryRead(out var liveEnvelope))
                     {
-                        continue;
+                        await responseStream.WriteAsync(new MailboxStreamServerMessage { Envelope = ToProto(liveEnvelope) });
                     }
-
-                    await responseStream.WriteAsync(
-                        new MailboxStreamServerMessage { Envelope = ToProto(liveEnv) }).ConfigureAwait(false);
                 }
             }
-        }, cts.Token);
+            catch (OperationCanceledException) { }
+        });
 
-        await Task.WhenAny(readClientAcksTask, writeServerLiveEnvelopesTask).ConfigureAwait(false);
-        cts.Cancel();
-        liveChannel.Writer.TryComplete();
-
-        try
-        {
-            await Task.WhenAll(readClientAcksTask, writeServerLiveEnvelopesTask).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
-        {
-            // Expected cooperative cancellation on stream completion/closure
-        }
+        await Task.WhenAny(readTask, writeTask);
+        linkedCts.Cancel();
+        await Task.WhenAll(readTask, writeTask);
     }
 
     public override async Task<PublishPreKeyBundleResponse> PublishPreKeyBundle(PublishPreKeyBundleRequest request, ServerCallContext context)
     {
-        // Flattened request: storage is keyed by (routing_token, device_id). The relay
-        // never learns the owner's public identity — authorization is the drain token,
-        // key-material integrity is the bundle's own signed-prekey signature verified
-        // inside RelayHostedPreKeyBundle.Create/UpdateSignedPreKey.
+        var policy = _policyProvider.GetPolicy();
+        if (!policy.IsFeatureEnabled(RelayFeatureFlags.PreKeys))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "PreKeys feature is disabled on this relay."));
+        }
+
         if (request.RoutingToken.Length != 16 ||
             request.DrainToken.Length != 32 ||
             request.DeviceId == 0 ||
             request.IdentityKey.Length != 32 ||
-            request.SignedPrekeyId == 0 ||
             request.SignedPrekey.Length != 32 ||
-            request.PrekeySignature.Length != 64)
+            request.PrekeySignature.Length != 64 ||
+            request.SignedPrekeyId == 0)
         {
-            return new PublishPreKeyBundleResponse { Success = false };
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "All bundle fields are required and must have exact sizes."));
         }
 
-        // Mailbox ownership: a valid drain token for routing_token is required —
-        // the drain token is the only credential that authorizes overwriting this
-        // mailbox's hosted bundle.
         var routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
-        bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
-            routingToken,
-            DeliveryToken.FromSpan(request.DrainToken.Span),
-            context.CancellationToken);
-        if (!drainValid)
+        byte[] drainTokenBytes = request.DrainToken.ToByteArray();
+        try
         {
-            return new PublishPreKeyBundleResponse { Success = false };
+            bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
+                routingToken,
+                DeliveryToken.FromSpan(drainTokenBytes),
+                context.CancellationToken);
+            if (!drainValid)
+            {
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid drain token capability."));
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(drainTokenBytes);
         }
 
         var deviceId = new DeviceId(request.DeviceId);
-
         var identityKey = IdentityKey.FromSpan(request.IdentityKey.Span);
 
-        // Collapse duplicate KeyIds within the batch — the merge below only filters
-        // against already-hosted ids, so a duplicated id would otherwise enqueue the
-        // same key twice and ConsumeBundle could serve a consumed id to a second
-        // fetcher. Keep the first occurrence.
         var opks = new List<(uint KeyId, DhPublicKey Key)>();
         var seenKeyIds = new HashSet<uint>();
         foreach (var opk in request.OneTimePrekeys)
@@ -265,8 +342,6 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         var signedPreKeySignature = DeviceLinkProof.FromSpan(request.PrekeySignature.Span);
         var signedPreKeyId = new SignedPreKeyId(request.SignedPrekeyId);
 
-        // Server-side OPK replenishment: an existing bundle gains only new KeyIds and a
-        // rotated signed prekey; a missing bundle is created wholesale.
         var existing = await _preKeyRepository.GetAsync(routingToken, deviceId, context.CancellationToken);
         if (existing == null)
         {
@@ -278,7 +353,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
                 signedPreKeySignature,
                 signedPreKeyId,
                 opks,
-                RelayHostingPolicy.Default,
+                policy,
                 _cryptoEngine);
 
             if (bundleResult.IsFailure)
@@ -299,7 +374,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
                 signedPreKey,
                 signedPreKeySignature,
                 signedPreKeyId,
-                RelayHostingPolicy.Default,
+                policy,
                 _cryptoEngine);
             if (updateSpk.IsFailure)
             {
@@ -308,7 +383,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
             var existingKeyIds = new HashSet<uint>(existing.OneTimePreKeys.Select(k => k.KeyId));
             var newOpks = opks.Where(k => !existingKeyIds.Contains(k.KeyId)).ToList();
-            var replenish = existing.ReplenishOneTimePreKeys(newOpks, RelayHostingPolicy.Default);
+            var replenish = existing.ReplenishOneTimePreKeys(newOpks, policy);
             if (replenish.IsFailure)
             {
                 return new PublishPreKeyBundleResponse { Success = false };
@@ -330,13 +405,21 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         }
 
         var routingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
-        bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
-            routingToken,
-            DeliveryToken.FromSpan(request.DrainToken.Span),
-            context.CancellationToken);
-        if (!drainValid)
+        byte[] drainTokenBytes = request.DrainToken.ToByteArray();
+        try
         {
-            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid drain token capability."));
+            bool drainValid = await _capabilityStore.VerifyDrainTokenAsync(
+                routingToken,
+                DeliveryToken.FromSpan(drainTokenBytes),
+                context.CancellationToken);
+            if (!drainValid)
+            {
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid drain token capability."));
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(drainTokenBytes);
         }
 
         var bundle = await _preKeyRepository.GetAsync(
@@ -355,6 +438,134 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
             OneTimePrekeyCount = (uint)bundle.AvailableOneTimePreKeyCount,
             SignedPrekeyId = bundle.SignedPreKeyId.Value
         };
+    }
+
+    public override async Task<PreKeyBundleProto> FetchPreKeyBundle(FetchPreKeyBundleRequestProto request, ServerCallContext context)
+    {
+        var policy = _policyProvider.GetPolicy();
+        if (!policy.IsFeatureEnabled(RelayFeatureFlags.PreKeys))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "PreKeys feature is disabled on this relay."));
+        }
+
+        if (request.RoutingToken.Length != 16 || request.DrainToken.Length != 32 || request.TargetRoutingToken.Length != 16)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token, drain token, and target routing token are required."));
+        }
+
+        var callerRoutingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
+        byte[] drainTokenBytes = request.DrainToken.ToByteArray();
+        try
+        {
+            bool callerValid = await _capabilityStore.VerifyDrainTokenAsync(
+                callerRoutingToken,
+                DeliveryToken.FromSpan(drainTokenBytes),
+                context.CancellationToken);
+            if (!callerValid)
+            {
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Caller credentials are invalid."));
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(drainTokenBytes);
+        }
+
+        // Per-member sliding window rate limit
+        bool allowed = await _rateLimiter.TryConsumeAsync(callerRoutingToken, "FetchPreKeyBundle", context.CancellationToken);
+        if (!allowed)
+        {
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Rate limit exceeded for FetchPreKeyBundle."));
+        }
+
+        var targetRoutingToken = BlindedRoutingToken.FromBytes(request.TargetRoutingToken.ToByteArray());
+        var targetDevice = request.DeviceId != 0 ? new DeviceId(request.DeviceId) : DeviceId.Primary;
+
+        var consumed = await _preKeyRepository.ConsumePreKeyBundleAsync(targetRoutingToken, targetDevice, context.CancellationToken);
+        if (consumed == null)
+        {
+            throw new RpcException(new Status(StatusCode.NotFound, "Target pre-key bundle not found."));
+        }
+
+        var response = new PreKeyBundleProto
+        {
+            IdentityKey = ByteString.CopyFrom(consumed.IdentityKey.Span),
+            SignedPrekey = ByteString.CopyFrom(consumed.SignedPreKey.Span),
+            PrekeySignature = ByteString.CopyFrom(consumed.SignedPreKeySignature.Span),
+            SignedPrekeyId = consumed.SignedPreKeyId.Value
+        };
+
+        if (consumed.OneTimePreKey != null)
+        {
+            response.OneTimePrekey = ByteString.CopyFrom(consumed.OneTimePreKey.Span);
+            response.OneTimePrekeyId = consumed.OneTimePreKeyId;
+        }
+
+        return response;
+    }
+
+    public override async Task<EnqueueMailboxResponseProto> SendInitialHandshake(SendInitialHandshakeRequestProto request, ServerCallContext context)
+    {
+        var policy = _policyProvider.GetPolicy();
+        if (request.RoutingToken.Length != 16 || request.DrainToken.Length != 32 || request.RecipientRoutingToken.Length != 16)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token, drain token, and recipient routing token are required."));
+        }
+
+        var callerRoutingToken = BlindedRoutingToken.FromBytes(request.RoutingToken.ToByteArray());
+        byte[] drainTokenBytes = request.DrainToken.ToByteArray();
+        try
+        {
+            bool callerValid = await _capabilityStore.VerifyDrainTokenAsync(
+                callerRoutingToken,
+                DeliveryToken.FromSpan(drainTokenBytes),
+                context.CancellationToken);
+            if (!callerValid)
+            {
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Caller credentials are invalid."));
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(drainTokenBytes);
+        }
+
+        // Per-member sliding window rate limit
+        bool allowed = await _rateLimiter.TryConsumeAsync(callerRoutingToken, "SendInitialHandshake", context.CancellationToken);
+        if (!allowed)
+        {
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Rate limit exceeded for SendInitialHandshake."));
+        }
+
+        if (request.Envelope == null || request.Envelope.EncryptedPackage.Length > policy.MaxMailboxBytes)
+        {
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Envelope size exceeds relay mailbox quota."));
+        }
+
+        var recipientRoutingToken = BlindedRoutingToken.FromBytes(request.RecipientRoutingToken.ToByteArray());
+        var now = DateTimeOffset.UtcNow;
+        var envelope = new MailboxEnvelope(
+            EnvelopeId.New(),
+            recipientRoutingToken,
+            request.Envelope.EncryptedPackage.ToByteArray(),
+            now,
+            now.Add(policy.EnvelopeTtl));
+
+        var result = await _capabilityStore.EnqueueAuthenticatedInitialAsync(
+            recipientRoutingToken,
+            envelope,
+            policy.MaxMailboxBytes,
+            context.CancellationToken);
+
+        if (result.IsFailure)
+        {
+            var statusCode = result.Error.Code == "MAILBOX_QUOTA_EXCEEDED"
+                ? StatusCode.ResourceExhausted
+                : StatusCode.PermissionDenied;
+            throw new RpcException(new Status(statusCode, result.Error.Description));
+        }
+
+        return new EnqueueMailboxResponseProto { Success = true };
     }
 
     private static QueuedSealedEnvelopeProto ToProto(RelayQueuedEnvelopeRecord record) => new()

@@ -10,8 +10,31 @@ public sealed class RelayPreKeyEntity
     public byte[] SignedPreKey { get; set; } = Array.Empty<byte>();
     public byte[] SignedPreKeySignature { get; set; } = Array.Empty<byte>();
     public uint SignedPreKeyId { get; set; } = 1;
-    public string OneTimePreKeysJson { get; set; } = string.Empty;
     public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class RelayOneTimePreKeyEntity
+{
+    public byte[] OwnerRoutingToken { get; set; } = Array.Empty<byte>(); // 16 bytes
+    public uint DeviceId { get; set; }
+    public uint PreKeyId { get; set; }
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>(); // 32 bytes
+}
+
+public sealed class PendingMailboxRegistrationEntity
+{
+    public string RelayId { get; set; } = string.Empty;
+    public byte[] ApplicantRoutingToken { get; set; } = Array.Empty<byte>();
+    public int Status { get; set; }
+    public DateTimeOffset RequestedAtUtc { get; set; }
+    public DateTimeOffset? DecidedAtUtc { get; set; }
+}
+
+public sealed class LocalRelayAssociationEntity
+{
+    public string RelayId { get; set; } = string.Empty;
+    public byte[] AuthorizedRoutingToken { get; set; } = Array.Empty<byte>();
+    public DateTimeOffset CreatedAtUtc { get; set; }
 }
 
 public sealed class RelayProfileSlotEntity

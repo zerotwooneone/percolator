@@ -39,7 +39,8 @@ public class SqlOutboxQueryServiceTests
         // Arrange
         var ownerId = Domain.Identities.PublicIdentityId.New();
         var channelId = ChannelId.New();
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
+        var route = DeliveryRoute.RelayedOneToOne(BlindedRoutingToken.New(), relayEndpoint, DeliveryToken.FromSpan(new byte[32]));
 
         var pendingJob = OutboxJob.Rehydrate(
             Guid.NewGuid(), channelId, ownerId, null, route,

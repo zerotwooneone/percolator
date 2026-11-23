@@ -93,6 +93,9 @@ public sealed class BaselineStage2HostFactory
             services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
             services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
             services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
+            services.AddScoped<ILocalRelayAssociationRepository, SqliteLocalRelayAssociationRepository>();
+            services.AddScoped<IPendingMailboxRegistrationRepository, SqlitePendingMailboxRegistrationRepository>();
+            services.AddScoped<Percolator.Application.Hosting.IExchangeRegistrationModerationService, Percolator.Application.Hosting.ExchangeRegistrationModerationService>();
             services.AddScoped<IRelayRegistrationRepository, SqliteRelayRegistrationRepository>();
             services.AddScoped<IRelayMailboxProvisioner, GrpcRelayMailboxProvisioner>();
             services.AddScoped<IRelayDirectory, RelayDirectoryService>();
@@ -104,6 +107,8 @@ public sealed class BaselineStage2HostFactory
             services.AddSingleton<ICryptoEngine, SignalCryptoEngine>();
             services.AddSingleton<PeerGrpcChannelFactoryOptions>();
             services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
+            services.AddSingleton<Percolator.Domain.Delivery.Hosting.IRelayHostingPolicyProvider, Percolator.Domain.Delivery.Hosting.RelayHostingPolicyHolder>();
+            services.AddSingleton<IAuthenticatedMemberRateLimiter, InMemoryAuthenticatedMemberRateLimiter>();
 
             // Background Maintenance Pruners
             services.AddSingleton(TimeProvider.System);

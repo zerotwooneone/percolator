@@ -49,11 +49,11 @@ public sealed class RelayBlobClientTests
         Directory.CreateDirectory(_tempDirectory);
         _chunkStore = new LocalFileChunkStore(_tempDirectory, maxBlobSizeBytes: 10 * 1024 * 1024, maxCacheQuotaBytes: 50 * 1024 * 1024);
 
-        _endpoint = UnauthenticatedDeliveryEndpoint.ForRelay(
+        _endpoint = new UnauthenticatedDeliveryEndpoint(
             new UnauthenticatedDeliveryEndpointTestsFakes.StubProfileRepo(),
-            new UnauthenticatedDeliveryEndpointTestsFakes.StubPreKeyRepo(),
             _chunkStore,
-            new FakeRelayMailboxCapabilityStore());
+            new FakeRelayMailboxCapabilityStore(),
+            new RelayHostingPolicyHolder(RelayHostingPolicy.Default));
 
         _directClient = new RelayBlobClient(uri => new DirectEndpointClient(_endpoint));
     }
@@ -184,14 +184,16 @@ public sealed class RelayBlobClientTests
     /// <summary>DI-validation stand-in — the real port is registered by the transport slice.</summary>
     private sealed class StubPeerGrpcChannelFactory : IPeerGrpcChannelFactory
     {
-        public GrpcChannel GetOrCreateChannel(Uri address) =>
+        public GrpcChannel GetOrCreateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated) =>
             throw new NotSupportedException("DI-validation stub only.");
 
-        public void InvalidateChannel(Uri address)
+        public void InvalidateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated)
         {
         }
 
         public int EvictIdleChannels() => 0;
+
+        public int GetActiveChannelCount(ChannelPoolKind poolKind) => 0;
 
         public int ActiveChannelCount => 0;
 
@@ -393,6 +395,7 @@ internal static class UnauthenticatedDeliveryEndpointTestsFakes
     public sealed class StubPreKeyRepo : IRelayPreKeyRepository
     {
         public Task<RelayHostedPreKeyBundle?> GetAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default) => Task.FromResult<RelayHostedPreKeyBundle?>(null);
+        public Task<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?> ConsumePreKeyBundleAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default) => Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(null);
         public Task<System.Collections.Generic.IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default) => Task.FromResult<System.Collections.Generic.IReadOnlyList<RelayHostedPreKeyBundle>>(Array.Empty<RelayHostedPreKeyBundle>());
         public Task<bool> HasActivePreKeyAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task SaveAsync(RelayHostedPreKeyBundle bundle, CancellationToken cancellationToken = default) => Task.CompletedTask;

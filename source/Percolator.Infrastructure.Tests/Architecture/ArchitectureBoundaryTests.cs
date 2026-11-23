@@ -1,4 +1,5 @@
 using Percolator.Application.Delivery;
+using Percolator.Domain.Delivery.ValueObjects;
 
 namespace Percolator.Infrastructure.Tests.Architecture;
 
@@ -174,7 +175,7 @@ public sealed class ArchitectureBoundaryTests
         var channelId = ChannelId.New();
         var ownerId = Domain.Identities.PublicIdentityId.New();
         var now = DateTimeOffset.UtcNow;
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, new Uri("https://127.0.0.1:5000"), null);
+        var route = new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, BlindedRoutingToken.New(), RelayEndpoint.Parse("percolator://127.0.0.1:5000"), null);
 
         // Guid.Empty throws
         Action actEmptyGuid = () => OutboxJob.Rehydrate(Guid.Empty, channelId, ownerId, null, route, new byte[] { 1 }, OutboxStatus.Pending, 0, 5, now, null);

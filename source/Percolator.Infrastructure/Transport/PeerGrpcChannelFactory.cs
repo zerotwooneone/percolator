@@ -9,6 +9,12 @@ using System.Security.Authentication;
 using Grpc.Net.Client;
 using Percolator.Domain.Common;
 
+public enum ChannelPoolKind
+{
+    Unauthenticated = 0,
+    Authenticated = 1
+}
+
 public sealed class PeerGrpcChannelFactoryOptions
 {
     public int MaxCapacity { get; set; } = 100;
@@ -18,10 +24,11 @@ public sealed class PeerGrpcChannelFactoryOptions
 
 public interface IPeerGrpcChannelFactory : IDisposable
 {
-    GrpcChannel GetOrCreateChannel(Uri address);
-    void InvalidateChannel(Uri address);
+    GrpcChannel GetOrCreateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated);
+    void InvalidateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated);
     int EvictIdleChannels();
     int ActiveChannelCount { get; }
+    int GetActiveChannelCount(ChannelPoolKind poolKind);
 }
 
 public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
@@ -29,7 +36,7 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
     private readonly PeerGrpcChannelFactoryOptions _options;
     private readonly IDateTimeProvider _timeProvider;
     private readonly Func<Uri, GrpcChannelOptions, GrpcChannel> _channelFactory;
-    private readonly Dictionary<Uri, CachedChannelEntry> _channels = new();
+    private readonly Dictionary<(Uri Address, ChannelPoolKind PoolKind), CachedChannelEntry> _channels = new();
     private readonly object _lock = new();
     private bool _disposed;
 
@@ -67,13 +74,23 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
         }
     }
 
-    public GrpcChannel GetOrCreateChannel(Uri address)
+    public int GetActiveChannelCount(ChannelPoolKind poolKind)
+    {
+        lock (_lock)
+        {
+            return _channels.Keys.Count(k => k.PoolKind == poolKind);
+        }
+    }
+
+    public GrpcChannel GetOrCreateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated)
     {
         ArgumentNullException.ThrowIfNull(address);
 
         var targetAddress = address.Scheme.Equals("percolator", StringComparison.OrdinalIgnoreCase)
             ? new UriBuilder(address) { Scheme = Uri.UriSchemeHttps }.Uri
             : address;
+
+        var key = (Address: targetAddress, PoolKind: poolKind);
 
         lock (_lock)
         {
@@ -82,7 +99,7 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
             var now = _timeProvider.UtcNow;
             EvictExpiredUnderLock(now);
 
-            if (_channels.TryGetValue(targetAddress, out var existing))
+            if (_channels.TryGetValue(key, out var existing))
             {
                 existing.LastAccessedAtUtc = now;
                 return existing.Channel;
@@ -109,7 +126,7 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
             };
 
             var channel = _channelFactory(targetAddress, channelOptions);
-            _channels[targetAddress] = new CachedChannelEntry
+            _channels[key] = new CachedChannelEntry
             {
                 Channel = channel,
                 LastAccessedAtUtc = now
@@ -119,13 +136,15 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
         }
     }
 
-    public void InvalidateChannel(Uri address)
+    public void InvalidateChannel(Uri address, ChannelPoolKind poolKind = ChannelPoolKind.Unauthenticated)
     {
         ArgumentNullException.ThrowIfNull(address);
 
         var targetAddress = address.Scheme.Equals("percolator", StringComparison.OrdinalIgnoreCase)
             ? new UriBuilder(address) { Scheme = Uri.UriSchemeHttps }.Uri
             : address;
+
+        var key = (Address: targetAddress, PoolKind: poolKind);
 
         lock (_lock)
         {
@@ -134,7 +153,7 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
                 return;
             }
 
-            if (_channels.Remove(targetAddress, out var entry))
+            if (_channels.Remove(key, out var entry))
             {
                 entry.Channel.Dispose();
             }
@@ -156,9 +175,9 @@ public sealed class PeerGrpcChannelFactory : IPeerGrpcChannelFactory
             .Where(kvp => (now - kvp.Value.LastAccessedAtUtc) >= _options.IdleTimeout)
             .ToList();
 
-        foreach (var (uri, entry) in expired)
+        foreach (var (key, entry) in expired)
         {
-            _channels.Remove(uri);
+            _channels.Remove(key);
             entry.Channel.Dispose();
         }
 

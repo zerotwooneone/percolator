@@ -1,7 +1,3 @@
-using Percolator.Application.Ingress;
-using Percolator.Application.Ports;
-using Percolator.Application.Session.Ports;
-
 namespace Percolator.Infrastructure.Transport.Endpoints;
 
 using System;
@@ -11,6 +7,7 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -19,166 +16,75 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.PluginSdk;
-using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliveryService.UnauthenticatedDeliveryServiceBase
 {
     private readonly IRelayProfileRepository _profileRepository;
-    private readonly IRelayPreKeyRepository _preKeyRepository;
     private readonly ILocalChunkStore _chunkStore;
     private readonly IRelayMailboxCapabilityStore _capabilityStore;
-    private readonly IIngressFilterService? _ingressFilter;
-    private readonly ISealedEnvelopeUnwrapper? _unwrapper;
-    private readonly IInboundIngressPipeline? _ingressPipeline;
-    private readonly IActiveIdentitySet? _activeIdentities;
+    private readonly IRelayHostingPolicyProvider _policyProvider;
 
-    /// <summary>
-    /// Primary constructor for persona hosts supporting direct delivery and relay endpoints.
-    /// </summary>
     public UnauthenticatedDeliveryEndpoint(
         IRelayProfileRepository profileRepository,
-        IRelayPreKeyRepository preKeyRepository,
         ILocalChunkStore chunkStore,
         IRelayMailboxCapabilityStore capabilityStore,
-        IIngressFilterService ingressFilter,
-        ISealedEnvelopeUnwrapper unwrapper,
-        IInboundIngressPipeline ingressPipeline,
-        IActiveIdentitySet activeIdentities)
+        IRelayHostingPolicyProvider policyProvider)
     {
         _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
-        _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
         _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
         _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
-        _ingressFilter = ingressFilter ?? throw new ArgumentNullException(nameof(ingressFilter));
-        _unwrapper = unwrapper ?? throw new ArgumentNullException(nameof(unwrapper));
-        _ingressPipeline = ingressPipeline ?? throw new ArgumentNullException(nameof(ingressPipeline));
-        _activeIdentities = activeIdentities ?? throw new ArgumentNullException(nameof(activeIdentities));
+        _policyProvider = policyProvider ?? throw new ArgumentNullException(nameof(policyProvider));
     }
 
-    /// <summary>
-    /// Factory for standalone relay hosts that do not support direct peer-to-peer delivery.
-    /// </summary>
-    public static UnauthenticatedDeliveryEndpoint ForRelay(
-        IRelayProfileRepository profileRepository,
-        IRelayPreKeyRepository preKeyRepository,
-        ILocalChunkStore chunkStore,
-        IRelayMailboxCapabilityStore capabilityStore) =>
-        new(profileRepository, preKeyRepository, chunkStore, capabilityStore);
-
-    private UnauthenticatedDeliveryEndpoint(
-        IRelayProfileRepository profileRepository,
-        IRelayPreKeyRepository preKeyRepository,
-        ILocalChunkStore chunkStore,
-        IRelayMailboxCapabilityStore capabilityStore)
+    public override async Task<EnqueueMailboxResponseProto> EnqueueMailbox(EnqueueMailboxRequestProto request, ServerCallContext context)
     {
-        _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
-        _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
-        _chunkStore = chunkStore ?? throw new ArgumentNullException(nameof(chunkStore));
-        _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
-        _ingressFilter = null;
-        _unwrapper = null;
-        _ingressPipeline = null;
-        _activeIdentities = null;
-    }
-
-    public override Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
-    {
-        return Task.FromResult(new DeliveryAckProto
+        var policy = _policyProvider.GetPolicy();
+        if (request.DeliveryToken.IsEmpty)
         {
-            Success = false,
-            ErrorMessage = "Direct delivery is deprecated and removed."
-        });
-    }
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "DeliveryToken is required for unauthenticated mailbox delivery."));
+        }
 
-    public override async Task<EnqueueAckProto> EnqueueMailbox(SealedEnvelopeProto request, ServerCallContext context)
-    {
+        if (request.Envelope == null || request.Envelope.EncryptedPackage.Length > policy.MaxMailboxBytes)
+        {
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Envelope size exceeds relay mailbox quota."));
+        }
+
         if (request.RecipientRoutingToken.Length != 16 || request.DeliveryToken.Length != 32)
         {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Recipient routing token and delivery token are required."));
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token (16B) and delivery token (32B) required."));
         }
 
         var routingToken = BlindedRoutingToken.FromBytes(request.RecipientRoutingToken.ToByteArray());
-        bool isAuthorized = await _capabilityStore.VerifyDeliveryTokenAsync(
+        var deliveryToken = DeliveryToken.FromBytes(request.DeliveryToken.ToByteArray());
+        var now = DateTimeOffset.UtcNow;
+        var envelope = new MailboxEnvelope(
+            EnvelopeId.New(),
             routingToken,
-            DeliveryToken.FromSpan(request.DeliveryToken.Span),
-            context.CancellationToken);
+            request.Envelope.EncryptedPackage.ToByteArray(),
+            now,
+            now.Add(policy.EnvelopeTtl));
 
-        if (!isAuthorized)
+        // Enforces constant-time DeliveryToken verification AND cumulative per-mailbox byte + envelope-count quotas
+        var result = await _capabilityStore.EnqueueEnvelopeAsync(routingToken, deliveryToken, envelope, policy.MaxMailboxBytes, context.CancellationToken);
+        if (result.IsFailure)
         {
-            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid delivery token capability."));
+            var statusCode = result.Error.Code == "MAILBOX_QUOTA_EXCEEDED"
+                ? StatusCode.ResourceExhausted
+                : StatusCode.PermissionDenied;
+            throw new RpcException(new Status(statusCode, result.Error.Description));
         }
 
-        var queued = new RelayQueuedEnvelopeRecord(
-            MailboxQueueId.Parse(Guid.NewGuid().ToString("N")),
-            request.ToByteArray(),
-            DateTimeOffset.UtcNow);
-
-        await _capabilityStore.EnqueueEnvelopeAsync(routingToken, queued, context.CancellationToken);
-
-        return new EnqueueAckProto
-        {
-            Accepted = true,
-            ExpiresAtUtc = request.ExpiresAtUtc
-        };
-    }
-
-    public override async Task<FetchPreKeyBundleResponse> FetchPreKeyBundle(FetchPreKeyBundleRequest request, ServerCallContext context)
-    {
-        if (request.RecipientRoutingToken.Length != 16 || request.DeliveryToken.Length != 32)
-        {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Routing token and delivery token are required."));
-        }
-
-        // Anonymous capability gating: verify delivery token in constant time
-        var routingToken = BlindedRoutingToken.FromBytes(request.RecipientRoutingToken.ToByteArray());
-        bool isAuthorized = await _capabilityStore.VerifyDeliveryTokenAsync(
-            routingToken,
-            DeliveryToken.FromSpan(request.DeliveryToken.Span),
-            context.CancellationToken);
-
-        if (!isAuthorized)
-        {
-            // Reject without consuming OPK
-            throw new RpcException(new Status(StatusCode.PermissionDenied, "Invalid delivery token capability."));
-        }
-
-        // Direct routing-token lookup: the hosted bundle is keyed by the mailbox's
-        // (BlindedRoutingToken, DeviceId) — the relay never resolves an owner identity.
-        var bundle = await _preKeyRepository.GetAsync(routingToken, DeviceId.Primary, context.CancellationToken);
-        if (bundle == null)
-        {
-            throw new RpcException(new Status(StatusCode.NotFound, "Pre-key bundle not found for routing token."));
-        }
-
-        // Consume one-time prekey
-        var consumeResult = bundle.ConsumeBundle();
-        if (consumeResult.IsFailure)
-        {
-            throw new RpcException(new Status(StatusCode.NotFound, "Unable to consume pre-key bundle."));
-        }
-
-        await _preKeyRepository.SaveAsync(bundle, context.CancellationToken);
-        var consumed = consumeResult.Value!;
-
-        var response = new FetchPreKeyBundleResponse
-        {
-            IdentityKey = ByteString.CopyFrom(consumed.IdentityKey.Span),
-            SignedPrekey = ByteString.CopyFrom(consumed.SignedPreKey.Span),
-            PrekeySignature = ByteString.CopyFrom(consumed.SignedPreKeySignature.Span),
-            SignedPrekeyId = consumed.SignedPreKeyId.Value
-        };
-
-        if (consumed.OneTimePreKey != null)
-        {
-            response.OneTimePrekey = ByteString.CopyFrom(consumed.OneTimePreKey.Span);
-            response.OneTimePrekeyId = consumed.OneTimePreKeyId;
-        }
-
-        return response;
+        return new EnqueueMailboxResponseProto { Success = true };
     }
 
     public override async Task<ProfileFetchResponseProto> GetProfile(ProfileFetchRequestProto request, ServerCallContext context)
     {
+        var policy = _policyProvider.GetPolicy();
+        if (!policy.IsFeatureEnabled(RelayFeatureFlags.Profiles))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Profiles feature is disabled on this relay."));
+        }
+
         if (request.BlindedLocator.Length != 32)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Blinded locator must be exactly 32 bytes."));
@@ -215,6 +121,12 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
 
     public override async Task<ProfileUploadResponseProto> UploadProfile(ProfileUploadRequestProto request, ServerCallContext context)
     {
+        var policy = _policyProvider.GetPolicy();
+        if (!policy.IsFeatureEnabled(RelayFeatureFlags.Profiles))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Profiles feature is disabled on this relay."));
+        }
+
         if (request.BlindedLocator.Length != 32)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Blinded locator must be exactly 32 bytes."));
@@ -271,6 +183,12 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
 
     public override async Task<ProfileDeleteResponseProto> DeleteProfile(ProfileDeleteRequestProto request, ServerCallContext context)
     {
+        var policy = _policyProvider.GetPolicy();
+        if (!policy.IsFeatureEnabled(RelayFeatureFlags.Profiles))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Profiles feature is disabled on this relay."));
+        }
+
         if (request.BlindedLocator.Length != 32 || request.WriteToken.Length != 32)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Locator and write token must be 32 bytes."));
@@ -291,6 +209,12 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         IServerStreamWriter<BlindBlobChunkProto> responseStream,
         ServerCallContext context)
     {
+        var policy = _policyProvider.GetPolicy();
+        if (!policy.IsFeatureEnabled(RelayFeatureFlags.Blobs))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Blobs feature is disabled on this relay."));
+        }
+
         if (request.BlobId.Length != 32)
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Blob ID must be exactly 32 bytes (SHA-256)."));
@@ -326,7 +250,15 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         IAsyncStreamReader<BlindBlobChunkProto> requestStream,
         ServerCallContext context)
     {
-        string tempPath = Path.Combine(Path.GetTempPath(), $"blob_up_{Guid.NewGuid():N}.tmp");
+        var policy = _policyProvider.GetPolicy();
+        if (!policy.IsFeatureEnabled(RelayFeatureFlags.Blobs))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "Blobs feature is disabled on this relay."));
+        }
+
+        var stagingDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "Staging");
+        Directory.CreateDirectory(stagingDir);
+        string tempPath = Path.Combine(stagingDir, $"blob_up_{Guid.NewGuid():N}.tmp");
         byte[]? blobIdBytes = null;
         long totalBytes = 0;
         const long maxBlobSize = 100 * 1024 * 1024; // 100 MB

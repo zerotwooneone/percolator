@@ -39,6 +39,14 @@ public sealed class NearbyDiscoveryEndpointTests
             return Task.FromResult(bundle);
         }
 
+        public Task<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?> ConsumePreKeyBundleAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
+        {
+            _bundles.TryGetValue((routingToken, deviceId), out var bundle);
+            if (bundle == null) return Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(null);
+            var result = bundle.ConsumeBundle();
+            return Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(result.Value);
+        }
+
         public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
         {
             IReadOnlyList<RelayHostedPreKeyBundle> list = _bundles.Values.Where(b => b.RoutingToken == routingToken).ToList();

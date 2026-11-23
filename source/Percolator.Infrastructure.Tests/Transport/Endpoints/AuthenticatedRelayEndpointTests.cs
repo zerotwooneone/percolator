@@ -21,10 +21,12 @@ using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Security;
 using Percolator.Infrastructure.Tests.Fakes;
+using Percolator.Infrastructure.Transport;
 using Percolator.Infrastructure.Transport.Endpoints;
 using Percolator.PluginSdk;
 using Signal.Interop;
@@ -43,6 +45,14 @@ public sealed class AuthenticatedRelayEndpointTests
         {
             _bundles.TryGetValue((routingToken, deviceId), out var bundle);
             return Task.FromResult(bundle);
+        }
+
+        public Task<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?> ConsumePreKeyBundleAsync(BlindedRoutingToken routingToken, DeviceId deviceId, CancellationToken cancellationToken = default)
+        {
+            _bundles.TryGetValue((routingToken, deviceId), out var bundle);
+            if (bundle == null) return Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(null);
+            var result = bundle.ConsumeBundle();
+            return Task.FromResult<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?>(result.Value);
         }
 
         public Task<IReadOnlyList<RelayHostedPreKeyBundle>> GetAllForMailboxAsync(BlindedRoutingToken routingToken, CancellationToken cancellationToken = default)
@@ -96,6 +106,81 @@ public sealed class AuthenticatedRelayEndpointTests
             => ValueTask.CompletedTask;
     }
 
+    private sealed class InMemoryLocalRelayAssociationRepository : ILocalRelayAssociationRepository
+    {
+        private readonly HashSet<BlindedRoutingToken> _authorized = new();
+
+        public Task<bool> IsAuthorizedAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
+        {
+            lock (_authorized)
+            {
+                return Task.FromResult(_authorized.Contains(routingToken));
+            }
+        }
+
+        public Task AuthorizeAsync(string relayId, BlindedRoutingToken routingToken, CancellationToken ct = default)
+        {
+            lock (_authorized)
+            {
+                _authorized.Add(routingToken);
+                return Task.CompletedTask;
+            }
+        }
+    }
+
+    private sealed class InMemoryPendingMailboxRegistrationRepository : IPendingMailboxRegistrationRepository
+    {
+        private readonly ConcurrentDictionary<BlindedRoutingToken, PendingMailboxRegistration> _registrations = new();
+
+        public Task<PendingMailboxRegistration?> GetByApplicantRoutingTokenAsync(BlindedRoutingToken applicantRoutingToken, CancellationToken ct = default)
+        {
+            _registrations.TryGetValue(applicantRoutingToken, out var reg);
+            return Task.FromResult(reg);
+        }
+
+        public Task<IReadOnlyList<PendingMailboxRegistration>> GetPendingByRelayIdAsync(Percolator.Domain.Identities.PublicIdentityId relayIdentityId, CancellationToken ct = default)
+        {
+            IReadOnlyList<PendingMailboxRegistration> list = _registrations.Values
+                .Where(r => r.RelayIdentityId == relayIdentityId && r.Status == RegistrationModerationStatus.PendingApproval)
+                .ToList();
+            return Task.FromResult(list);
+        }
+
+        public Task SaveAsync(PendingMailboxRegistration registration, CancellationToken ct = default)
+        {
+            _registrations[registration.ApplicantRoutingToken] = registration;
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateStatusAsync(Percolator.Domain.Identities.PublicIdentityId relayIdentityId, BlindedRoutingToken applicantRoutingToken, RegistrationModerationStatus status, CancellationToken ct = default)
+        {
+            if (_registrations.TryGetValue(applicantRoutingToken, out var reg))
+            {
+                _registrations[applicantRoutingToken] = reg with { Status = status, DecidedAtUtc = DateTimeOffset.UtcNow };
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    private static AuthenticatedRelayEndpoint CreateEndpoint(
+        IRelayMailboxCapabilityStore capabilityStore,
+        IRelayPreKeyRepository preKeyRepository,
+        ICryptoEngine cryptoEngine,
+        IRelayHostingPolicyProvider? policyProvider = null,
+        ILocalRelayAssociationRepository? localAssociationRepo = null,
+        IPendingMailboxRegistrationRepository? pendingRegistrationRepo = null,
+        IAuthenticatedMemberRateLimiter? rateLimiter = null)
+    {
+        return new AuthenticatedRelayEndpoint(
+            capabilityStore,
+            preKeyRepository,
+            cryptoEngine,
+            policyProvider ?? new RelayHostingPolicyHolder(new RelayHostingPolicy { RegistrationStrategy = RelayRegistrationStrategy.Open }),
+            localAssociationRepo ?? new InMemoryLocalRelayAssociationRepository(),
+            pendingRegistrationRepo ?? new InMemoryPendingMailboxRegistrationRepository(),
+            rateLimiter ?? new InMemoryAuthenticatedMemberRateLimiter());
+    }
+
     private static PublishPreKeyBundleRequest BuildPublishRequest(
         byte[] routingToken,
         byte[] drainToken,
@@ -132,9 +217,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
-        var unauthEndpoint = UnauthenticatedDeliveryEndpoint.ForRelay(
-            new InMemoryProfileRepo(), preKeyRepo, new InMemoryChunkStore(), capabilityStore);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -168,13 +251,13 @@ public sealed class AuthenticatedRelayEndpointTests
         var response = await endpoint.PublishPreKeyBundle(request, new TestServerCallContext());
         response.Success.Should().BeTrue();
 
-        // The publish alone makes the bundle fetchable by (routing_token, delivery_token) —
-        // no owner-identity association exists anywhere.
-        var fetch = await unauthEndpoint.FetchPreKeyBundle(
-            new FetchPreKeyBundleRequest
+        var fetch = await endpoint.FetchPreKeyBundle(
+            new FetchPreKeyBundleRequestProto
             {
-                RecipientRoutingToken = ByteString.CopyFrom(routingToken),
-                DeliveryToken = ByteString.CopyFrom(deliveryToken)
+                RoutingToken = ByteString.CopyFrom(routingToken),
+                DrainToken = ByteString.CopyFrom(drainToken),
+                TargetRoutingToken = ByteString.CopyFrom(routingToken),
+                DeviceId = deviceId
             },
             new TestServerCallContext());
 
@@ -187,7 +270,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -217,8 +300,9 @@ public sealed class AuthenticatedRelayEndpointTests
             prekeySig,
             new List<(uint, DhPublicKey)>());
 
-        var response = await endpoint.PublishPreKeyBundle(request, new TestServerCallContext());
-        response.Success.Should().BeFalse();
+        Func<Task> act = async () => await endpoint.PublishPreKeyBundle(request, new TestServerCallContext());
+        var rpcEx = await act.Should().ThrowAsync<RpcException>();
+        rpcEx.Which.StatusCode.Should().Be(StatusCode.PermissionDenied);
 
         (await preKeyRepo.GetAsync(BlindedRoutingToken.FromBytes(routingToken), new DeviceId(1u))).Should().BeNull();
     }
@@ -229,7 +313,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -294,7 +378,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -339,7 +423,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -385,7 +469,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken1 = new byte[32];
@@ -428,7 +512,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken1 = new byte[32];
@@ -474,7 +558,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -570,7 +654,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -644,7 +728,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new GatedSnapshotCapabilityStore(inner);
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -708,7 +792,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -794,7 +878,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -870,7 +954,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -951,6 +1035,12 @@ public sealed class AuthenticatedRelayEndpointTests
         public ValueTask EnqueueEnvelopeAsync(BlindedRoutingToken routingToken, RelayQueuedEnvelopeRecord envelope, CancellationToken ct = default)
             => _inner.EnqueueEnvelopeAsync(routingToken, envelope, ct);
 
+        public ValueTask<DomainResult> EnqueueEnvelopeAsync(BlindedRoutingToken routingToken, DeliveryToken deliveryToken, MailboxEnvelope envelope, long maxMailboxBytes, CancellationToken ct = default)
+            => _inner.EnqueueEnvelopeAsync(routingToken, deliveryToken, envelope, maxMailboxBytes, ct);
+
+        public ValueTask<DomainResult> EnqueueAuthenticatedInitialAsync(BlindedRoutingToken routingToken, MailboxEnvelope envelope, long maxMailboxBytes, CancellationToken ct = default)
+            => _inner.EnqueueAuthenticatedInitialAsync(routingToken, envelope, maxMailboxBytes, ct);
+
         public ValueTask<int> PurgeMailboxAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
             => _inner.PurgeMailboxAsync(routingToken, ct);
 
@@ -967,7 +1057,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -1007,7 +1097,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -1035,7 +1125,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         var routingToken = new byte[16];
         var deliveryToken = new byte[32];
@@ -1066,7 +1156,7 @@ public sealed class AuthenticatedRelayEndpointTests
         var capabilityStore = new FakeRelayMailboxCapabilityStore();
         var preKeyRepo = new InMemoryPreKeyRepo();
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
-        var endpoint = new AuthenticatedRelayEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
+        var endpoint = CreateEndpoint(capabilityStore, preKeyRepo, cryptoEngine);
 
         Func<Task> act = async () => await endpoint.GetPreKeyStatus(
             new GetPreKeyStatusRequest

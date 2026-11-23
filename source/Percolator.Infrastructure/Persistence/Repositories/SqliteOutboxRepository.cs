@@ -5,7 +5,6 @@ namespace Percolator.Infrastructure.Persistence.Repositories;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -95,9 +94,12 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
         var payloadBytes = job.Status == OutboxStatus.Delivered
             ? Array.Empty<byte>()
             : job.Payload.ToArray();
-        var routeJson = SerializeRoute(job.Route);
         var ownerGuid = job.OwnerIdentityId.Value;
         var recipientGuid = job.RecipientIdentityId.HasValue ? job.RecipientIdentityId.Value.Value : (Guid?)null;
+        var targetEndpoint = job.Route.RelayEndpoint?.ToString() ?? string.Empty;
+        var targetRouting = job.Route.TargetToken.ToByteArray();
+        var targetDelivery = job.Route.TargetDeliveryToken?.Span.ToArray();
+
         bool isNew = existing == null;
         if (isNew)
         {
@@ -109,7 +111,9 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
                 ChannelId = job.ChannelId.Value,
                 RecipientId = recipientGuid,
                 DeliveryRouteType = (int)job.Route.Type,
-                DeliveryRouteJson = routeJson,
+                TargetRelayEndpoint = targetEndpoint,
+                TargetRoutingToken = targetRouting,
+                TargetDeliveryToken = targetDelivery,
                 Payload = payloadBytes,
                 Status = (int)job.Status,
                 RetryCount = job.RetryCount,
@@ -125,7 +129,9 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
             existing.ChannelId = job.ChannelId.Value;
             existing.RecipientId = recipientGuid;
             existing.DeliveryRouteType = (int)job.Route.Type;
-            existing.DeliveryRouteJson = routeJson;
+            existing.TargetRelayEndpoint = targetEndpoint;
+            existing.TargetRoutingToken = targetRouting;
+            existing.TargetDeliveryToken = targetDelivery;
             existing.Payload = payloadBytes;
             existing.Status = (int)job.Status;
             existing.RetryCount = job.RetryCount;
@@ -140,7 +146,20 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
         Domain.Identities.PublicIdentityId? recipientId = entity.RecipientId.HasValue
             ? new Domain.Identities.PublicIdentityId(entity.RecipientId.Value)
             : null;
-        var route = DeserializeRoute(entity.DeliveryRouteType, entity.DeliveryRouteJson);
+        var route = (DeliveryRouteType)entity.DeliveryRouteType switch
+        {
+            DeliveryRouteType.RelayedOneToOne => new DeliveryRoute(
+                DeliveryRouteType.RelayedOneToOne,
+                BlindedRoutingToken.FromBytes(entity.TargetRoutingToken),
+                RelayEndpoint.Parse(entity.TargetRelayEndpoint),
+                entity.TargetDeliveryToken != null ? DeliveryToken.FromBytes(entity.TargetDeliveryToken) : null),
+            DeliveryRouteType.RelayedGroup => new DeliveryRoute(
+                DeliveryRouteType.RelayedGroup,
+                BlindedRoutingToken.FromBytes(entity.TargetRoutingToken),
+                RelayEndpoint.Parse(entity.TargetRelayEndpoint),
+                entity.TargetDeliveryToken != null ? DeliveryToken.FromBytes(entity.TargetDeliveryToken) : null),
+            _ => throw new InvalidOperationException($"Unsupported persistent delivery route type: {entity.DeliveryRouteType}")
+        };
         return OutboxJob.Rehydrate(
             entity.Id,
             channelId,
@@ -153,54 +172,5 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
             entity.MaxAttempts,
             entity.CreatedAtUtc,
             entity.NextAttemptAtUtc);
-    }
-    private static string SerializeRoute(DeliveryRoute route)
-    {
-        var dto = new DeliveryRouteDto
-        {
-            Type = (int)route.Type,
-            TargetToken = route.TargetToken != default ? route.TargetToken.ToByteArray() : null,
-            RelayEndpoint = route.RelayEndpoint?.Value,
-            TargetDeliveryToken = route.TargetDeliveryToken != null ? Convert.ToHexString(route.TargetDeliveryToken.Span) : null
-        };
-        return JsonSerializer.Serialize(dto);
-    }
-    private static DeliveryRoute DeserializeRoute(int routeType, string? json)
-    {
-        var fallbackEndpoint = RelayEndpoint.Create("percolator://fallback.local").Value;
-        if (string.IsNullOrEmpty(json))
-        {
-            return new DeliveryRoute((DeliveryRouteType)routeType, default, fallbackEndpoint);
-        }
-        try
-        {
-            var dto = JsonSerializer.Deserialize<DeliveryRouteDto>(json);
-            if (dto == null) return new DeliveryRoute((DeliveryRouteType)routeType, default, fallbackEndpoint);
-            BlindedRoutingToken targetToken = dto.TargetToken != null && dto.TargetToken.Length == 16
-                ? BlindedRoutingToken.FromBytes(dto.TargetToken)
-                : default;
-            RelayEndpoint relayEndpoint = !string.IsNullOrEmpty(dto.RelayEndpoint)
-                ? RelayEndpoint.Create(dto.RelayEndpoint).Value
-                : fallbackEndpoint;
-            DeliveryToken? targetDeliveryToken = !string.IsNullOrEmpty(dto.TargetDeliveryToken)
-                ? DeliveryToken.FromSpan(Convert.FromHexString(dto.TargetDeliveryToken))
-                : null;
-            return new DeliveryRoute(
-                (DeliveryRouteType)dto.Type,
-                targetToken,
-                relayEndpoint,
-                targetDeliveryToken);
-        }
-        catch
-        {
-            return new DeliveryRoute((DeliveryRouteType)routeType, default, fallbackEndpoint);
-        }
-    }
-    private sealed class DeliveryRouteDto
-    {
-        public int Type { get; set; }
-        public byte[]? TargetToken { get; set; }
-        public string? RelayEndpoint { get; set; }
-        public string? TargetDeliveryToken { get; set; }
     }
 }

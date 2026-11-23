@@ -30,10 +30,10 @@ public sealed class DiscoveryQueryClient : INearbyDiscoveryQueryClientPort
     [ActivatorUtilitiesConstructor]
     public DiscoveryQueryClient(
         IPeerGrpcChannelFactory channelFactory,
-        IPeerMailboxRoutingRepository? routingRepository = null)
+        IPeerMailboxRoutingRepository routingRepository)
     {
         _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
-        _routingRepository = routingRepository;
+        _routingRepository = routingRepository ?? throw new ArgumentNullException(nameof(routingRepository));
     }
 
     public async Task<IReadOnlyList<PeerDiscoveryDescriptor>> SendNearbyQueryAsync(

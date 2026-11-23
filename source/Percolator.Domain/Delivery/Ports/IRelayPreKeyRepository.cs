@@ -29,4 +29,9 @@ public interface IRelayPreKeyRepository
         BlindedRoutingToken routingToken,
         DeviceId deviceId,
         CancellationToken cancellationToken = default);
+
+    Task<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?> ConsumePreKeyBundleAsync(
+        BlindedRoutingToken routingToken,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default);
 }

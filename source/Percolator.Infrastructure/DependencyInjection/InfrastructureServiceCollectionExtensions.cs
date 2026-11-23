@@ -2,6 +2,7 @@ using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Egress;
 using Percolator.Application.Handshake;
+using Percolator.Application.Hosting;
 using Percolator.Application.Ingress;
 using Percolator.Application.Invitations;
 using Percolator.Application.Profiles;
@@ -9,6 +10,7 @@ using Percolator.Application.Routing;
 using Percolator.Application.Services;
 using Percolator.Application.Session;
 using Percolator.Application.Session.Ports;
+using Percolator.Domain.Delivery.Hosting;
 using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Infrastructure.DependencyInjection;
@@ -221,6 +223,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IRelayLedgerRepository>(sp => sp.GetRequiredService<SqliteRelayLedgerRepository>());
         services.AddScoped<IPeerProfileRepository, SqlitePeerProfileRepository>();
         services.AddScoped<IPeerMailboxRoutingRepository, SqlitePeerMailboxRoutingRepository>();
+        services.AddScoped<ILocalRelayAssociationRepository, SqliteLocalRelayAssociationRepository>();
+        services.AddScoped<IPendingMailboxRegistrationRepository, SqlitePendingMailboxRegistrationRepository>();
+        services.AddScoped<IExchangeRegistrationModerationService, Percolator.Application.Hosting.ExchangeRegistrationModerationService>();
 
         // Repository-maintenance workers
         services.AddHostedService<OutboxRetentionPruner>();
@@ -244,6 +249,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<PeerGrpcChannelFactoryOptions>();
         services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
         services.AddSingleton<ITransportClientInvoker, GrpcTransportClientInvoker>();
+        services.AddSingleton<IRelayHostingPolicyProvider, Percolator.Domain.Delivery.Hosting.RelayHostingPolicyHolder>();
+        services.AddSingleton<IAuthenticatedMemberRateLimiter, InMemoryAuthenticatedMemberRateLimiter>();
         services.AddSingleton<PeerTransportServerOptions>();
         services.AddSingleton<KestrelPeerTransportServer>();
         services.AddSingleton<IPeerTransportServer>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());

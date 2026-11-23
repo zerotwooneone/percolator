@@ -5,6 +5,7 @@ package percolator.infrastructure;
 option csharp_namespace = "Percolator.Infrastructure.Protos";
 
 import "google/protobuf/timestamp.proto";
+import "unauthenticated_delivery.proto";
 
 message QueuedSealedEnvelopeProto {
   string queue_id = 1;
@@ -54,8 +55,15 @@ message RegisterMailboxRequest {
   bytes existing_drain_token = 4;
 }
 
+enum RegistrationStatusProto {
+  REGISTRATION_STATUS_UNSPECIFIED = 0;
+  REGISTRATION_STATUS_APPROVED = 1;
+  REGISTRATION_STATUS_PENDING_APPROVAL = 2;
+}
+
 message RegisterMailboxResponse {
   bool success = 1;
+  RegistrationStatusProto registration_status = 2;
 }
 
 message OneTimePreKeyProto {
@@ -96,9 +104,34 @@ message GetPreKeyStatusResponse {
   uint32 signed_prekey_id = 3;
 }
 
+message FetchPreKeyBundleRequestProto {
+  bytes routing_token = 1;
+  bytes drain_token = 2;
+  bytes target_routing_token = 3;
+  uint32 device_id = 4;
+}
+
+message PreKeyBundleProto {
+  bytes identity_key = 1;
+  bytes signed_prekey = 2;
+  bytes prekey_signature = 3;
+  uint32 signed_prekey_id = 4;
+  optional bytes one_time_prekey = 5;
+  optional uint32 one_time_prekey_id = 6;
+}
+
+message SendInitialHandshakeRequestProto {
+  bytes routing_token = 1;
+  bytes drain_token = 2;
+  bytes recipient_routing_token = 3;
+  SealedEnvelopeProto envelope = 4;
+}
+
 service AuthenticatedRelayService {
   rpc ConnectMailboxStream(stream MailboxStreamClientMessage) returns (stream MailboxStreamServerMessage);
   rpc RegisterMailbox(RegisterMailboxRequest) returns (RegisterMailboxResponse);
   rpc PublishPreKeyBundle(PublishPreKeyBundleRequest) returns (PublishPreKeyBundleResponse);
   rpc GetPreKeyStatus(GetPreKeyStatusRequest) returns (GetPreKeyStatusResponse);
+  rpc FetchPreKeyBundle (FetchPreKeyBundleRequestProto) returns (PreKeyBundleProto);
+  rpc SendInitialHandshake (SendInitialHandshakeRequestProto) returns (EnqueueMailboxResponseProto);
 }

@@ -21,14 +21,16 @@ public sealed class CoreProtoCompilationTests
         };
         sealedEnvelope.ToByteArray().Should().NotBeEmpty();
 
-        var preKeyBundleReq = new FetchPreKeyBundleRequest
+        var preKeyBundleReq = new FetchPreKeyBundleRequestProto
         {
-            RecipientRoutingToken = ByteString.CopyFrom(new byte[16]),
-            DeliveryToken = ByteString.CopyFrom(new byte[32])
+            RoutingToken = ByteString.CopyFrom(new byte[16]),
+            DrainToken = ByteString.CopyFrom(new byte[32]),
+            TargetRoutingToken = ByteString.CopyFrom(new byte[16]),
+            DeviceId = 1
         };
         preKeyBundleReq.ToByteArray().Should().NotBeEmpty();
 
-        var preKeyBundleResp = new FetchPreKeyBundleResponse
+        var preKeyBundleResp = new PreKeyBundleProto
         {
             IdentityKey = ByteString.CopyFrom(new byte[32]),
             SignedPrekey = ByteString.CopyFrom(new byte[32]),

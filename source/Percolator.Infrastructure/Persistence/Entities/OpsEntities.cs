@@ -10,7 +10,9 @@ public sealed class OpsOutboxJobEntity
     public Guid ChannelId { get; set; }
     public Guid? RecipientId { get; set; }
     public int DeliveryRouteType { get; set; }
-    public string? DeliveryRouteJson { get; set; }
+    public string TargetRelayEndpoint { get; set; } = string.Empty;
+    public byte[] TargetRoutingToken { get; set; } = Array.Empty<byte>();
+    public byte[]? TargetDeliveryToken { get; set; }
     public byte[] Payload { get; set; } = Array.Empty<byte>();
     public int Status { get; set; }
     public int RetryCount { get; set; }

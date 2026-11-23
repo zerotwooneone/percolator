@@ -178,7 +178,7 @@ public sealed class SqlitePeerMailboxRoutingRepository : IPeerMailboxRoutingRepo
         var peerId = new Domain.Identities.PublicIdentityId(entity.PeerId);
         var routingToken = new BlindedRoutingToken(entity.RoutingToken);
         var deliveryToken = DeliveryToken.FromSpan(entity.DeliveryToken);
-        var relayEndpoint = !string.IsNullOrEmpty(entity.RelayEndpoint) ? RelayEndpoint.Parse(entity.RelayEndpoint) : null;
+        var relayEndpoint = RelayEndpoint.Parse(entity.RelayEndpoint);
 
         return new PeerMailboxRoutingCapability(
             peerId,

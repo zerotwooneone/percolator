@@ -169,6 +169,108 @@ public sealed class FakeRelayMailboxCapabilityStore : IRelayMailboxCapabilitySto
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask<DomainResult> EnqueueEnvelopeAsync(
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        if (!_mailboxes.TryGetValue(routingToken, out var entry))
+        {
+            return ValueTask.FromResult(DomainResult.Failure(new DomainError("MAILBOX_NOT_FOUND", "Mailbox not found.")));
+        }
+
+        lock (entry.Lock)
+        {
+            bool authorized = entry.DeliveryToken.Length > 0 &&
+                entry.DeliveryToken.Length == deliveryToken.Length &&
+                CryptographicOperations.FixedTimeEquals(entry.DeliveryToken, deliveryToken.Span);
+
+            if (!authorized)
+            {
+                for (int i = 0; i < entry.AuthorizedDeliveryTokens.Count; i++)
+                {
+                    var tok = entry.AuthorizedDeliveryTokens[i];
+                    if (tok.Length == deliveryToken.Length &&
+                        CryptographicOperations.FixedTimeEquals(tok, deliveryToken.Span))
+                    {
+                        authorized = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!authorized)
+            {
+                return ValueTask.FromResult(DomainResult.Failure(new DomainError("PERMISSION_DENIED", "Invalid delivery token.")));
+            }
+
+            long currentBytes = 0;
+            foreach (var env in entry.Envelopes)
+            {
+                currentBytes += env.EnvelopePayload.Length;
+            }
+
+            if (currentBytes + envelope.Ciphertext.Length > maxMailboxBytes)
+            {
+                return ValueTask.FromResult(DomainResult.Failure(new DomainError("MAILBOX_QUOTA_EXCEEDED", "Mailbox byte quota exceeded.")));
+            }
+
+            var record = new RelayQueuedEnvelopeRecord(
+                MailboxQueueId.Parse(envelope.Id.Value.ToString("N")),
+                envelope.Ciphertext,
+                DateTimeOffset.UtcNow);
+
+            entry.Envelopes.Add(record);
+            for (int i = 0; i < entry.Subscribers.Count; i++)
+            {
+                entry.Subscribers[i].TryWrite(record);
+            }
+
+            return ValueTask.FromResult(DomainResult.Success());
+        }
+    }
+
+    public ValueTask<DomainResult> EnqueueAuthenticatedInitialAsync(
+        BlindedRoutingToken routingToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        if (!_mailboxes.TryGetValue(routingToken, out var entry))
+        {
+            return ValueTask.FromResult(DomainResult.Failure(new DomainError("MAILBOX_NOT_FOUND", "Mailbox not found.")));
+        }
+
+        lock (entry.Lock)
+        {
+            long currentBytes = 0;
+            foreach (var env in entry.Envelopes)
+            {
+                currentBytes += env.EnvelopePayload.Length;
+            }
+
+            if (currentBytes + envelope.Ciphertext.Length > maxMailboxBytes)
+            {
+                return ValueTask.FromResult(DomainResult.Failure(new DomainError("MAILBOX_QUOTA_EXCEEDED", "Mailbox byte quota exceeded.")));
+            }
+
+            var record = new RelayQueuedEnvelopeRecord(
+                MailboxQueueId.Parse(envelope.Id.Value.ToString("N")),
+                envelope.Ciphertext,
+                DateTimeOffset.UtcNow);
+
+            entry.Envelopes.Add(record);
+            for (int i = 0; i < entry.Subscribers.Count; i++)
+            {
+                entry.Subscribers[i].TryWrite(record);
+            }
+
+            return ValueTask.FromResult(DomainResult.Success());
+        }
+    }
+
     public ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)
     {
         if (!_mailboxes.TryGetValue(routingToken, out var entry))

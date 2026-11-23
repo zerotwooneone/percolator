@@ -58,7 +58,6 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
     public async Task StartAsync(
         IPAddress? bindAddress = null,
         PortNumber? preferredPort = null,
-        bool mapRelayEndpoints = false,
         CancellationToken ct = default)
     {
         var targetBindAddress = bindAddress ?? _options.BindAddress;
@@ -95,23 +94,15 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
             // Bridge endpoint activation to the parent Stage 2 DI container per request
             builder.Services.AddSingleton<IGrpcServiceActivator<UnauthenticatedDeliveryEndpoint>>(
                 new ParentContainerServiceActivator<UnauthenticatedDeliveryEndpoint>(_serviceProvider));
-
-            if (mapRelayEndpoints)
-            {
-                builder.Services.AddSingleton<IGrpcServiceActivator<AuthenticatedRelayEndpoint>>(
-                    new ParentContainerServiceActivator<AuthenticatedRelayEndpoint>(_serviceProvider));
-                builder.Services.AddSingleton<IGrpcServiceActivator<PrivateRendezvousRelayEndpoint>>(
-                    new ParentContainerServiceActivator<PrivateRendezvousRelayEndpoint>(_serviceProvider));
-            }
+            builder.Services.AddSingleton<IGrpcServiceActivator<AuthenticatedRelayEndpoint>>(
+                new ParentContainerServiceActivator<AuthenticatedRelayEndpoint>(_serviceProvider));
+            builder.Services.AddSingleton<IGrpcServiceActivator<PrivateRendezvousRelayEndpoint>>(
+                new ParentContainerServiceActivator<PrivateRendezvousRelayEndpoint>(_serviceProvider));
 
             app = builder.Build();
             app.MapGrpcService<UnauthenticatedDeliveryEndpoint>();
-
-            if (mapRelayEndpoints)
-            {
-                app.MapGrpcService<AuthenticatedRelayEndpoint>();
-                app.MapGrpcService<PrivateRendezvousRelayEndpoint>();
-            }
+            app.MapGrpcService<AuthenticatedRelayEndpoint>();
+            app.MapGrpcService<PrivateRendezvousRelayEndpoint>();
 
             _app = app;
         }

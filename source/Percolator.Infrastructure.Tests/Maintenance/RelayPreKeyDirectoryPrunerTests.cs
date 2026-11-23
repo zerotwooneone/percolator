@@ -48,7 +48,6 @@ public sealed class RelayPreKeyDirectoryPrunerTests
                 IdentityKey = new byte[] { 1 },
                 SignedPreKey = new byte[] { 2 },
                 SignedPreKeySignature = new byte[] { 3 },
-                OneTimePreKeysJson = "[]",
                 UpdatedAtUtc = t0
             },
             new RelayPreKeyEntity
@@ -58,7 +57,6 @@ public sealed class RelayPreKeyDirectoryPrunerTests
                 IdentityKey = new byte[] { 4 },
                 SignedPreKey = new byte[] { 5 },
                 SignedPreKeySignature = new byte[] { 6 },
-                OneTimePreKeysJson = "[]",
                 UpdatedAtUtc = t0.AddDays(15)
             }
         );
@@ -103,7 +101,6 @@ public sealed class RelayPreKeyDirectoryPrunerTests
                 IdentityKey = new byte[] { 1 },
                 SignedPreKey = new byte[] { 2 },
                 SignedPreKeySignature = new byte[] { 3 },
-                OneTimePreKeysJson = "[]",
                 UpdatedAtUtc = t0.AddHours(-1)
             });
         }
@@ -118,7 +115,6 @@ public sealed class RelayPreKeyDirectoryPrunerTests
                 IdentityKey = new byte[] { 4 },
                 SignedPreKey = new byte[] { 5 },
                 SignedPreKeySignature = new byte[] { 6 },
-                OneTimePreKeysJson = "[]",
                 UpdatedAtUtc = t0.AddDays(20)
             });
         }

@@ -36,6 +36,9 @@ public class PercolatorDbContext : DbContext
     public DbSet<ChatChannelMemberEntity> ChatChannelMembers => Set<ChatChannelMemberEntity>();
     public DbSet<ChatChannelPayloadEntity> ChatChannelPayloads => Set<ChatChannelPayloadEntity>();
     public DbSet<RelayPreKeyEntity> RelayPreKeys => Set<RelayPreKeyEntity>();
+    public DbSet<RelayOneTimePreKeyEntity> RelayOneTimePreKeys => Set<RelayOneTimePreKeyEntity>();
+    public DbSet<PendingMailboxRegistrationEntity> PendingMailboxRegistrations => Set<PendingMailboxRegistrationEntity>();
+    public DbSet<LocalRelayAssociationEntity> LocalRelayAssociations => Set<LocalRelayAssociationEntity>();
     public DbSet<RelayProfileSlotEntity> RelayProfileSlots => Set<RelayProfileSlotEntity>();
     public DbSet<RelayLedgerEpochEntity> RelayLedgerEpochs => Set<RelayLedgerEpochEntity>();
     public DbSet<RelayLedgerRoutingTokenEntity> RelayLedgerRoutingTokens => Set<RelayLedgerRoutingTokenEntity>();
@@ -185,6 +188,9 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("ops_outbox_jobs");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Payload).HasColumnType("BLOB");
+            entity.Property(e => e.TargetRelayEndpoint).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.TargetRoutingToken).HasColumnType("BLOB").IsRequired().Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.TargetDeliveryToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.HasIndex(e => new { e.Status, e.NextAttemptAtUtc, e.SequenceNumber })
                 .HasDatabaseName("ix_ops_outbox_due");
             entity.HasIndex(e => new { e.OwnerIdentityId, e.Status, e.SequenceNumber })
@@ -272,9 +278,27 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.IdentityKey).HasColumnType("BLOB");
             entity.Property(e => e.SignedPreKey).HasColumnType("BLOB");
             entity.Property(e => e.SignedPreKeySignature).HasColumnType("BLOB");
-            entity.Property(e => e.OneTimePreKeysJson).IsRequired();
             entity.HasIndex(e => e.UpdatedAtUtc)
                 .HasDatabaseName("ix_relay_prekeys_updated");
+        });
+        modelBuilder.Entity<RelayOneTimePreKeyEntity>(entity =>
+        {
+            entity.ToTable("relay_onetime_prekeys");
+            entity.HasKey(e => new { e.OwnerRoutingToken, e.DeviceId, e.PreKeyId });
+            entity.Property(e => e.OwnerRoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.PublicKey).HasColumnType("BLOB").IsRequired();
+        });
+        modelBuilder.Entity<PendingMailboxRegistrationEntity>(entity =>
+        {
+            entity.ToTable("pending_mailbox_registrations");
+            entity.HasKey(e => new { e.RelayId, e.ApplicantRoutingToken });
+            entity.Property(e => e.ApplicantRoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        modelBuilder.Entity<LocalRelayAssociationEntity>(entity =>
+        {
+            entity.ToTable("local_relay_associations");
+            entity.HasKey(e => new { e.RelayId, e.AuthorizedRoutingToken });
+            entity.Property(e => e.AuthorizedRoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
         // 20. Relay Profile Slots
         modelBuilder.Entity<RelayProfileSlotEntity>(entity =>

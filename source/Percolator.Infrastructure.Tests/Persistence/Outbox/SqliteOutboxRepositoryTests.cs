@@ -41,7 +41,10 @@ public class SqliteOutboxRepositoryTests
         var jobId = Guid.NewGuid();
         var channelId = ChannelId.New();
         var ownerId = Domain.Identities.PublicIdentityId.New();
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, new Uri("http://localhost:5000"), null);
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
+        var routingToken = BlindedRoutingToken.New();
+        var deliveryToken = DeliveryToken.FromSpan(new byte[32]);
+        var route = new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, routingToken, relayEndpoint, deliveryToken);
         byte[] payload = Encoding.UTF8.GetBytes("EncryptedPayloadBlob");
 
         var job = OutboxJob.Rehydrate(
@@ -93,7 +96,8 @@ public class SqliteOutboxRepositoryTests
         // Arrange
         var ownerId = Domain.Identities.PublicIdentityId.New();
         var channelId = ChannelId.New();
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
+        var route = new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, BlindedRoutingToken.New(), relayEndpoint, null);
         var now = DateTimeOffset.UtcNow;
 
         // Due Pending job 1 (due 10 min ago)
@@ -143,7 +147,8 @@ public class SqliteOutboxRepositoryTests
         var jobId = Guid.NewGuid();
         var channelId = ChannelId.New();
         var ownerId = Domain.Identities.PublicIdentityId.New();
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
+        var route = new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, BlindedRoutingToken.New(), relayEndpoint, null);
         byte[] payload = Encoding.UTF8.GetBytes("SensibleSecretPayloadData");
 
         var deliveredJob = OutboxJob.Rehydrate(
@@ -182,12 +187,13 @@ public class SqliteOutboxRepositoryTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
         var job = OutboxJob.Rehydrate(
             jobId,
             ChannelId.New(),
             Domain.Identities.PublicIdentityId.New(),
             null,
-            new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null),
+            new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, BlindedRoutingToken.New(), relayEndpoint, null),
             Encoding.UTF8.GetBytes("Payload"),
             OutboxStatus.Pending,
             retryCount: 0,

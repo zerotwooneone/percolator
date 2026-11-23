@@ -47,6 +47,19 @@ public interface IRelayMailboxCapabilityStore
         RelayQueuedEnvelopeRecord envelope,
         CancellationToken ct = default);
 
+    ValueTask<DomainResult> EnqueueEnvelopeAsync(
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default);
+
+    ValueTask<DomainResult> EnqueueAuthenticatedInitialAsync(
+        BlindedRoutingToken routingToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default);
+
     ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(
         BlindedRoutingToken routingToken,
         CancellationToken ct = default);
