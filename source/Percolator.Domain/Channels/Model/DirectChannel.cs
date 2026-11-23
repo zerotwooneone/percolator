@@ -69,6 +69,11 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
             return DomainResult<DirectChannel>.Failure(new DomainError("SELF_CHANNEL_NOT_ALLOWED", "Owner cannot establish a direct channel with self."));
         }
 
+        if (!Enum.IsDefined(status))
+        {
+            return DomainResult<DirectChannel>.Failure(new DomainError("INVALID_CHANNEL_STATUS", $"Invalid direct channel status: {status}."));
+        }
+
         var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, timeProvider.UtcNow, status, relayEndpoint);
         channel.AddDomainEvent(new DirectChannelCreatedDomainEvent(id, ownerIdentityId, remotePeerId, status, relayEndpoint, timeProvider.UtcNow));
         return DomainResult<DirectChannel>.Success(channel);
@@ -133,6 +138,7 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         if (!ownerIdentityId.IsValid) throw new ArgumentException("OwnerIdentityId cannot be empty.", nameof(ownerIdentityId));
         if (!remotePeerId.IsValid) throw new ArgumentException("RemotePeerId cannot be empty.", nameof(remotePeerId));
         if (ownerIdentityId == remotePeerId) throw new ArgumentException("Owner cannot establish a direct channel with self.", nameof(remotePeerId));
+        if (!Enum.IsDefined(status)) throw new ArgumentOutOfRangeException(nameof(status), status, "Invalid direct channel status.");
 
         var channel = new DirectChannel(id, ownerIdentityId, remotePeerId, createdAtUtc, status, relayEndpoint)
         {

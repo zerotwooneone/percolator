@@ -184,4 +184,27 @@ public class DirectChannelTests
         channel.RelayEndpoint.Should().Be(relayEndpoint);
         channel.LastActivityUtc.Should().Be(_timeProvider.UtcNow);
     }
+
+    [Test]
+    public void Create_WithUndefinedStatus_ReturnsInvalidChannelStatusFailure()
+    {
+        var result = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider, (DirectChannelStatus)999);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_CHANNEL_STATUS");
+    }
+
+    [Test]
+    public void Rehydrate_WithUndefinedStatus_ThrowsArgumentOutOfRangeException()
+    {
+        var act = () => DirectChannel.Rehydrate(
+            _channelId,
+            _ownerId,
+            _peerId,
+            _timeProvider.UtcNow,
+            _timeProvider.UtcNow,
+            status: (DirectChannelStatus)999);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }

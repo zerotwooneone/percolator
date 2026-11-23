@@ -10,7 +10,7 @@ public sealed record DirectChannelActivatedDomainEvent(
     ChannelId ChannelId,
     PublicIdentityId OwnerIdentityId,
     PublicIdentityId RemotePeerId,
-    RelayEndpoint? RelayEndpoint,
+    RelayEndpoint RelayEndpoint,
     DateTimeOffset OccurredOnUtc) : IDomainEvent
 {
     public Guid EventId { get; } = Guid.NewGuid();

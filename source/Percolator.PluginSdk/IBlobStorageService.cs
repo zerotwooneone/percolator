@@ -6,8 +6,7 @@ public interface IBlobStorageService
 {
     /// <summary>
     /// Strips EXIF metadata, encrypts (chunked STREAM AEAD), and stages/transfers media:
-    /// - 1:1 Direct (no relay): stages ciphertext in local chunk store for direct peer pull.
-    /// - 1:1 Relayed or GroupChannel: uploads once to the channel's designated relay.
+    /// - RelayHosted or P2PSwarm: uploads to the channel's designated relay or stages chunks for swarm retrieval.
     /// Returns a compact BlobReference suitable for embedding in an E2EE chat message.
     /// </summary>
     ValueTask<DomainResult<BlobUploadResult>> UploadBlobAsync(

@@ -117,7 +117,7 @@ public interface IProfileManager
 }
 
 /// <summary>
-/// Delivery client port for unauthenticated profile queries and mutations against Relays or direct peer endpoints.
+/// Delivery client port for unauthenticated profile queries and mutations against Relays.
 /// </summary>
 public interface IProfileDeliveryClient
 {
