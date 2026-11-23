@@ -159,7 +159,9 @@ public sealed class RelayBlobClient : IRelayBlobClient
 
                 if (destinationStream is MemoryStream memStream && totalBytes > InMemoryThresholdBytes)
                 {
-                    string tempPath = Path.Combine(Path.GetTempPath(), $"blob_dl_{Guid.NewGuid():N}.tmp");
+                    string stagingDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "Staging");
+                    Directory.CreateDirectory(stagingDir);
+                    string tempPath = Path.Combine(stagingDir, $"blob_dl_{Guid.NewGuid():N}.tmp");
                     var fileStream = new FileStream(
                         tempPath,
                         FileMode.CreateNew,

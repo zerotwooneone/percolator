@@ -232,7 +232,9 @@ public sealed class StreamingAesGcmCryptoService : IBlobCryptoService
             return new MemoryStream();
         }
 
-        string tempPath = Path.Combine(Path.GetTempPath(), $"perc_stage_{Guid.NewGuid():N}.tmp");
+        string stagingDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "Staging");
+        Directory.CreateDirectory(stagingDir);
+        string tempPath = Path.Combine(stagingDir, $"perc_stage_{Guid.NewGuid():N}.tmp");
         return new FileStream(
             tempPath,
             FileMode.Create,

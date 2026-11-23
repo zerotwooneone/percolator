@@ -16,7 +16,7 @@ public sealed class PeerProfileSnapshotEntity
 {
     public Guid PeerId { get; set; }
     public string SourceEndpoint { get; set; } = string.Empty;
-    public int SourceType { get; set; } // 1 = DirectP2P, 2 = Relay
+    public int SourceType { get; set; } // 2 = Relay
     public byte[] BlindedLocator { get; set; } = Array.Empty<byte>();
     public string MetadataJson { get; set; } = string.Empty;
     public DateTimeOffset LastObservedAtUtc { get; set; }
