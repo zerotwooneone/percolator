@@ -76,7 +76,7 @@ public sealed class RelayHostedPreKeyBundleTests
     public void Create_WhenAcceptingPreKeysIsDisabled_ReturnsError()
     {
         // Arrange
-        var policy = new RelayHostingPolicy(IsAcceptingPreKeys: false);
+        var policy = new RelayHostingPolicy(enabledFeatures: RelayFeatureFlags.Profiles | RelayFeatureFlags.Blobs);
         var routingToken = BlindedRoutingToken.New();
 
         // Act
@@ -100,7 +100,7 @@ public sealed class RelayHostedPreKeyBundleTests
     public void Create_WhenQuotaExceeded_ReturnsQuotaExceededError()
     {
         // Arrange: Policy with limit of 2 OTPKs
-        var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
+        var policy = new RelayHostingPolicy(maxOneTimePreKeysPerIdentity: 2);
         var routingToken = BlindedRoutingToken.New();
 
         var oneTimeKeys = new (uint, DhPublicKey)[]
@@ -131,7 +131,7 @@ public sealed class RelayHostedPreKeyBundleTests
     public void ReplenishOneTimePreKeys_OverCapacity_EvictsOldestWithinCap()
     {
         // Arrange: Policy with limit of 2 OTPKs
-        var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
+        var policy = new RelayHostingPolicy(maxOneTimePreKeysPerIdentity: 2);
         var routingToken = BlindedRoutingToken.New();
 
         var bundle = RelayHostedPreKeyBundle.Create(
@@ -161,7 +161,7 @@ public sealed class RelayHostedPreKeyBundleTests
     public void ReplenishOneTimePreKeys_BatchLargerThanCap_ReturnsQuotaExceededError()
     {
         // Arrange: Policy with limit of 2 OTPKs
-        var policy = new RelayHostingPolicy(IsAcceptingPreKeys: true, MaxOneTimePreKeysPerIdentity: 2);
+        var policy = new RelayHostingPolicy(maxOneTimePreKeysPerIdentity: 2);
         var routingToken = BlindedRoutingToken.New();
 
         var bundle = RelayHostedPreKeyBundle.Create(

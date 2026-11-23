@@ -74,6 +74,19 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         return DomainResult<DirectChannel>.Success(channel);
     }
 
+    public DomainResult UpdateRelayEndpoint(RelayEndpoint relayEndpoint, IDateTimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        if (relayEndpoint is null)
+        {
+            return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "RelayEndpoint cannot be null."));
+        }
+
+        RelayEndpoint = relayEndpoint;
+        LastActivityUtc = timeProvider.UtcNow;
+        return DomainResult.Success();
+    }
+
     public DomainResult Activate(IDateTimeProvider timeProvider, RelayEndpoint? relayEndpoint = null)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
@@ -81,6 +94,11 @@ public sealed class DirectChannel : AggregateRoot<ChannelId>
         if (relayEndpoint != null)
         {
             RelayEndpoint = relayEndpoint;
+        }
+
+        if (RelayEndpoint is null)
+        {
+            return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "DirectChannel cannot be activated without a RelayEndpoint."));
         }
 
         if (Status == DirectChannelStatus.Active)

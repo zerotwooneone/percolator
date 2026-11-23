@@ -2,7 +2,8 @@ namespace Percolator.PluginSdk;
 
 public enum BlobStorageMode
 {
-    DirectP2P = 1,
     ChannelRelay = 2,
-    PublicRelayBlob = 3
+    PublicRelayBlob = 3,
+    RelayHosted = 2,
+    P2PSwarm = 3
 }

@@ -145,6 +145,15 @@ public sealed class ScenarioParticipant : IDisposable
             keyId);
     }
 
+    public PeerInvitation CreatePeerInvitation(RelayEndpoint relayEndpoint)
+    {
+        return PeerInvitation.Create(
+            IdentityId,
+            IdentityPublicKey,
+            relayEndpoint,
+            RoutingToken).Value!;
+    }
+
     /// <summary>
     /// Creates a RelayHostedPreKeyBundle aggregate ready to be hosted on a relay directory.
     /// </summary>

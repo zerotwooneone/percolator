@@ -292,6 +292,11 @@ public sealed class PeerContact : AggregateRoot<PublicIdentityId>
 
         State = ContactState.Active;
         LastSeenAtUtc = timeProvider.UtcNow;
+        AddDomainEvent(new ContactOutboundAcceptedDomainEvent(
+            OwnerIdentityId,
+            RemotePeerId,
+            TrustLevel,
+            timeProvider.UtcNow));
         return DomainResult.Success();
     }
 

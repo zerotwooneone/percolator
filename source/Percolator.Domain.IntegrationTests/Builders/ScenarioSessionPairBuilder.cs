@@ -102,4 +102,59 @@ public sealed class ScenarioSessionPairBuilder
 
         return (initSession, respSession);
     }
+
+    public async Task<(DirectRatchetSession InitiatorSession, DirectRatchetSession ResponderSession)> ViaPinnedPeerInvitationAsync(
+        Percolator.Domain.Identities.ValueObjects.PeerInvitation invitation,
+        RelayHostedPreKeyBundle hostedBundle)
+    {
+        var consumedBundle = hostedBundle.ConsumeBundle().Value!;
+        var verifyResult = invitation.VerifyFetchedBundle(consumedBundle, _engine);
+        if (verifyResult.IsFailure)
+        {
+            throw new InvalidOperationException($"Bundle verification failed: {verifyResult.Error.Code} - {verifyResult.Error.Description}");
+        }
+
+        uint opkId = consumedBundle.OneTimePreKeyId;
+
+        var x3dhInit = X3dhAgreement.Initiate(
+            _initiator.IdentityPrivateKey.Span,
+            _initiator.IdentityPublicKey,
+            consumedBundle,
+            _engine).Value!;
+
+        var initSession = DirectRatchetSession.CreateFromX3dhInitiator(
+            _initiator.IdentityId,
+            _initiator.DeviceId,
+            _responder.IdentityId,
+            _responder.DeviceId,
+            x3dhInit,
+            consumedBundle.SignedPreKey,
+            _engine).Value!;
+
+        var consumedOpkPriv = await _responder.PreKeyStore.TryConsumeOneTimePreKeyPrivateAsync(
+            _responder.IdentityId, _responder.DeviceId, opkId);
+
+        var storedSpkPriv = await _responder.PreKeyStore.GetSignedPreKeyPrivateAsync(
+            _responder.IdentityId, _responder.DeviceId, consumedBundle.SignedPreKeyId);
+        var spkPrivSpan = storedSpkPriv != null ? storedSpkPriv.Span : _responder.SignedPreKeyPrivate.Span;
+
+        var responderMasterSecret = X3dhAgreement.Receive(
+            _responder.IdentityPrivateKey.Span,
+            spkPrivSpan,
+            consumedOpkPriv != null ? consumedOpkPriv.Span : default,
+            _initiator.IdentityPublicKey,
+            x3dhInit.EphemeralPublicKey,
+            _engine).Value!;
+
+        var respSession = DirectRatchetSession.CreateFromX3dhResponder(
+            _responder.IdentityId,
+            _responder.DeviceId,
+            _initiator.IdentityId,
+            _initiator.DeviceId,
+            responderMasterSecret,
+            x3dhInit.EphemeralPublicKey,
+            _engine).Value!;
+
+        return (initSession, respSession);
+    }
 }

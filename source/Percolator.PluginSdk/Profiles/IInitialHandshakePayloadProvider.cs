@@ -16,6 +16,5 @@ public interface IInitialHandshakePayloadProvider
     ValueTask<(AppId AppId, ReadOnlyMemory<byte> Payload)?> CreateInitialPayloadAsync(
         PublicIdentityId localIdentityId,
         ChannelId channelId,
-        bool allowDirectEndpoint,
         CancellationToken ct = default);
 }

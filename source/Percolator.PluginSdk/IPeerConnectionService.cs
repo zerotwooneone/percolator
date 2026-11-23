@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -28,11 +30,8 @@ public interface IPeerConnectionService
         RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default);
 
-    Task<DomainResult<PeerConnectionResult>> ConnectToDirectPeerAsync(
-        PublicIdentityId targetPeerId,
-        BlindedRoutingToken routingToken,
-        DeliveryToken deliveryToken,
-        Uri directEndpoint,
-        DeviceId? targetDeviceId = null,
+    Task<DomainResult<PeerConnectionResult>> ConnectWithInvitationAsync(
+        PublicIdentityId ownerId,
+        PeerInvitation invitation,
         CancellationToken ct = default);
 }

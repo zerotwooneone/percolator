@@ -11,7 +11,6 @@ namespace Percolator.PluginSdk.Profiles;
 /// </summary>
 public enum ProfileSourceType
 {
-    DirectP2P = 1,
     Relay = 2
 }
 
@@ -58,7 +57,7 @@ public sealed record PeerMailboxRoutingCapability(
     PublicIdentityId PeerId,
     BlindedRoutingToken RoutingToken,
     DeliveryToken DeliveryToken,
-    RelayEndpoint? RelayEndpoint = null,
+    RelayEndpoint RelayEndpoint,
     DateTimeOffset LastObservedAtUtc = default,
     DateTimeOffset? LastSuccessAtUtc = null,
     DateTimeOffset? BackpressureCooldownUntilUtc = null)

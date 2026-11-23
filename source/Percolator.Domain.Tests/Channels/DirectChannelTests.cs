@@ -124,4 +124,64 @@ public class DirectChannelTests
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("SENDER_NOT_PARTICIPANT");
     }
+
+    [Test]
+    public void Activate_WhenNoRelayEndpointExistsOrPassed_ReturnsMissingRelayEndpointFailure()
+    {
+        var channel = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider, DirectChannelStatus.PendingAcceptance, relayEndpoint: null).Value;
+
+        var result = channel.Activate(_timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("MISSING_RELAY_ENDPOINT");
+    }
+
+    [Test]
+    public void Activate_WithRelayEndpoint_TransitionsToActive_EmitsDirectChannelActivatedDomainEvent()
+    {
+        var channel = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider, DirectChannelStatus.PendingAcceptance, relayEndpoint: null).Value;
+        channel.ClearDomainEvents();
+
+        var relayEndpoint = Percolator.Domain.Delivery.ValueObjects.RelayEndpoint.Parse("percolator://relay.example.com:5100");
+        _timeProvider.Advance(TimeSpan.FromMinutes(2));
+        var result = channel.Activate(_timeProvider, relayEndpoint);
+
+        result.IsSuccess.Should().BeTrue();
+        channel.Status.Should().Be(DirectChannelStatus.Active);
+        channel.RelayEndpoint.Should().Be(relayEndpoint);
+        channel.LastActivityUtc.Should().Be(_timeProvider.UtcNow);
+        channel.DomainEvents.Should().ContainSingle(e => e is DirectChannelActivatedDomainEvent)
+            .Which.Should().BeOfType<DirectChannelActivatedDomainEvent>()
+            .Which.Should().Match<DirectChannelActivatedDomainEvent>(e =>
+                e.ChannelId == _channelId &&
+                e.OwnerIdentityId == _ownerId &&
+                e.RemotePeerId == _peerId &&
+                e.RelayEndpoint == relayEndpoint &&
+                e.OccurredOnUtc == _timeProvider.UtcNow);
+    }
+
+    [Test]
+    public void UpdateRelayEndpoint_NullEndpoint_Fails()
+    {
+        var channel = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider).Value;
+
+        var result = channel.UpdateRelayEndpoint(null!, _timeProvider);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("MISSING_RELAY_ENDPOINT");
+    }
+
+    [Test]
+    public void UpdateRelayEndpoint_ValidEndpoint_UpdatesEndpointAndActivityUtc()
+    {
+        var channel = DirectChannel.Create(_channelId, _ownerId, _peerId, _timeProvider).Value;
+        var relayEndpoint = Percolator.Domain.Delivery.ValueObjects.RelayEndpoint.Parse("percolator://relay.example.com:5100");
+
+        _timeProvider.Advance(TimeSpan.FromMinutes(10));
+        var result = channel.UpdateRelayEndpoint(relayEndpoint, _timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        channel.RelayEndpoint.Should().Be(relayEndpoint);
+        channel.LastActivityUtc.Should().Be(_timeProvider.UtcNow);
+    }
 }

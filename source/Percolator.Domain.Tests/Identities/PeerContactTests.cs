@@ -321,4 +321,61 @@ public class PeerContactTests
         _contact.TrustLevel.Should().Be(PeerTrustLevel.Untrusted);
         _contact.RegisteredDevices.Should().ContainSingle().Which.Should().Be(DeviceId.Primary);
     }
+
+    [Test]
+    public void MarkOutboundAccepted_PendingOutbound_TransitionsToActive_EmitsContactOutboundAcceptedDomainEvent()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var ownerId = PublicIdentityId.New();
+        var peerId = PublicIdentityId.New();
+        var contact = PeerContact.CreateOutboundRequest(ownerId, peerId, _primaryPeerKey, timeProvider).Value!;
+        contact.ClearDomainEvents();
+
+        var result = contact.MarkOutboundAccepted(timeProvider);
+
+        result.IsSuccess.Should().BeTrue();
+        contact.State.Should().Be(ContactState.Active);
+        contact.TrustLevel.Should().Be(PeerTrustLevel.Tofu);
+        contact.DomainEvents.Should().ContainSingle(e => e is ContactOutboundAcceptedDomainEvent)
+            .Which.Should().BeOfType<ContactOutboundAcceptedDomainEvent>()
+            .Which.Should().Match<ContactOutboundAcceptedDomainEvent>(e =>
+                e.OwnerIdentityId == ownerId &&
+                e.RemotePeerId == peerId &&
+                e.TrustLevel == PeerTrustLevel.Tofu &&
+                e.OccurredOnUtc == timeProvider.UtcNow);
+    }
+
+    [Test]
+    public void MarkOutboundAccepted_AlreadyActive_IsIdempotent_EmitsNoEvent()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        var contact = PeerContact.CreateOutboundRequest(PublicIdentityId.New(), PublicIdentityId.New(), _primaryPeerKey, timeProvider).Value!;
+        contact.MarkOutboundAccepted(timeProvider).IsSuccess.Should().BeTrue();
+        contact.ClearDomainEvents();
+
+        var repeatResult = contact.MarkOutboundAccepted(timeProvider);
+
+        repeatResult.IsSuccess.Should().BeTrue();
+        contact.DomainEvents.Should().BeEmpty();
+    }
+
+    [Test]
+    public void MarkOutboundAccepted_BlockedOrPendingApproval_FailsWithInvalidStateTransition()
+    {
+        var timeProvider = new FakeDateTimeProvider(FixedCreatedAt);
+        // PendingApproval contact
+        var inboundContact = PeerContact.CreateInboundRequest(PublicIdentityId.New(), PublicIdentityId.New(), _primaryPeerKey, "Bob", timeProvider).Value!;
+
+        var failPendingApproval = inboundContact.MarkOutboundAccepted(timeProvider);
+        failPendingApproval.IsFailure.Should().BeTrue();
+        failPendingApproval.Error.Code.Should().Be("INVALID_STATE_TRANSITION");
+
+        // Blocked contact
+        var outboundContact = PeerContact.CreateOutboundRequest(PublicIdentityId.New(), PublicIdentityId.New(), _primaryPeerKey, timeProvider).Value!;
+        outboundContact.Block();
+
+        var failBlocked = outboundContact.MarkOutboundAccepted(timeProvider);
+        failBlocked.IsFailure.Should().BeTrue();
+        failBlocked.Error.Code.Should().Be("CONTACT_BLOCKED");
+    }
 }
