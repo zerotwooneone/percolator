@@ -15,10 +15,8 @@ public sealed class BlobStorageServiceTests
 {
     private FakeChannelRepository _channelRepo = null!;
     private FakeChannelRelayResolver _relayResolver = null!;
-    private InMemoryStreamRegistry _streamRegistry = null!;
     private FakeBlobCryptoService _cryptoService = null!;
     private FakeRelayBlobClient _relayBlobClient = null!;
-    private FakePeerStreamBlobClient _peerStreamBlobClient = null!;
     private FakeLocalChunkStore _localChunkStore = null!;
     private TestDateTimeProvider _timeProvider = null!;
 
@@ -29,26 +27,22 @@ public sealed class BlobStorageServiceTests
     {
         _channelRepo = new FakeChannelRepository();
         _relayResolver = new FakeChannelRelayResolver();
-        _streamRegistry = new InMemoryStreamRegistry();
         _cryptoService = new FakeBlobCryptoService();
         _relayBlobClient = new FakeRelayBlobClient();
-        _peerStreamBlobClient = new FakePeerStreamBlobClient();
         _localChunkStore = new FakeLocalChunkStore();
         _timeProvider = new TestDateTimeProvider();
 
         _service = new BlobStorageService(
             _channelRepo,
             _relayResolver,
-            _streamRegistry,
             _cryptoService,
             _relayBlobClient,
-            _peerStreamBlobClient,
             _localChunkStore,
             _timeProvider);
     }
 
     [Test]
-    public async Task UploadBlobAsync_DirectChannel_PeerOffline_ReturnsDirectPeerOfflineError()
+    public async Task UploadBlobAsync_DirectChannel_WithoutRelay_ReturnsNoRelayEndpointError()
     {
         // Arrange
         var channelId = ChannelId.New();
@@ -57,8 +51,6 @@ public sealed class BlobStorageServiceTests
 
         var directChannel = DirectChannel.Create(channelId, ownerId, peerId, _timeProvider).Value!;
         await _channelRepo.SaveDirectAsync(directChannel);
-        // Relay is null (Direct P2P un-relayed)
-        // Stream is not registered (Peer offline)
 
         var request = new BlobUploadRequest(
             new MemoryStream([1, 2, 3]),
@@ -71,39 +63,7 @@ public sealed class BlobStorageServiceTests
 
         // Assert
         result.IsSuccess.Should().BeFalse();
-        result.Error!.Code.Should().Be("DIRECT_PEER_OFFLINE");
-    }
-
-    [Test]
-    public async Task UploadBlobAsync_DirectChannel_PeerOnline_StagesCiphertextAndReturnsDirectP2P()
-    {
-        // Arrange
-        var channelId = ChannelId.New();
-        var ownerId = PublicIdentityId.New();
-        var peerId = PublicIdentityId.New();
-
-        var directChannel = DirectChannel.Create(channelId, ownerId, peerId, _timeProvider).Value!;
-        await _channelRepo.SaveDirectAsync(directChannel);
-        _streamRegistry.SetStreamActive(peerId, true);
-
-        var request = new BlobUploadRequest(
-            new MemoryStream([1, 2, 3]),
-            "image/jpeg",
-            3,
-            channelId,
-            Width: 800,
-            Height: 600);
-
-        // Act
-        var result = await _service.UploadBlobAsync(request);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        var uploadResult = result.Value!;
-        uploadResult.StorageMode.Should().Be(BlobStorageMode.DirectP2P);
-        uploadResult.Reference.StorageMode.Should().Be(BlobStorageMode.DirectP2P);
-        uploadResult.Reference.RelayEndpointUri.Should().BeNull();
-        (await _localChunkStore.HasBlobAsync(uploadResult.Reference.Id)).Should().BeTrue();
+        result.Error!.Code.Should().Be("CHANNEL_RELAY_UNAVAILABLE");
     }
 
     [Test]
@@ -324,16 +284,6 @@ public sealed class BlobStorageServiceTests
             UploadedBlobs.Remove(blobId);
             return ValueTask.FromResult(DomainResult.Success());
         }
-    }
-
-    private sealed class FakePeerStreamBlobClient : IPeerStreamBlobClient
-    {
-        public ValueTask<DomainResult<Stream>> RequestBlobFromPeerAsync(
-            PublicIdentityId peerId,
-            BlobId blobId,
-            IProgress<TransferProgress>? progress = null,
-            CancellationToken ct = default) =>
-            ValueTask.FromResult(DomainResult<Stream>.Success(new MemoryStream([1, 2, 3])));
     }
 
     private sealed class FakeLocalChunkStore : ILocalChunkStore

@@ -1,5 +1,6 @@
 using Percolator.Application.Ingress;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.PluginSdk;
@@ -13,6 +14,7 @@ public interface IHandshakeService
         PublicIdentityId ownerId,
         DeviceId ownerDeviceId,
         PublicIdentityId remotePeerId,
+        RelayEndpoint relayEndpoint,
         PreKeyBundle remoteBundle,
         AppId? initialAppId = null,
         ReadOnlyMemory<byte>? initialPayload = null,

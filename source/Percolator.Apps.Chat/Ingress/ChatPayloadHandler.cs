@@ -35,7 +35,6 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IProfileManager _profileManager;
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IPeerMailboxRoutingRepository _peerMailboxRoutingRepo;
-    private readonly IDirectEndpointRegistry _directEndpointRegistry;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -50,8 +49,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IProfileDeliveryClient profileDeliveryClient,
         IProfileManager profileManager,
         ICryptoEngine cryptoEngine,
-        IPeerMailboxRoutingRepository peerMailboxRoutingRepo,
-        IDirectEndpointRegistry directEndpointRegistry)
+        IPeerMailboxRoutingRepository peerMailboxRoutingRepo)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -66,7 +64,6 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _profileManager = profileManager ?? throw new ArgumentNullException(nameof(profileManager));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _peerMailboxRoutingRepo = peerMailboxRoutingRepo ?? throw new ArgumentNullException(nameof(peerMailboxRoutingRepo));
-        _directEndpointRegistry = directEndpointRegistry ?? throw new ArgumentNullException(nameof(directEndpointRegistry));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -139,29 +136,35 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
                 if (authorPublicKey is not null && !string.IsNullOrWhiteSpace(dto.SourceEndpoint))
                 {
-                    RelayEndpoint? relayEndpoint = null;
                     var endpointResult = RelayEndpoint.Create(dto.SourceEndpoint);
                     if (endpointResult.IsSuccess)
                     {
-                        relayEndpoint = endpointResult.Value;
-                    }
+                        var relayEndpoint = endpointResult.Value;
 
-                    var deliveryToken = DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
-                    var capability = new PeerMailboxRoutingCapability(
-                        dto.AuthorId,
-                        routingToken,
-                        deliveryToken,
-                        relayEndpoint,
-                        _timeProvider.UtcNow);
-                    await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
+                        var deliveryToken = (dto.DeliveryTokenBytes != null && dto.DeliveryTokenBytes.Length == 16)
+                            ? DeliveryToken.FromBytes(dto.DeliveryTokenBytes)
+                            : DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
+
+                        var capability = new PeerMailboxRoutingCapability(
+                            dto.AuthorId,
+                            routingToken,
+                            deliveryToken,
+                            relayEndpoint,
+                            _timeProvider.UtcNow);
+                        await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
+
+                        var directChannel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
+                        if (directChannel != null && directChannel.RelayEndpoint != relayEndpoint)
+                        {
+                            directChannel.UpdateRelayEndpoint(relayEndpoint, _timeProvider);
+                            await _channelRepo.SaveDirectAsync(directChannel, ct).ConfigureAwait(false);
+                        }
+                    }
                 }
             }
         }
 
-        // 2. Direct P2P Endpoint Registration:
-        // Enforce [SYS-RELAY-ONLY-CLOAKING] & Anti-SSRF:
-        // A direct endpoint can ONLY be registered if the target direct channel has NO relay endpoint
-        // (meaning this is an authentic direct P2P channel, not a relayed channel where an attacker could decloak IP).
+        // 2. Resolve fetch endpoint URI
         Uri? fetchEndpointUri = null;
         if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
         {
@@ -170,15 +173,6 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                  parsedUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)))
             {
                 fetchEndpointUri = parsedUri;
-            }
-        }
-
-        if (dto.SourceType == ProfileSourceType.DirectP2P && fetchEndpointUri != null)
-        {
-            var channel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
-            if (channel != null && channel.RelayEndpoint == null)
-            {
-                _directEndpointRegistry.RegisterDirectEndpoint(dto.AuthorId, fetchEndpointUri);
             }
         }
 
@@ -231,7 +225,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         // Record multi-source snapshot without remote-provided expiry heuristics
         var snapshot = new PeerProfileSourceSnapshot(
             dto.AuthorId,
-            dto.SourceEndpoint ?? (dto.SourceType == ProfileSourceType.DirectP2P ? "direct-p2p" : "relay"),
+            dto.SourceEndpoint ?? "relay",
             dto.SourceType,
             decrypted,
             locator,
@@ -361,14 +355,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                 ? directChannel.OwnerIdentityId
                 : directChannel.RemotePeerId;
 
-            var route = DeliveryRoute.DirectP2P;
-            var bestRoute = await _peerMailboxRoutingRepo
-                .GetBestRouteAsync(dto.AuthorId, context.ReceivedAtUtc, ct)
-                .ConfigureAwait(false);
-            if (bestRoute is not null)
-            {
-                route = DeliveryRoute.RelayedOneToOne;
-            }
+            var route = DeliveryRoute.RelayedOneToOne;
 
             var receiptDto = new DeliveryReceiptDto(
                 context.ChannelId,

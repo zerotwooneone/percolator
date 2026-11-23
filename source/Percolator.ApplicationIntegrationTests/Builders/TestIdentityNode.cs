@@ -237,10 +237,8 @@ public sealed class TestIdentityNode
         BlobStorage = new BlobStorageService(
             _channelRepo,
             ChannelRelayResolver,
-            StreamRegistry,
             BlobCryptoService,
             RelayBlobClient,
-            peerStreamBlobClient,
             _localChunkStore,
             TimeProvider);
 
@@ -254,7 +252,6 @@ public sealed class TestIdentityNode
             wirePacker,
             CryptoEngine,
             _outboxRepo,
-            StreamRegistry,
             TimeProvider,
             channelLockService,
             EventBus);
@@ -275,8 +272,7 @@ public sealed class TestIdentityNode
             profileDeliveryClient: ProfileDeliveryClient,
             profileManager: ProfileManager,
             cryptoEngine: CryptoEngine,
-            peerMailboxRoutingRepo: PeerMailboxRoutingRepo,
-            directEndpointRegistry: StreamRegistry);
+            peerMailboxRoutingRepo: PeerMailboxRoutingRepo);
         appRouter.RegisterHandler(chatHandler);
 
         // File Transfer Wiring

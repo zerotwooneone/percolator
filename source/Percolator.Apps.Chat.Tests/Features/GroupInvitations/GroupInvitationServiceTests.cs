@@ -83,7 +83,7 @@ public class GroupInvitationServiceTests
             ChatTestFactory.AliceId,
             ChatTestFactory.AliceDeviceId,
             directChannel.Id,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         acceptResult.IsSuccess.Should().BeTrue();
 
@@ -123,7 +123,7 @@ public class GroupInvitationServiceTests
             ChatTestFactory.AliceId,
             ChatTestFactory.AliceDeviceId,
             directChannel.Id,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         declineResult.IsSuccess.Should().BeTrue();
 
@@ -165,7 +165,7 @@ public class GroupInvitationServiceTests
             ChatTestFactory.AliceId,
             ChatTestFactory.AliceDeviceId,
             directChannel.Id,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         acceptResult.IsFailure.Should().BeTrue();
         acceptResult.Error.Code.Should().Be("INVITATION_EXPIRED");

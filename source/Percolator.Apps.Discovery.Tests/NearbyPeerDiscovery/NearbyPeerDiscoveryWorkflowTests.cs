@@ -183,24 +183,21 @@ public sealed class NearbyPeerDiscoveryWorkflowTests
                 new PeerConnectionResult(channelId, deviceId)));
         }
 
-        public Task<DomainResult<PeerConnectionResult>> ConnectToDirectPeerAsync(
-            PublicIdentityId targetPeerId,
-            BlindedRoutingToken routingToken,
-            DeliveryToken deliveryToken,
-            Uri directEndpoint,
-            DeviceId? targetDeviceId = null,
+        public Task<DomainResult<PeerConnectionResult>> ConnectWithInvitationAsync(
+            PublicIdentityId ownerId,
+            PeerInvitation invitation,
             CancellationToken ct = default)
         {
             ConnectCallCount++;
 
-            if (_failingPeers.Contains(targetPeerId))
+            if (_failingPeers.Contains(invitation.InviterIdentityId))
             {
                 return Task.FromResult(DomainResult<PeerConnectionResult>.Failure(
                     new DomainError(_failureCode, "Simulated connection error.")));
             }
 
             var channelId = ChannelId.New();
-            var deviceId = targetDeviceId ?? new DeviceId(1);
+            var deviceId = DeviceId.Primary;
             return Task.FromResult(DomainResult<PeerConnectionResult>.Success(
                 new PeerConnectionResult(channelId, deviceId)));
         }

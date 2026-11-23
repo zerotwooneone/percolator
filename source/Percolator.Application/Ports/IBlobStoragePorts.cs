@@ -27,14 +27,6 @@ public interface IRelayBlobClient
         CancellationToken ct = default);
 }
 
-public interface IPeerStreamBlobClient
-{
-    ValueTask<DomainResult<Stream>> RequestBlobFromPeerAsync(
-        PublicIdentityId peerId,
-        BlobId blobId,
-        IProgress<TransferProgress>? progress = null,
-        CancellationToken ct = default);
-}
 
 public interface ILocalChunkStore
 {

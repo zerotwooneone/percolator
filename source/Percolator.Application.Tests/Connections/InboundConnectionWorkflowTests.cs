@@ -15,8 +15,10 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 
 [TestFixture]
 public sealed class InboundConnectionWorkflowTests
@@ -32,6 +34,7 @@ public sealed class InboundConnectionWorkflowTests
 
     private PublicIdentityId _personaId;
     private PublicIdentityId _requesterId;
+    private RelayEndpoint _relayEndpoint = null!;
 
     [SetUp]
     public void SetUp()
@@ -46,6 +49,14 @@ public sealed class InboundConnectionWorkflowTests
 
         _personaId = PublicIdentityId.New();
         _requesterId = PublicIdentityId.New();
+        _relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com").Value;
+
+        _routingRepo.SaveAsync(new PeerMailboxRoutingCapability(
+            _requesterId,
+            BlindedRoutingToken.New(),
+            DeliveryToken.GenerateRandom(),
+            _relayEndpoint,
+            _timeProvider.UtcNow)).GetAwaiter().GetResult();
 
         _sut = new InboundConnectionWorkflow(
             _contactCoordinator,
@@ -99,7 +110,7 @@ public sealed class InboundConnectionWorkflowTests
         _handshakeService.LastCompleted!.Value.RecipientId.Should().Be(_personaId);
         _handshakeService.LastCompleted.Value.SenderId.Should().Be(_requesterId);
 
-        var expectedChannelId = Domain.Channels.ValueObjects.ChannelId.DeterministicForDirect(_personaId, _requesterId);
+        var expectedChannelId = Domain.Channels.ValueObjects.ChannelId.DeterministicForDirect(_personaId, _requesterId, _relayEndpoint);
         var createdChannel = await _channelRepo.GetDirectByIdAsync(expectedChannelId);
         createdChannel.Should().NotBeNull();
         createdChannel!.Status.Should().Be(Domain.Channels.Model.DirectChannelStatus.Active);
@@ -147,13 +158,14 @@ public sealed class InboundConnectionWorkflowTests
     [Test]
     public async Task AcceptRequestAsync_WhenExistingChannelPresent_ActivatesAndPublishesEvent()
     {
-        var expectedChannelId = Domain.Channels.ValueObjects.ChannelId.DeterministicForDirect(_personaId, _requesterId);
+        var expectedChannelId = Domain.Channels.ValueObjects.ChannelId.DeterministicForDirect(_personaId, _requesterId, _relayEndpoint);
         var existingChannel = Domain.Channels.Model.DirectChannel.Create(
             expectedChannelId,
             _personaId,
             _requesterId,
             _timeProvider,
-            Domain.Channels.Model.DirectChannelStatus.PendingAcceptance).Value!;
+            Domain.Channels.Model.DirectChannelStatus.PendingAcceptance,
+            _relayEndpoint).Value!;
         existingChannel.ClearDomainEvents();
         await _channelRepo.SaveDirectAsync(existingChannel);
 
@@ -255,7 +267,7 @@ public sealed class InboundConnectionWorkflowTests
             return ValueTask.FromResult(CompleteResult);
         }
 
-        public ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(PublicIdentityId ownerId, DeviceId ownerDeviceId, PublicIdentityId remotePeerId, PreKeyBundle remoteBundle, AppId? initialAppId = null, ReadOnlyMemory<byte>? initialPayload = null, CancellationToken ct = default)
+        public ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(PublicIdentityId ownerId, DeviceId ownerDeviceId, PublicIdentityId remotePeerId, RelayEndpoint relayEndpoint, PreKeyBundle remoteBundle, AppId? initialAppId = null, ReadOnlyMemory<byte>? initialPayload = null, CancellationToken ct = default)
             => throw new NotImplementedException();
 
         public ValueTask<DomainResult> ReceiveInvitationAsync(InboundHandshakeEnvelope envelope, CancellationToken ct = default)

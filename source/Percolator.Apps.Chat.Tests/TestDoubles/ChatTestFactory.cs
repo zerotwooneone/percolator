@@ -56,7 +56,7 @@ public static class ChatTestFactory
             authorId ?? AliceId,
             recipientId ?? BobId,
             BobDeviceId,
-            DeliveryRoute.DirectP2P,
+            DeliveryRoute.RelayedOneToOne,
             content,
             mentions,
             replyContext,

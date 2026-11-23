@@ -1,7 +1,7 @@
 namespace Percolator.Application.Tests.Invitations;
 
 using System;
-using System.Collections.Generic;
+using System.Security.Cryptography;
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Application.Invitations;
@@ -28,119 +28,53 @@ public sealed class PeerInvitationCodecTests
     }
 
     [Test]
-    public void Encode_ProducesUrlWithPercolatorSchemeAndParameters()
+    public void Encode_ProducesUrlWithPercolatorInvitePrefix()
     {
         var id = PublicIdentityId.New();
+        var key = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
+        var endpoint = RelayEndpoint.Create("percolator://relay.example.com").Value;
         var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var hosts = new List<string> { "192.168.1.50", "10.0.0.5" };
-        var ports = new PortRange(5100, 5200);
 
-        var payload = new PeerInvitationPayload(id, route, deliv, hosts, ports);
+        var payload = new PeerInvitationPayload(id, key, endpoint, route);
         var url = _codec.Encode(payload);
 
-        url.Should().StartWith("percolator://invite?");
-        url.Should().Contain($"id={id.Value:D}");
-        url.Should().Contain($"route={route.Value:N}");
-        url.Should().Contain($"deliv={Convert.ToHexString(deliv.Span).ToLowerInvariant()}");
-        url.Should().Contain("endpoints=192.168.1.50%2C10.0.0.5");
-        url.Should().Contain("ports=5100-5200");
-    }
-
-    [Test]
-    public void Encode_SinglePort_EmbedsSingleNumber()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var payload = new PeerInvitationPayload(id, route, deliv, new[] { "127.0.0.1" }, PortRange.Single(5123));
-
-        var url = _codec.Encode(payload);
-        url.Should().Contain("ports=5123");
-    }
-
-    [Test]
-    public void Encode_NullPortRange_OmitsPortsQueryParam()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var payload = new PeerInvitationPayload(id, route, deliv, new[] { "127.0.0.1" }, null);
-
-        var url = _codec.Encode(payload);
-        url.Should().NotContain("ports=");
+        url.Should().StartWith("percolator://invite/");
     }
 
     [Test]
     public void Decode_RoundtripUrl_PreservesAllFields()
     {
         var id = PublicIdentityId.New();
+        var key = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
+        var endpoint = RelayEndpoint.Create("percolator://relay.example.com:5100").Value;
         var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var hosts = new[] { "192.168.1.100", "myhost.local" };
-        var ports = new PortRange(5110, 5190);
 
-        var original = new PeerInvitationPayload(id, route, deliv, hosts, ports);
+        var original = new PeerInvitationPayload(id, key, endpoint, route);
         var encoded = _codec.Encode(original);
 
         var result = _codec.Decode(encoded);
         result.IsSuccess.Should().BeTrue();
         result.Value.IdentityId.Should().Be(id);
+        result.Value.IdentityKey.Should().Be(key);
+        result.Value.RelayEndpoint.Should().Be(endpoint);
         result.Value.RoutingToken.Should().Be(route);
-        result.Value.DeliveryToken.Should().Be(deliv);
-        result.Value.EndpointHosts.Should().Equal(hosts);
-        result.Value.PortRange.Should().Be(ports);
     }
 
     [Test]
-    public void Decode_RoundtripBase64_PreservesAllFields()
+    public void Decode_WithoutPercolatorPrefix_ReturnsFailure()
     {
         var id = PublicIdentityId.New();
+        var key = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
+        var endpoint = RelayEndpoint.Create("percolator://relay.local").Value;
         var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var hosts = new[] { "10.0.0.1", "172.16.0.1" };
-        var ports = new PortRange(5150, 5250);
 
-        var original = new PeerInvitationPayload(id, route, deliv, hosts, ports);
-        var base64 = _codec.EncodeAsBase64(original);
-
-        var result = _codec.Decode(base64);
-        result.IsSuccess.Should().BeTrue();
-        result.Value.IdentityId.Should().Be(id);
-        result.Value.RoutingToken.Should().Be(route);
-        result.Value.DeliveryToken.Should().Be(deliv);
-        result.Value.EndpointHosts.Should().Equal(hosts);
-        result.Value.PortRange.Should().Be(ports);
-    }
-
-    [Test]
-    public void Decode_WithoutPercolatorPrefix_DecodesSuccessfully()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var payload = new PeerInvitationPayload(id, route, deliv, new[] { "127.0.0.1" }, PortRange.Single(5100));
-
+        var payload = new PeerInvitationPayload(id, key, endpoint, route);
         var url = _codec.Encode(payload);
-        var stripped = url.Replace("percolator://", "");
+        var stripped = url.Replace("percolator://invite/", "");
 
         var result = _codec.Decode(stripped);
-        result.IsSuccess.Should().BeTrue();
-        result.Value.IdentityId.Should().Be(id);
-    }
-
-    [Test]
-    public void Decode_OmittedPorts_DefaultsToDefaultDynamicRange()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-
-        var query = $"invite?id={id.Value:D}&route={route.Value:N}&deliv={Convert.ToHexString(deliv.Span)}&endpoints=127.0.0.1";
-        var result = _codec.Decode(query);
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value.PortRange.Should().Be(PortRange.DefaultDynamicRange);
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("INVALID_INVITATION_URI");
     }
 
     [Test]
@@ -152,70 +86,6 @@ public sealed class PeerInvitationCodecTests
     }
 
     [Test]
-    public void Decode_MissingId_ReturnsFailure()
-    {
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var query = $"invite?route={route.Value:N}&deliv={Convert.ToHexString(deliv.Span)}";
-
-        var result = _codec.Decode(query);
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_IDENTITY_ID");
-    }
-
-    [Test]
-    public void Decode_InvalidRoutingToken_ReturnsFailure()
-    {
-        var id = PublicIdentityId.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var query = $"invite?id={id.Value:D}&route=not-a-guid&deliv={Convert.ToHexString(deliv.Span)}";
-
-        var result = _codec.Decode(query);
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_ROUTING_TOKEN");
-    }
-
-    [Test]
-    public void Decode_InvalidDeliveryToken_ReturnsFailure()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var query = $"invite?id={id.Value:D}&route={route.Value:N}&deliv=not-hex";
-
-        var result = _codec.Decode(query);
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_DELIVERY_TOKEN");
-    }
-
-    [Test]
-    public void Decode_DeliveryTokenWrongLength_ReturnsFailure()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        // 16 bytes hex (32 chars) instead of 32 bytes (64 chars)
-        var shortHex = "0102030405060708090a0b0c0d0e0f10";
-        var query = $"invite?id={id.Value:D}&route={route.Value:N}&deliv={shortHex}";
-
-        var result = _codec.Decode(query);
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_DELIVERY_TOKEN");
-    }
-
-    [Test]
-    public void Decode_InvalidPortRange_ReturnsFailure()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        // Min > Max
-        var query = $"invite?id={id.Value:D}&route={route.Value:N}&deliv={Convert.ToHexString(deliv.Span)}&ports=6000-5000";
-
-        var result = _codec.Decode(query);
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_PORT_RANGE");
-    }
-
-    [Test]
     public void Decode_GarbageString_ReturnsFailure()
     {
         var result = _codec.Decode("RandomGarbageStringThatIsNotAUrlOrValidBinaryPayload!");
@@ -223,61 +93,48 @@ public sealed class PeerInvitationCodecTests
     }
 
     [Test]
-    public void Decode_UrlWithFragment_StripsFragmentAndSucceeds()
+    public void Decode_UnsupportedVersion_ReturnsFailure()
     {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var url = $"percolator://invite?id={id.Value:D}&route={route.Value:N}&deliv={Convert.ToHexStringLower(deliv.Span)}&ports=5100-5200#localFragmentNotes";
+        var raw = new byte[67];
+        raw[0] = 0x02; // version 2 (unsupported)
 
-        var result = _codec.Decode(url);
-        result.IsSuccess.Should().BeTrue();
-        result.Value.PortRange.Should().Be(new PortRange(5100, 5200));
-    }
+        var base64Url = System.Buffers.Text.Base64Url.EncodeToString(raw);
+        var result = _codec.Decode($"percolator://invite/{base64Url}");
 
-    [Test]
-    public void Decode_UppercaseDeliveryHex_DecodesSuccessfully()
-    {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
-        var url = $"invite?id={id.Value:D}&route={route.Value:N}&deliv={Convert.ToHexString(deliv.Span).ToUpperInvariant()}";
-
-        var result = _codec.Decode(url);
-        result.IsSuccess.Should().BeTrue();
-        result.Value.DeliveryToken.Should().Be(deliv);
-    }
-
-    [Test]
-    public void Decode_BinaryPayloadTooLarge_ReturnsFailure()
-    {
-        var oversized = new byte[4097];
-        var base64 = Convert.ToBase64String(oversized);
-
-        var result = _codec.Decode(base64);
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("PAYLOAD_TOO_LARGE");
+        result.Error.Code.Should().Be("UNSUPPORTED_VERSION");
     }
 
     [Test]
-    public void Decode_BinaryPayloadExcessiveHosts_ReturnsFailure()
+    public void Decode_TruncatedBinaryPayload_ReturnsFailure()
     {
-        var id = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var deliv = DeliveryToken.GenerateRandom();
+        var raw = new byte[30]; // less than 67 bytes minimum
+        raw[0] = 0x01;
 
-        using var ms = new System.IO.MemoryStream();
-        using var writer = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8);
-        writer.Write((byte)1); // version
-        writer.Write(id.ToByteArray());
-        writer.Write(route.ToByteArray());
-        writer.Write(deliv.Span);
-        writer.Write((byte)0); // no port range
-        writer.Write((ushort)65); // excessive host count > 64
+        var base64Url = System.Buffers.Text.Base64Url.EncodeToString(raw);
+        var result = _codec.Decode($"percolator://invite/{base64Url}");
 
-        var base64 = Convert.ToBase64String(ms.ToArray());
-        var result = _codec.Decode(base64);
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("INVALID_INVITATION_PAYLOAD");
+    }
+
+    [Test]
+    public void ToDomain_And_FromDomain_RoundtripsSuccessfully()
+    {
+        var id = PublicIdentityId.New();
+        var key = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
+        var endpoint = RelayEndpoint.Create("percolator://relay.domain.com").Value;
+        var route = BlindedRoutingToken.New();
+
+        var original = new PeerInvitationPayload(id, key, endpoint, route);
+        var domainInvitation = original.ToDomain().Value;
+
+        domainInvitation.InviterIdentityId.Should().Be(id);
+        domainInvitation.InviterIdentityKey.Should().Be(key);
+        domainInvitation.RelayEndpoint.Should().Be(endpoint);
+        domainInvitation.RoutingToken.Should().Be(route);
+
+        var restoredPayload = PeerInvitationPayload.FromDomain(domainInvitation);
+        restoredPayload.Should().Be(original);
     }
 }

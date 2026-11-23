@@ -16,4 +16,5 @@ public sealed record ProfileCapabilityDto(
     ulong TimestampUnixMs,
     byte[]? AuthorPublicKeyBytes = null,
     string? SourceEndpoint = null,
-    ProfileSourceType SourceType = ProfileSourceType.DirectP2P);
+    ProfileSourceType SourceType = ProfileSourceType.Relay,
+    byte[]? DeliveryTokenBytes = null);

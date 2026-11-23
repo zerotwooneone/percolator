@@ -12,7 +12,7 @@ namespace Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
 /// </summary>
 public sealed record PeerDiscoveryDescriptor(
     PublicIdentityId PeerId,
-    DeliveryRoute Route,
+    DeliveryRoute Route = DeliveryRoute.RelayedOneToOne,
     RelayEndpoint? RelayEndpoint = null,
     BlindedRoutingToken? RoutingToken = null,
     DeliveryToken? DeliveryToken = null);

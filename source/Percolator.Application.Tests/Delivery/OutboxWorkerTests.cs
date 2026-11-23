@@ -1,6 +1,7 @@
 using Percolator.Application.Delivery;
 using Percolator.Application.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Events;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -35,7 +36,7 @@ public sealed class OutboxWorkerTests
     public async Task ProcessBatchAsync_WhenTransportSucceeds_MarksJobDelivered()
     {
         // Arrange
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var route = DeliveryRoute.RelayedOneToOne(BlindedRoutingToken.New(), RelayEndpoint.Create("percolator://relay.example.com").Value);
         var job = OutboxJob.Create(_channelId, _aliceId, _bobId, route, "Hello"u8.ToArray(), _timeProvider).Value!;
         await _outboxRepo.SaveAsync(job);
 
@@ -53,7 +54,7 @@ public sealed class OutboxWorkerTests
     {
         // Arrange
         _dispatcher.ShouldSucceed = false;
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var route = DeliveryRoute.RelayedOneToOne(BlindedRoutingToken.New(), RelayEndpoint.Create("percolator://relay.example.com").Value);
         var job = OutboxJob.Create(_channelId, _aliceId, _bobId, route, "Hello"u8.ToArray(), _timeProvider).Value!;
         await _outboxRepo.SaveAsync(job);
 
@@ -72,7 +73,7 @@ public sealed class OutboxWorkerTests
     {
         // Arrange
         _dispatcher.ShouldSucceed = false;
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var route = DeliveryRoute.RelayedOneToOne(BlindedRoutingToken.New(), RelayEndpoint.Create("percolator://relay.example.com").Value);
         var job = OutboxJob.Create(_channelId, _aliceId, _bobId, route, "Hello"u8.ToArray(), _timeProvider, maxAttempts: 1).Value!;
         await _outboxRepo.SaveAsync(job);
 
@@ -107,7 +108,7 @@ public sealed class OutboxWorkerTests
     public async Task DormancyEventListener_TransitionsAllIdentityJobsToPausedDormant()
     {
         // Arrange
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var route = DeliveryRoute.RelayedOneToOne(BlindedRoutingToken.New(), RelayEndpoint.Create("percolator://relay.example.com").Value);
         var job1 = OutboxJob.Create(_channelId, _aliceId, _bobId, route, "Job1"u8.ToArray(), _timeProvider).Value!;
         var job2 = OutboxJob.Create(_channelId, _aliceId, _bobId, route, "Job2"u8.ToArray(), _timeProvider).Value!;
         await _outboxRepo.SaveAsync(job1);
@@ -127,7 +128,7 @@ public sealed class OutboxWorkerTests
     public async Task ProcessBatchAsync_IgnoresJobsAlreadyInFlightOrPaused()
     {
         // Arrange
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
+        var route = DeliveryRoute.RelayedOneToOne(BlindedRoutingToken.New(), RelayEndpoint.Create("percolator://relay.example.com").Value);
         var inFlightJob = OutboxJob.Create(_channelId, _aliceId, _bobId, route, "InFlight"u8.ToArray(), _timeProvider).Value!;
         inFlightJob.MarkInFlight();
 

@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using Percolator.Application.Ports;
+using Percolator.Application.Security;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
@@ -230,6 +232,22 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
             {
                 contact.MarkOutboundAccepted(_timeProvider);
                 await _contactRepository.SaveAsync(contact, ct).ConfigureAwait(false);
+
+                try
+                {
+                    foreach (var domainEvt in contact.DomainEvents)
+                    {
+                        var appEvt = domainEvt.ToApplicationEvent();
+                        if (appEvt != null)
+                        {
+                            await _eventPublisher.PublishAsync(appEvt, ct).ConfigureAwait(false);
+                        }
+                    }
+                }
+                finally
+                {
+                    contact.ClearDomainEvents();
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -319,52 +337,66 @@ public sealed class InboundIngressPipeline : IInboundIngressPipeline
             return DomainResult.Failure(new DomainError("EMPTY_INNER_PAYLOAD", "Decrypted payload contains 0 bytes."));
         }
 
-        var appId = new AppId(plaintext[0]);
-        var appPayload = plaintext.AsMemory(1);
-
-        var appContext = new InboundPayloadContext(
-            channelId,
-            recipientId,
-            senderId,
-            senderDeviceId,
-            appId,
-            appPayload,
-            receivedAtUtc);
-
-        // Phase 4a: App-Level Ingress Pre-Filter (Pre-Deserialization Kill Switch & Blocklist)
-        IAppIngressFilter? appFilter = _appRouter.ResolveFilter(appId);
-        if (appFilter != null)
+        byte[] unpadded;
+        try
         {
-            IngressDecision decision = await appFilter.EvaluateAsync(appContext, ct);
-            if (decision == IngressDecision.DiscardSilently)
-            {
-                Array.Clear(plaintext, 0, plaintext.Length);
-                return DomainResult.Success();
-            }
+            unpadded = PayloadPadding.RemovePadding(plaintext).ToArray();
+        }
+        catch (Exception)
+        {
+            unpadded = (byte[])plaintext.Clone();
         }
 
-        DomainResult dispatchResult;
-
-        // Phase 4b: Route SystemControl messages (such as SenderKeyDistribution) or App Payload Handlers
-        if (appId == AppId.SystemControl)
+        try
         {
-            dispatchResult = await _groupKeyDistributionService.ProcessInboundDistributionAsync(appContext, ct);
-        }
-        else
-        {
-            var handlerResult = _appRouter.Resolve(appId);
-            if (!handlerResult.IsSuccess)
+            if (unpadded.Length == 0)
             {
-                Array.Clear(plaintext, 0, plaintext.Length);
-                return DomainResult.Failure(handlerResult.Error!);
+                return DomainResult.Failure(new DomainError("EMPTY_INNER_PAYLOAD", "Payload after unpadding contains 0 bytes."));
             }
 
-            dispatchResult = await handlerResult.Value!.HandleInboundAsync(appContext, ct);
+            var appId = new AppId(unpadded[0]);
+            var appPayload = unpadded.AsMemory(1);
+
+            var appContext = new InboundPayloadContext(
+                channelId,
+                recipientId,
+                senderId,
+                senderDeviceId,
+                appId,
+                appPayload,
+                receivedAtUtc);
+
+            // Phase 4a: App-Level Ingress Pre-Filter (Pre-Deserialization Kill Switch & Blocklist)
+            IAppIngressFilter? appFilter = _appRouter.ResolveFilter(appId);
+            if (appFilter != null)
+            {
+                IngressDecision decision = await appFilter.EvaluateAsync(appContext, ct);
+                if (decision == IngressDecision.DiscardSilently)
+                {
+                    return DomainResult.Success();
+                }
+            }
+
+            // Phase 4b: Route SystemControl messages (such as SenderKeyDistribution) or App Payload Handlers
+            if (appId == AppId.SystemControl)
+            {
+                return await _groupKeyDistributionService.ProcessInboundDistributionAsync(appContext, ct);
+            }
+            else
+            {
+                var handlerResult = _appRouter.Resolve(appId);
+                if (!handlerResult.IsSuccess)
+                {
+                    return DomainResult.Failure(handlerResult.Error!);
+                }
+
+                return await handlerResult.Value!.HandleInboundAsync(appContext, ct);
+            }
         }
-
-        // Phase 5: Deterministic Zeroization
-        Array.Clear(plaintext, 0, plaintext.Length);
-
-        return dispatchResult;
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+            CryptographicOperations.ZeroMemory(unpadded);
+        }
     }
 }

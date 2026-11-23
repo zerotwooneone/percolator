@@ -1,11 +1,14 @@
 using Percolator.Application.Delivery;
 using Percolator.Application.Egress;
 using Percolator.Application.Tests.TestDoubles;
+using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.ValueObjects;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Model;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Profiles;
 using PluginRoute = Percolator.PluginSdk.DeliveryRoute;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -19,9 +22,10 @@ public sealed class EgressPipelineTests
     private FakeSessionWirePacker _sessionWirePacker = null!;
     private ApplicationTestCryptoEngine _cryptoEngine = null!;
     private InMemoryOutboxRepository _outboxRepo = null!;
-    private InMemoryStreamRegistry _streamRegistry = null!;
     private TestDateTimeProvider _timeProvider = null!;
     private NoOpChannelLockService _channelLockService = null!;
+    private InMemoryPeerMailboxRoutingRepository _routingRepo = null!;
+    private InMemoryChannelRepository _channelRepo = null!;
     private FakeEventPublisher _eventPublisher = null!;
     private OutboundEgressPipeline _egressPipeline = null!;
 
@@ -39,7 +43,8 @@ public sealed class EgressPipelineTests
         _sessionWirePacker = new FakeSessionWirePacker();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _outboxRepo = new InMemoryOutboxRepository();
-        _streamRegistry = new InMemoryStreamRegistry();
+        _routingRepo = new InMemoryPeerMailboxRoutingRepository();
+        _channelRepo = new InMemoryChannelRepository();
         _timeProvider = new TestDateTimeProvider();
         _channelLockService = new NoOpChannelLockService();
         _eventPublisher = new FakeEventPublisher();
@@ -50,7 +55,8 @@ public sealed class EgressPipelineTests
             _sessionWirePacker,
             _cryptoEngine,
             _outboxRepo,
-            _streamRegistry,
+            _routingRepo,
+            _channelRepo,
             _timeProvider,
             _channelLockService,
             _eventPublisher);
@@ -82,6 +88,11 @@ public sealed class EgressPipelineTests
     {
         // Arrange
         await SetupActiveRatchetSessionAsync();
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com").Value;
+        var directChannel = DirectChannel.Create(_channelId, _aliceId, _bobId, _timeProvider, relayEndpoint: relayEndpoint).Value!;
+        await _channelRepo.SaveDirectAsync(directChannel);
+        await _routingRepo.SaveAsync(new PeerMailboxRoutingCapability(_bobId, BlindedRoutingToken.New(), DeliveryToken.GenerateRandom(), relayEndpoint, _timeProvider.UtcNow));
+
         var context = new OutboundPayloadContext(
             _channelId,
             _aliceId,
@@ -89,7 +100,7 @@ public sealed class EgressPipelineTests
             _bobDeviceId,
             AppId.Chat,
             "Hello Bob"u8.ToArray(),
-            PluginRoute.DirectP2P);
+            PluginRoute.RelayedOneToOne);
 
         // Act
         var result = await _egressPipeline.SendPayloadAsync(context);
@@ -101,96 +112,17 @@ public sealed class EgressPipelineTests
         job.ChannelId.Should().Be(_channelId);
         job.OwnerIdentityId.Should().Be(_aliceId);
         job.RecipientIdentityId.Should().Be(_bobId);
-    }
-
-    [Test]
-    public async Task DispatchAsync_WhenStreamOnline_TriggersImmediateStreamDispatch()
-    {
-        // Arrange
-        await SetupActiveRatchetSessionAsync();
-        _streamRegistry.SetStreamActive(_bobId, true);
-
-        var context = new OutboundPayloadContext(
-            _channelId,
-            _aliceId,
-            _bobId,
-            _bobDeviceId,
-            AppId.Chat,
-            "Stream Fast-Path"u8.ToArray(),
-            PluginRoute.DirectP2P);
-
-        // Act
-        var result = await _egressPipeline.SendPayloadAsync(context);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        _streamRegistry.WrittenPayloads.Should().HaveCount(1);
-        _streamRegistry.WrittenPayloads[0].TargetId.Should().Be(_bobId);
-
-        var job = _outboxRepo.AllJobs.First();
-        job.Status.Should().Be(OutboxStatus.Delivered);
-    }
-
-    [Test]
-    public async Task DispatchAsync_WhenStreamDisconnected_LeavesJobPendingWithBackoff()
-    {
-        // Arrange
-        await SetupActiveRatchetSessionAsync();
-        _streamRegistry.SetStreamActive(_bobId, false); // offline stream
-
-        var context = new OutboundPayloadContext(
-            _channelId,
-            _aliceId,
-            _bobId,
-            _bobDeviceId,
-            AppId.Chat,
-            "Stream Offline"u8.ToArray(),
-            PluginRoute.DirectP2P);
-
-        // Act
-        var result = await _egressPipeline.SendPayloadAsync(context);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        _streamRegistry.WrittenPayloads.Should().BeEmpty();
-
-        var job = _outboxRepo.AllJobs.First();
         job.Status.Should().Be(OutboxStatus.Pending);
-    }
-
-    [Test]
-    public async Task DispatchAsync_WhenStreamBackpressured_SpillsToOutboxWithBackoff()
-    {
-        // Arrange
-        await SetupActiveRatchetSessionAsync();
-        _streamRegistry.SetStreamActive(_bobId, true);
-        _streamRegistry.SetBackpressured(_bobId, true);
-
-        var context = new OutboundPayloadContext(
-            _channelId,
-            _aliceId,
-            _bobId,
-            _bobDeviceId,
-            AppId.Chat,
-            "Stream Backpressured"u8.ToArray(),
-            PluginRoute.DirectP2P);
-
-        // Act
-        var result = await _egressPipeline.SendPayloadAsync(context);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        _streamRegistry.WrittenPayloads.Should().BeEmpty();
-
-        var job = _outboxRepo.AllJobs.First();
-        job.Status.Should().Be(OutboxStatus.Pending);
-        job.RetryCount.Should().Be(1);
     }
 
     [Test]
     public async Task DispatchGroupBroadcast_DispatchesSingleFramedPayload()
     {
         // Arrange
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com").Value;
+        var groupChannel = GroupChannel.CreateGenesis(_channelId, _aliceId, "Test Group", _timeProvider, relayEndpoint: relayEndpoint).Value!;
+        await _channelRepo.SaveGroupAsync(groupChannel);
+
         using var initialChain = ChainKey.FromSpan(new byte[32]);
         var (signingPriv, signingPub) = _cryptoEngine.GenerateEphemeralKeyPair();
         var ratchet = new GroupSenderKeyRatchet(

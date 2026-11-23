@@ -78,7 +78,9 @@ public sealed class AppHostPipelineTests
             _cryptoEngine,
             _timeProvider,
             _appRouter,
-            _eventPublisher);
+            _eventPublisher,
+            new FakeSessionWirePacker(),
+            new FakeRoutingCoordinator());
 
         _groupKeyDistributionService = new GroupKeyDistributionService(
             _senderKeyRepo,

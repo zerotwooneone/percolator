@@ -2,9 +2,6 @@ namespace Percolator.Application.Invitations;
 
 using System;
 using System.Buffers.Binary;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -13,80 +10,31 @@ using Percolator.Domain.Identities.ValueObjects;
 
 public sealed class PeerInvitationCodec : IPeerInvitationCodec
 {
-    private const string SchemePrefix = "percolator://";
+    private const string SchemePrefix = "percolator://invite/";
     private const byte BinaryVersion = 1;
 
     public string Encode(PeerInvitationPayload payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
+        if (!payload.IdentityId.IsValid) throw new ArgumentException("IdentityId is invalid.", nameof(payload));
+        if (payload.IdentityKey == null || payload.IdentityKey.Span.Length != 32) throw new ArgumentException("IdentityKey must be 32 bytes.", nameof(payload));
+        if (payload.RelayEndpoint == null || string.IsNullOrWhiteSpace(payload.RelayEndpoint.Value)) throw new ArgumentException("RelayEndpoint is required.", nameof(payload));
+        if (!payload.RoutingToken.IsValid) throw new ArgumentException("RoutingToken is invalid.", nameof(payload));
 
-        var sb = new StringBuilder();
-        sb.Append(SchemePrefix).Append("invite?");
-        sb.Append("id=").Append(payload.IdentityId.Value.ToString("D"));
-        sb.Append("&route=").Append(payload.RoutingToken.Value.ToString("N"));
-        sb.Append("&deliv=").Append(Convert.ToHexStringLower(payload.DeliveryToken.Span));
+        var endpointBytes = Encoding.UTF8.GetBytes(payload.RelayEndpoint.Value);
+        if (endpointBytes.Length > ushort.MaxValue) throw new ArgumentException("RelayEndpoint is too long.", nameof(payload));
 
-        if (payload.EndpointHosts != null && payload.EndpointHosts.Count > 0)
-        {
-            sb.Append("&endpoints=").Append(Uri.EscapeDataString(string.Join(",", payload.EndpointHosts)));
-        }
+        var totalLen = 1 + 16 + 32 + 16 + 2 + endpointBytes.Length;
+        var buffer = new byte[totalLen];
 
-        if (payload.PortRange != null)
-        {
-            sb.Append("&ports=").Append(payload.PortRange.IsSinglePort
-                ? payload.PortRange.MinPort.ToString()
-                : $"{payload.PortRange.MinPort}-{payload.PortRange.MaxPort}");
-        }
+        buffer[0] = BinaryVersion;
+        payload.IdentityId.ToByteArray().CopyTo(buffer.AsSpan(1, 16));
+        payload.IdentityKey.Span.CopyTo(buffer.AsSpan(17, 32));
+        payload.RoutingToken.ToByteArray().CopyTo(buffer.AsSpan(49, 16));
+        BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(65, 2), (ushort)endpointBytes.Length);
+        endpointBytes.CopyTo(buffer.AsSpan(67, endpointBytes.Length));
 
-        if (payload.RelayEndpoint != null)
-        {
-            sb.Append("&relay=").Append(Uri.EscapeDataString(payload.RelayEndpoint.Value));
-        }
-
-        return sb.ToString();
-    }
-
-    public string EncodeAsBase64(PeerInvitationPayload payload)
-    {
-        ArgumentNullException.ThrowIfNull(payload);
-
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms, Encoding.UTF8);
-
-        writer.Write(BinaryVersion);
-        writer.Write(payload.IdentityId.ToByteArray());
-        writer.Write(payload.RoutingToken.ToByteArray());
-        writer.Write(payload.DeliveryToken.Span);
-
-        if (payload.PortRange != null)
-        {
-            writer.Write((byte)1);
-            writer.Write((ushort)payload.PortRange.MinPort);
-            writer.Write((ushort)payload.PortRange.MaxPort);
-        }
-        else
-        {
-            writer.Write((byte)0);
-        }
-
-        var hosts = payload.EndpointHosts ?? Array.Empty<string>();
-        writer.Write((ushort)hosts.Count);
-        foreach (var host in hosts)
-        {
-            writer.Write(host);
-        }
-
-        if (payload.RelayEndpoint != null)
-        {
-            writer.Write((byte)1);
-            writer.Write(payload.RelayEndpoint.Value);
-        }
-        else
-        {
-            writer.Write((byte)0);
-        }
-
-        return Convert.ToBase64String(ms.ToArray());
+        return $"{SchemePrefix}{EncodeBase64Url(buffer)}";
     }
 
     public DomainResult<PeerInvitationPayload> Decode(string invitationString)
@@ -98,230 +46,115 @@ public sealed class PeerInvitationCodec : IPeerInvitationCodec
         }
 
         var input = invitationString.Trim();
-        if (input.StartsWith(SchemePrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            input = input.Substring(SchemePrefix.Length);
-        }
-
-        if (input.Contains('?') || input.Contains("id=", StringComparison.OrdinalIgnoreCase))
-        {
-            return DecodeFromUrl(input);
-        }
-
-        return DecodeFromBase64(input);
-    }
-
-    private static DomainResult<PeerInvitationPayload> DecodeFromUrl(string input)
-    {
-        var cleanInput = input;
-        var hashIndex = cleanInput.IndexOf('#');
-        if (hashIndex >= 0)
-        {
-            cleanInput = cleanInput.Substring(0, hashIndex);
-        }
-
-        var queryString = cleanInput;
-        var queryIndex = cleanInput.IndexOf('?');
-        if (queryIndex >= 0)
-        {
-            queryString = cleanInput.Substring(queryIndex + 1);
-        }
-
-        var pairs = queryString.Split('&', StringSplitOptions.RemoveEmptyEntries);
-        var queryParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var pair in pairs)
-        {
-            var eqIndex = pair.IndexOf('=');
-            if (eqIndex > 0)
-            {
-                var key = Uri.UnescapeDataString(pair.Substring(0, eqIndex)).Trim();
-                var val = Uri.UnescapeDataString(pair.Substring(eqIndex + 1)).Trim();
-                queryParams[key] = val;
-            }
-        }
-
-        if (!queryParams.TryGetValue("id", out var idStr) || !Guid.TryParse(idStr, out var idGuid) || idGuid == Guid.Empty)
+        if (!input.StartsWith(SchemePrefix, StringComparison.OrdinalIgnoreCase))
         {
             return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("INVALID_IDENTITY_ID", "Invalid or missing identity ID in invitation."));
+                new DomainError("INVALID_INVITATION_URI", $"Invitation URI must begin with '{SchemePrefix}'."));
         }
 
-        if (!queryParams.TryGetValue("route", out var routeStr) || !Guid.TryParse(routeStr, out var routeGuid) || routeGuid == Guid.Empty)
+        var rawBase64Url = input.Substring(SchemePrefix.Length);
+        if (string.IsNullOrWhiteSpace(rawBase64Url))
         {
             return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("INVALID_ROUTING_TOKEN", "Invalid or missing routing token in invitation."));
+                new DomainError("INVALID_INVITATION_PAYLOAD", "Invitation contains no payload."));
         }
 
-        if (!queryParams.TryGetValue("deliv", out var delivStr) || string.IsNullOrWhiteSpace(delivStr))
+        var bytes = DecodeBase64Url(rawBase64Url);
+        if (bytes == null || bytes.Length < 67)
         {
             return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("INVALID_DELIVERY_TOKEN", "Missing delivery token in invitation."));
+                new DomainError("INVALID_INVITATION_PAYLOAD", "Binary invitation payload is malformed or too short."));
         }
 
-        byte[] delivBytes;
-        try
-        {
-            delivBytes = Convert.FromHexString(delivStr);
-            if (delivBytes.Length != 32)
-            {
-                return DomainResult<PeerInvitationPayload>.Failure(
-                    new DomainError("INVALID_DELIVERY_TOKEN", "Delivery token must be exactly 32 bytes (64 hex characters)."));
-            }
-        }
-        catch (FormatException)
+        if (bytes[0] != BinaryVersion)
         {
             return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("INVALID_DELIVERY_TOKEN", "Delivery token contains invalid hex characters."));
+                new DomainError("UNSUPPORTED_VERSION", $"Unsupported invitation format byte: 0x{bytes[0]:X2}."));
         }
 
-        var endpointHosts = new List<string>();
-        if (queryParams.TryGetValue("endpoints", out var endpointsStr) && !string.IsNullOrWhiteSpace(endpointsStr))
+        var idBytes = bytes.AsSpan(1, 16);
+        if (IsAllZero(idBytes))
         {
-            endpointHosts.AddRange(endpointsStr.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            return DomainResult<PeerInvitationPayload>.Failure(
+                new DomainError("INVALID_IDENTITY_ID", "IdentityId cannot be all zeroes."));
         }
-
-        PortRange? portRange = PortRange.DefaultDynamicRange;
-        if (queryParams.TryGetValue("ports", out var portsStr) && !string.IsNullOrWhiteSpace(portsStr))
+        var identityId = PublicIdentityId.FromBytes(idBytes);
+        if (!identityId.IsValid)
         {
-            var dashIndex = portsStr.IndexOf('-');
-            if (dashIndex > 0)
-            {
-                var minStr = portsStr.Substring(0, dashIndex);
-                var maxStr = portsStr.Substring(dashIndex + 1);
-                if (int.TryParse(minStr, out var minPort) && int.TryParse(maxStr, out var maxPort) &&
-                    minPort >= 1 && maxPort <= 65535 && minPort <= maxPort)
-                {
-                    portRange = new PortRange(minPort, maxPort);
-                }
-                else
-                {
-                    return DomainResult<PeerInvitationPayload>.Failure(
-                        new DomainError("INVALID_PORT_RANGE", "Invalid port range specified in invitation."));
-                }
-            }
-            else if (int.TryParse(portsStr, out var singlePort) && singlePort >= 1 && singlePort <= 65535)
-            {
-                portRange = PortRange.Single(singlePort);
-            }
-            else
-            {
-                return DomainResult<PeerInvitationPayload>.Failure(
-                    new DomainError("INVALID_PORT_RANGE", "Invalid port range specified in invitation."));
-            }
+            return DomainResult<PeerInvitationPayload>.Failure(
+                new DomainError("INVALID_IDENTITY_ID", "IdentityId is invalid."));
         }
 
-        RelayEndpoint? relayEndpoint = null;
-        if (queryParams.TryGetValue("relay", out var relayStr) && !string.IsNullOrWhiteSpace(relayStr))
+        var ikBytes = bytes.AsSpan(17, 32);
+        if (IsAllZero(ikBytes))
         {
-            var epResult = RelayEndpoint.Create(relayStr);
-            if (epResult.IsSuccess)
-            {
-                relayEndpoint = epResult.Value;
-            }
+            return DomainResult<PeerInvitationPayload>.Failure(
+                new DomainError("INVALID_IDENTITY_KEY", "IdentityKey cannot be all zeroes."));
+        }
+        var identityKey = IdentityKey.FromSpan(ikBytes);
+
+        var routeBytes = bytes.AsSpan(49, 16);
+        if (IsAllZero(routeBytes))
+        {
+            return DomainResult<PeerInvitationPayload>.Failure(
+                new DomainError("INVALID_ROUTING_TOKEN", "RoutingToken cannot be all zeroes."));
+        }
+        var routingToken = BlindedRoutingToken.FromBytes(routeBytes);
+        if (!routingToken.IsValid)
+        {
+            return DomainResult<PeerInvitationPayload>.Failure(
+                new DomainError("INVALID_ROUTING_TOKEN", "RoutingToken is invalid."));
         }
 
-        var identityId = PublicIdentityId.FromGuid(idGuid);
-        var routingToken = BlindedRoutingToken.FromGuid(routeGuid);
-        var deliveryToken = DeliveryToken.FromSpan(delivBytes);
+        var endpointLen = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(65, 2));
+        if (endpointLen == 0 || bytes.Length != 67 + endpointLen)
+        {
+            return DomainResult<PeerInvitationPayload>.Failure(
+                new DomainError("INVALID_INVITATION_PAYLOAD", "RelayEndpoint length is invalid or does not match payload size."));
+        }
+
+        var endpointString = Encoding.UTF8.GetString(bytes.AsSpan(67, endpointLen));
+        var relayResult = RelayEndpoint.Create(endpointString);
+        if (relayResult.IsFailure)
+        {
+            return DomainResult<PeerInvitationPayload>.Failure(
+                new DomainError("INVALID_RELAY_ENDPOINT", $"Relay endpoint in invitation is invalid: {relayResult.Error.Description}"));
+        }
 
         return DomainResult<PeerInvitationPayload>.Success(
-            new PeerInvitationPayload(identityId, routingToken, deliveryToken, endpointHosts, portRange, relayEndpoint));
+            new PeerInvitationPayload(identityId, identityKey, relayResult.Value, routingToken));
     }
 
-    private static DomainResult<PeerInvitationPayload> DecodeFromBase64(string base64String)
+    private static string EncodeBase64Url(ReadOnlySpan<byte> bytes)
     {
-        byte[] bytes;
+        var base64 = Convert.ToBase64String(bytes);
+        return base64.Replace('+', '-').Replace('/', '_').TrimEnd('=');
+    }
+
+    private static byte[]? DecodeBase64Url(string base64Url)
+    {
+        var base64 = base64Url.Replace('-', '+').Replace('_', '/');
+        switch (base64.Length % 4)
+        {
+            case 2: base64 += "=="; break;
+            case 3: base64 += "="; break;
+        }
         try
         {
-            bytes = Convert.FromBase64String(base64String);
+            return Convert.FromBase64String(base64);
         }
-        catch (FormatException)
+        catch
         {
-            return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("UNSUPPORTED_INVITATION_FORMAT", "Invitation string is neither a valid URL nor a valid Base64 payload."));
+            return null;
         }
+    }
 
-        if (bytes.Length < 1 + 16 + 16 + 32 + 1 + 2)
+    private static bool IsAllZero(ReadOnlySpan<byte> span)
+    {
+        for (int i = 0; i < span.Length; i++)
         {
-            return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("INVALID_INVITATION_PAYLOAD", "Binary invitation payload is too short."));
+            if (span[i] != 0) return false;
         }
-
-        if (bytes.Length > 4096)
-        {
-            return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("PAYLOAD_TOO_LARGE", "Binary invitation payload exceeds maximum allowed size (4096 bytes)."));
-        }
-
-        try
-        {
-            using var ms = new MemoryStream(bytes);
-            using var reader = new BinaryReader(ms, Encoding.UTF8);
-
-            var version = reader.ReadByte();
-            if (version != BinaryVersion)
-            {
-                return DomainResult<PeerInvitationPayload>.Failure(
-                    new DomainError("UNSUPPORTED_VERSION", $"Unsupported binary invitation version: {version}."));
-            }
-
-            var idBytes = reader.ReadBytes(16);
-            var routeBytes = reader.ReadBytes(16);
-            var delivBytes = reader.ReadBytes(32);
-
-            var identityId = PublicIdentityId.FromBytes(idBytes);
-            var routingToken = BlindedRoutingToken.FromBytes(routeBytes);
-            var deliveryToken = DeliveryToken.FromSpan(delivBytes);
-
-            PortRange? portRange = null;
-            var hasPortRange = reader.ReadByte();
-            if (hasPortRange == 1)
-            {
-                var min = reader.ReadUInt16();
-                var max = reader.ReadUInt16();
-                portRange = new PortRange(min, max);
-            }
-            else
-            {
-                portRange = PortRange.DefaultDynamicRange;
-            }
-
-            var hostCount = reader.ReadUInt16();
-            if (hostCount > 64)
-            {
-                return DomainResult<PeerInvitationPayload>.Failure(
-                    new DomainError("INVALID_INVITATION_PAYLOAD", "Binary invitation payload contains too many endpoint hosts (max 64)."));
-            }
-
-            var endpointHosts = new List<string>(hostCount);
-            for (var i = 0; i < hostCount; i++)
-            {
-                endpointHosts.Add(reader.ReadString());
-            }
-
-            RelayEndpoint? relayEndpoint = null;
-            if (ms.Position < ms.Length)
-            {
-                var hasRelay = reader.ReadByte();
-                if (hasRelay == 1 && ms.Position < ms.Length)
-                {
-                    var relayStr = reader.ReadString();
-                    var epResult = RelayEndpoint.Create(relayStr);
-                    if (epResult.IsSuccess)
-                    {
-                        relayEndpoint = epResult.Value;
-                    }
-                }
-            }
-
-            return DomainResult<PeerInvitationPayload>.Success(
-                new PeerInvitationPayload(identityId, routingToken, deliveryToken, endpointHosts, portRange, relayEndpoint));
-        }
-        catch (Exception ex)
-        {
-            return DomainResult<PeerInvitationPayload>.Failure(
-                new DomainError("CORRUPT_PAYLOAD", $"Binary invitation payload deserialization failed: {ex.Message}"));
-        }
+        return true;
     }
 }

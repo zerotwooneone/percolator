@@ -33,16 +33,8 @@ public class ChatPayloadHandlerTests
     private FakeProfileManager _profileManager = null!;
     private ChatTestCryptoEngine _cryptoEngine = null!;
     private TestPayloadSender _payloadSender = null!;
-    private FakeDirectEndpointRegistry _directEndpointRegistry = null!;
+    private FakePeerMailboxRoutingRepository _peerMailboxRoutingRepo = null!;
     private ChatPayloadHandler _sut = null!;
-
-    private sealed class FakeDirectEndpointRegistry : IDirectEndpointRegistry
-    {
-        public readonly Dictionary<PublicIdentityId, Uri> Endpoints = new();
-        public void RegisterDirectEndpoint(PublicIdentityId targetId, Uri directEndpoint) => Endpoints[targetId] = directEndpoint;
-        public void UnregisterDirectEndpoint(PublicIdentityId targetId) => Endpoints.Remove(targetId);
-        public Uri? GetDirectEndpoint(PublicIdentityId targetId) => Endpoints.GetValueOrDefault(targetId);
-    }
 
     [SetUp]
     public void SetUp()
@@ -58,7 +50,7 @@ public class ChatPayloadHandlerTests
         _profileManager = new FakeProfileManager();
         _cryptoEngine = new ChatTestCryptoEngine();
         _payloadSender = new TestPayloadSender();
-        _directEndpointRegistry = new FakeDirectEndpointRegistry();
+        _peerMailboxRoutingRepo = new FakePeerMailboxRoutingRepository();
 
         _sut = new ChatPayloadHandler(
             _chatRepo,
@@ -73,8 +65,7 @@ public class ChatPayloadHandlerTests
             _profileDeliveryClient,
             _profileManager,
             _cryptoEngine,
-            new FakePeerMailboxRoutingRepository(),
-            _directEndpointRegistry);
+            _peerMailboxRoutingRepo);
     }
 
     [Test]
@@ -692,11 +683,12 @@ public class ChatPayloadHandlerTests
         var profileKey = ProfileKey.Generate();
         var locator = BlindedProfileLocator.FromBytes(new byte[32]);
         var routingToken = BlindedRoutingToken.New();
+        var authorKey = IdentityKey.FromSpan(new byte[32]);
 
         var fakePackage = new ProfileCiphertextPackage(new byte[12], new byte[1040]);
         _profileDeliveryClient.HostedProfiles[locator] = fakePackage;
         _profileManager.OnDecryptProfile = (pkg, key, engine, rev) =>
-            DomainResult<ProfileMetadata>.Success(new ProfileMetadata("Bob Direct", null, null, 1));
+            DomainResult<ProfileMetadata>.Success(new ProfileMetadata("Bob Relay", null, null, 1));
 
         var dto = new ProfileCapabilityDto(
             channel.Id,
@@ -706,8 +698,9 @@ public class ChatPayloadHandlerTests
             routingToken.Value.ToByteArray(),
             Revision: 1,
             _timeProvider.UtcNowUnixMs,
-            SourceEndpoint: "https://192.168.1.100:5100",
-            SourceType: ProfileSourceType.DirectP2P);
+            authorKey.Span.ToArray(),
+            SourceEndpoint: "percolator://relay.example.com",
+            SourceType: ProfileSourceType.Relay);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
         var context = new InboundPayloadContext(channel.Id, channel.OwnerIdentityId, channel.RemotePeerId, ChatTestFactory.BobDeviceId, AppId.Chat, _serializer.Serialize(envelope), _timeProvider.UtcNow);
@@ -715,11 +708,17 @@ public class ChatPayloadHandlerTests
         var result = await _sut.HandleInboundAsync(context);
 
         result.IsSuccess.Should().BeTrue();
-        _directEndpointRegistry.GetDirectEndpoint(channel.RemotePeerId).Should().Be(new Uri("https://192.168.1.100:5100"));
+        var updatedChannel = await _channelRepo.GetDirectByIdAsync(channel.Id);
+        updatedChannel!.RelayEndpoint.Should().Be(RelayEndpoint.Create("percolator://relay.example.com").Value);
+
+        var savedRoute = await _peerMailboxRoutingRepo.GetByPeerIdAsync(channel.RemotePeerId);
+        savedRoute.Should().NotBeNull();
+        savedRoute!.RoutingToken.Should().Be(routingToken);
+        savedRoute.RelayEndpoint.Should().Be(RelayEndpoint.Create("percolator://relay.example.com").Value);
     }
 
     [Test]
-    public async Task HandleInboundAsync_ProfileCapability_Relay_DoesNotRegisterDirectEndpoint()
+    public async Task HandleInboundAsync_ProfileCapability_WithoutSourceEndpoint_DoesNotUpdateChannelRelayEndpoint()
     {
         var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
         await _channelRepo.SaveDirectAsync(channel);
@@ -741,7 +740,8 @@ public class ChatPayloadHandlerTests
             routingToken.Value.ToByteArray(),
             Revision: 1,
             _timeProvider.UtcNowUnixMs,
-            SourceEndpoint: "https://relay.example.com",
+            AuthorPublicKeyBytes: null,
+            SourceEndpoint: null,
             SourceType: ProfileSourceType.Relay);
 
         var envelope = new ChatPayloadEnvelopeDto(ChatPayloadType.ProfileCapability, _serializer.Serialize(dto), Array.Empty<byte>());
@@ -750,7 +750,8 @@ public class ChatPayloadHandlerTests
         var result = await _sut.HandleInboundAsync(context);
 
         result.IsSuccess.Should().BeTrue();
-        _directEndpointRegistry.GetDirectEndpoint(channel.RemotePeerId).Should().BeNull();
+        var updatedChannel = await _channelRepo.GetDirectByIdAsync(channel.Id);
+        updatedChannel!.RelayEndpoint.Should().BeNull();
     }
 
     #endregion
@@ -991,8 +992,7 @@ public class ChatPayloadHandlerTests
             _profileDeliveryClient,
             _profileManager,
             _cryptoEngine,
-            new FakePeerMailboxRoutingRepository(),
-            _directEndpointRegistry);
+            new FakePeerMailboxRoutingRepository());
 
         var msgId = PayloadId.New();
         var msgDto = new ChatMessageDto(

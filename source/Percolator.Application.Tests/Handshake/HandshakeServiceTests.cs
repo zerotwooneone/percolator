@@ -1,7 +1,9 @@
 using Percolator.Application.Handshake;
 using Percolator.Application.Ingress;
 using Percolator.Application.Profiles;
+using Percolator.Application.Routing;
 using Percolator.Application.Tests.TestDoubles;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
@@ -28,6 +30,9 @@ public sealed class HandshakeServiceTests
     private TestDateTimeProvider _timeProvider = null!;
     private AppRouter _appRouter = null!;
     private FakeEventPublisher _eventPublisher = null!;
+    private FakeSessionWirePacker _wirePacker = null!;
+    private InMemoryPeerMailboxRoutingRepository _routingRepo = null!;
+    private RoutingCoordinator _routingCoordinator = null!;
     private HandshakeService _handshakeService = null!;
 
     private PublicIdentityId _aliceId;
@@ -54,6 +59,9 @@ public sealed class HandshakeServiceTests
         _outboxRepo = new InMemoryOutboxRepository();
         _cryptoEngine = new ApplicationTestCryptoEngine();
         _appRouter = new AppRouter();
+        _wirePacker = new FakeSessionWirePacker();
+        _routingRepo = new InMemoryPeerMailboxRoutingRepository();
+        _routingCoordinator = new RoutingCoordinator(_routingRepo, _timeProvider);
 
         _handshakeService = new HandshakeService(
             _identityKeyStore,
@@ -67,7 +75,9 @@ public sealed class HandshakeServiceTests
             _cryptoEngine,
             _timeProvider,
             _appRouter,
-            _eventPublisher);
+            _eventPublisher,
+            _wirePacker,
+            _routingCoordinator);
 
         _aliceId = PublicIdentityId.New();
         _aliceDeviceId = DeviceId.Primary;
@@ -113,12 +123,14 @@ public sealed class HandshakeServiceTests
     {
         // Arrange
         var bobBundle = CreateBobPreKeyBundle(out _, out _);
+        var relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com").Value;
 
         // Act
         var result = await _handshakeService.InitiateHandshakeAsync(
             _aliceId,
             _aliceDeviceId,
             _bobId,
+            relayEndpoint,
             bobBundle,
             AppId.Chat,
             "Initial Hello"u8.ToArray());

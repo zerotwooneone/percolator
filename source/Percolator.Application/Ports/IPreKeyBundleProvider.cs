@@ -17,4 +17,11 @@ public interface IPreKeyBundleProvider
         DeviceId? deviceId = null,
         RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default);
+
+    Task<DomainResult<PreKeyBundle>> FetchAuthenticatedAsync(
+        PublicIdentityId callerOwnerId,
+        RelayEndpoint relayEndpoint,
+        BlindedRoutingToken targetRoutingToken,
+        DeviceId? deviceId = null,
+        CancellationToken ct = default);
 }

@@ -84,9 +84,16 @@ public sealed class InboundConnectionWorkflow : IInboundConnectionWorkflow
             return DomainResult<bool>.Failure(completeResult.Error);
         }
 
-        var channelId = ChannelId.DeterministicForDirect(personaId, requesterId);
         var routing = await _routingRepo.GetByPeerIdAsync(requesterId, ct).ConfigureAwait(false);
-        var relayEndpoint = routing?.RelayEndpoint;
+        if (routing == null || routing.RelayEndpoint == null)
+        {
+            _logger.LogWarning("Missing relay routing capability for peer {RequesterId}", requesterId);
+            return DomainResult<bool>.Failure(new DomainError(
+                "MISSING_RELAY_ENDPOINT", $"No relay routing capability found for peer {requesterId}."));
+        }
+
+        var relayEndpoint = routing.RelayEndpoint;
+        var channelId = ChannelId.DeterministicForDirect(personaId, requesterId, relayEndpoint);
 
         var existingChannel = await _channelRepo.GetDirectByIdAsync(channelId, ct).ConfigureAwait(false);
         DirectChannel channel;
@@ -111,7 +118,11 @@ public sealed class InboundConnectionWorkflow : IInboundConnectionWorkflow
         else
         {
             channel = existingChannel;
-            channel.Activate(_timeProvider, relayEndpoint);
+            var activateResult = channel.Activate(_timeProvider, relayEndpoint);
+            if (!activateResult.IsSuccess)
+            {
+                return DomainResult<bool>.Failure(activateResult.Error);
+            }
         }
 
         await _channelRepo.SaveDirectAsync(channel, ct).ConfigureAwait(false);

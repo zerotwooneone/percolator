@@ -94,9 +94,9 @@ public sealed class GroupKeyDistributionService : IGroupKeyDistributionService
                 continue; // Do not distribute to self
             }
 
-            var route = DeliveryRoute.DirectP2P;
-            var resolved = await _routingCoordinator.ResolveRouteAsync(recipient, ct).ConfigureAwait(false);
-            if (resolved.IsSuccess && resolved.Value.Mode == DeliveryRoutingMode.RelayMailbox)
+            var route = DeliveryRoute.RelayedOneToOne;
+            var resolved = await _routingCoordinator.ResolveRouteAsync(recipient, ct: ct).ConfigureAwait(false);
+            if (resolved.IsSuccess)
             {
                 route = DeliveryRoute.RelayedOneToOne;
             }

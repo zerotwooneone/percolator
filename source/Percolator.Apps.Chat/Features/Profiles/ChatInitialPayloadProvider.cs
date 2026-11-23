@@ -18,14 +18,12 @@ using Percolator.PluginSdk.Profiles;
 /// <summary>
 /// Chat plugin contribution to outbound X3DH handshakes.
 /// Generates an initial padded ProfileCapability 0-RTT payload carrying the sender's profile key,
-/// blinded locator, sealed sender return route, and network endpoint.
-/// Enforces [SYS-RELAY-ONLY-CLOAKING]: direct P2P endpoint is included if and only if allowDirectEndpoint is true.
+/// blinded locator, sealed sender return route, and exchange relay coordinates.
 /// </summary>
 public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvider
 {
     private readonly ILocalIdentityKeyStore _keyStore;
     private readonly IRelayDirectory _relayDirectory;
-    private readonly INetworkEndpointDiscoveryPort _endpointDiscovery;
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
@@ -33,14 +31,12 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
     public ChatInitialPayloadProvider(
         ILocalIdentityKeyStore keyStore,
         IRelayDirectory relayDirectory,
-        INetworkEndpointDiscoveryPort endpointDiscovery,
         ICryptoEngine cryptoEngine,
         IPayloadSerializer serializer,
         IDateTimeProvider timeProvider)
     {
         _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         _relayDirectory = relayDirectory ?? throw new ArgumentNullException(nameof(relayDirectory));
-        _endpointDiscovery = endpointDiscovery ?? throw new ArgumentNullException(nameof(endpointDiscovery));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -49,7 +45,6 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
     public async ValueTask<(AppId AppId, ReadOnlyMemory<byte> Payload)?> CreateInitialPayloadAsync(
         PublicIdentityId localIdentityId,
         ChannelId channelId,
-        bool allowDirectEndpoint,
         CancellationToken ct = default)
     {
         var profileKey = await _keyStore.GetProfileKeyAsync(localIdentityId, ct).ConfigureAwait(false);
@@ -72,18 +67,8 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
             var blindedLocator = BlindedProfileLocator.Derive(identityPublicKey, profileKey, _cryptoEngine);
 
             string? sourceEndpoint = null;
-            var sourceType = ProfileSourceType.Relay;
             byte[] mailboxRoutingTokenBytes = Array.Empty<byte>();
-
-            if (allowDirectEndpoint)
-            {
-                var directUri = _endpointDiscovery.GetLocalDirectEndpoint();
-                if (directUri != null)
-                {
-                    sourceEndpoint = directUri.ToString();
-                    sourceType = ProfileSourceType.DirectP2P;
-                }
-            }
+            byte[]? deliveryTokenBytes = null;
 
             try
             {
@@ -91,16 +76,13 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
                 var linkedRelay = relays.FirstOrDefault(r => r.LinkedOwnerIdentityIds.Contains(localIdentityId));
                 if (linkedRelay != null)
                 {
-                    if (sourceEndpoint == null)
-                    {
-                        sourceEndpoint = linkedRelay.Endpoint.ToString();
-                        sourceType = ProfileSourceType.Relay;
-                    }
+                    sourceEndpoint = linkedRelay.Endpoint.Value;
 
                     var tokensResult = await _relayDirectory.GetMailboxTokensAsync(localIdentityId, linkedRelay.RelayIdentityId, ct).ConfigureAwait(false);
                     if (tokensResult.IsSuccess)
                     {
                         mailboxRoutingTokenBytes = tokensResult.Value.RoutingToken.ToByteArray();
+                        deliveryTokenBytes = tokensResult.Value.DrainToken.Span.ToArray();
                     }
                 }
             }
@@ -119,7 +101,8 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
                 (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds(),
                 identityPublicKey.Span.ToArray(),
                 sourceEndpoint,
-                sourceType);
+                ProfileSourceType.Relay,
+                deliveryTokenBytes);
 
             var paddedBytes = SteppedPadding.CreatePaddedEnvelopeBytes(
                 _serializer,

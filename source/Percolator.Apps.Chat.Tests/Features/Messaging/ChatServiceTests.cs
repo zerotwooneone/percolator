@@ -180,7 +180,7 @@ public class ChatServiceTests
             channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
-            DeliveryRoute.DirectP2P,
+            DeliveryRoute.RelayedOneToOne,
             "Updated content");
 
         var editResult = await _sut.EditMessageAsync(editCmd);
@@ -215,7 +215,7 @@ public class ChatServiceTests
             channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
-            DeliveryRoute.DirectP2P,
+            DeliveryRoute.RelayedOneToOne,
             "Late edit");
 
         var editResult = await _sut.EditMessageAsync(editCmd);
@@ -240,7 +240,7 @@ public class ChatServiceTests
             channel.RemotePeerId, // Non-author
             channel.OwnerIdentityId,
             ChatTestFactory.AliceDeviceId,
-            DeliveryRoute.DirectP2P,
+            DeliveryRoute.RelayedOneToOne,
             "Spoofed edit");
 
         var editResult = await _sut.EditMessageAsync(editCmd);
@@ -273,7 +273,7 @@ public class ChatServiceTests
             channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         var deleteResult = await _sut.DeleteMessageAsync(deleteCmd);
 
@@ -308,7 +308,7 @@ public class ChatServiceTests
             adminId,
             null,
             ChatTestFactory.BobDeviceId,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         var deleteResult = await _sut.DeleteMessageAsync(deleteCmd);
 
@@ -336,7 +336,7 @@ public class ChatServiceTests
             channel.OwnerIdentityId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
-            DeliveryRoute.DirectP2P,
+            DeliveryRoute.RelayedOneToOne,
             emoji);
 
         var first = await _sut.AddReactionAsync(reactCmd);
@@ -375,7 +375,7 @@ public class ChatServiceTests
             msgId,
             channel.RemotePeerId,
             ChatTestFactory.BobDeviceId,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         var result = await _sut.MarkAsReadAsync(readCmd);
 
@@ -408,7 +408,7 @@ public class ChatServiceTests
             locator,
             routingToken,
             Revision: 1,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         var result = await _sut.ShareProfileCapabilityAsync(cmd);
         result.IsSuccess.Should().BeTrue();

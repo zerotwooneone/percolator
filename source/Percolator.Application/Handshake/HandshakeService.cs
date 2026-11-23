@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Delivery.Events;
@@ -5,9 +6,11 @@ using Percolator.Application.Ingress;
 using Percolator.Application.Ports;
 using Percolator.Application.Profiles;
 using Percolator.Application.Routing;
+using Percolator.Application.Security;
 using Percolator.PluginSdk.Events;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
@@ -35,8 +38,8 @@ public sealed class HandshakeService : IHandshakeService
     private readonly IDateTimeProvider _timeProvider;
     private readonly IAppRouter _appRouter;
     private readonly IEventPublisher _eventPublisher;
-    private readonly ISessionWirePacker? _wirePacker;
-    private readonly IRoutingCoordinator? _routingCoordinator;
+    private readonly ISessionWirePacker _wirePacker;
+    private readonly IRoutingCoordinator _routingCoordinator;
 
     public HandshakeService(
         ILocalIdentityKeyStore identityKeyStore,
@@ -51,8 +54,8 @@ public sealed class HandshakeService : IHandshakeService
         IDateTimeProvider timeProvider,
         IAppRouter appRouter,
         IEventPublisher eventPublisher,
-        ISessionWirePacker? wirePacker = null,
-        IRoutingCoordinator? routingCoordinator = null)
+        ISessionWirePacker wirePacker,
+        IRoutingCoordinator routingCoordinator)
     {
         _identityKeyStore = identityKeyStore ?? throw new ArgumentNullException(nameof(identityKeyStore));
         _preKeyStore = preKeyStore ?? throw new ArgumentNullException(nameof(preKeyStore));
@@ -66,14 +69,15 @@ public sealed class HandshakeService : IHandshakeService
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _appRouter = appRouter ?? throw new ArgumentNullException(nameof(appRouter));
         _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
-        _wirePacker = wirePacker;
-        _routingCoordinator = routingCoordinator;
+        _wirePacker = wirePacker ?? throw new ArgumentNullException(nameof(wirePacker));
+        _routingCoordinator = routingCoordinator ?? throw new ArgumentNullException(nameof(routingCoordinator));
     }
 
     public async ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
         PublicIdentityId ownerId,
         DeviceId ownerDeviceId,
         PublicIdentityId remotePeerId,
+        RelayEndpoint relayEndpoint,
         PreKeyBundle remoteBundle,
         AppId? initialAppId = null,
         ReadOnlyMemory<byte>? initialPayload = null,
@@ -83,6 +87,11 @@ public sealed class HandshakeService : IHandshakeService
         {
             return DomainResult<DirectRatchetSession>.Failure(
                 new DomainError("NULL_PREKEY_BUNDLE", "Remote pre-key bundle cannot be null."));
+        }
+        if (relayEndpoint == null)
+        {
+            return DomainResult<DirectRatchetSession>.Failure(
+                new DomainError("MISSING_RELAY_ENDPOINT", "RelayEndpoint cannot be null."));
         }
 
         using var identityPrivateKey = await _identityKeyStore.GetIdentityPrivateKeyAsync(ownerId, ct);
@@ -136,21 +145,29 @@ public sealed class HandshakeService : IHandshakeService
             inner[0] = initialAppId.Value.Value;
             initialPayload.Value.Span.CopyTo(inner.AsSpan(1));
 
-            using (messageKey)
-            using (var expanded = messageKey.Expand(counter))
+            var padded = PayloadPadding.ApplyPadding(inner);
+            try
             {
-                encryptedInitialPayload = _cryptoEngine.EncryptAesGcm(
-                    expanded.CipherKey,
-                    expanded.Nonce,
-                    inner,
-                    ReadOnlySpan<byte>.Empty);
+                using (messageKey)
+                using (var expanded = messageKey.Expand(counter))
+                {
+                    encryptedInitialPayload = _cryptoEngine.EncryptAesGcm(
+                        expanded.CipherKey,
+                        expanded.Nonce,
+                        padded,
+                        ReadOnlySpan<byte>.Empty);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(inner);
+                CryptographicOperations.ZeroMemory(padded);
             }
         }
 
         await _sessionRepo.SaveSessionAsync(session, ct);
 
         // Assemble handshake outbox package
-        byte[] handshakePackage;
         uint signedPreKeyId = remoteBundle.SignedPreKeyId.Value;
         uint? oneTimePreKeyId = remoteBundle.OneTimePreKey != null ? remoteBundle.OneTimePreKeyId : null;
 
@@ -160,36 +177,23 @@ public sealed class HandshakeService : IHandshakeService
             signedPreKeyId,
             oneTimePreKeyId);
 
-        if (_wirePacker != null)
-        {
-            var packed = _wirePacker.PackHandshakeMessage(header, encryptedInitialPayload ?? ReadOnlyMemory<byte>.Empty);
-            handshakePackage = packed.ToArray();
-        }
-        else
-        {
-            handshakePackage = new byte[32 + (encryptedInitialPayload?.Length ?? 0)];
-            initiatorResult.EphemeralPublicKey.Span.CopyTo(handshakePackage.AsSpan(0, 32));
-            if (encryptedInitialPayload != null)
-            {
-                Buffer.BlockCopy(encryptedInitialPayload, 0, handshakePackage, 32, encryptedInitialPayload.Length);
-            }
-        }
+        var packed = _wirePacker.PackHandshakeMessage(header, encryptedInitialPayload ?? ReadOnlyMemory<byte>.Empty);
+        var handshakePackage = packed.ToArray();
 
-        var route = new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
-        if (_routingCoordinator != null)
-        {
-            var routeResult = await _routingCoordinator.ResolveRouteAsync(remotePeerId, ct);
-            if (routeResult.IsSuccess)
-            {
-                var resolved = routeResult.Value;
-                route = resolved.Mode == DeliveryRoutingMode.RelayMailbox
-                    ? new DeliveryRoute(DeliveryRouteType.RelayedOneToOne, null, resolved.TargetRoutingToken, resolved.TargetRelayEndpoint, resolved.TargetDeliveryToken)
-                    : new DeliveryRoute(DeliveryRouteType.DirectP2P, null, null);
-            }
-        }
+        var channelId = ChannelId.DeterministicForDirect(ownerId, remotePeerId, relayEndpoint);
+        var routeResult = await _routingCoordinator.ResolveRouteAsync(remotePeerId, relayEndpoint, ct).ConfigureAwait(false);
+        var routingToken = routeResult.IsSuccess
+            ? routeResult.Value.TargetRoutingToken
+            : BlindedRoutingToken.New();
+
+        var route = new DeliveryRoute(
+            DeliveryRouteType.RelayedOneToOne,
+            routingToken,
+            relayEndpoint,
+            TargetDeliveryToken: null);
 
         var jobResult = OutboxJob.Create(
-            ChannelId.New(),
+            channelId,
             ownerId,
             remotePeerId,
             route,
@@ -361,30 +365,48 @@ public sealed class HandshakeService : IHandshakeService
 
             if (decrypted.Length > 0)
             {
-                var appId = new AppId(decrypted[0]);
-                var appPayload = decrypted.AsMemory(1);
-                var handlerResult = _appRouter.Resolve(appId);
-                if (handlerResult.IsSuccess)
+                byte[] unpadded;
+                try
                 {
-                    var channelId = ChannelId.DeterministicForDirect(envelope.RecipientIdentityId, envelope.SenderIdentityId);
-                    var appContext = new InboundPayloadContext(
-                        channelId,
-                        envelope.RecipientIdentityId,
-                        envelope.SenderIdentityId,
-                        envelope.SenderDeviceId,
-                        appId,
-                        appPayload,
-                        envelope.ReceivedAtUtc);
-
-                    var handleResult = await handlerResult.Value!.HandleInboundAsync(appContext, ct);
-                    if (handleResult.IsFailure)
-                    {
-                        Array.Clear(decrypted, 0, decrypted.Length);
-                        return handleResult;
-                    }
+                    unpadded = PayloadPadding.RemovePadding(decrypted).ToArray();
+                }
+                catch (Exception)
+                {
+                    unpadded = (byte[])decrypted.Clone();
                 }
 
-                Array.Clear(decrypted, 0, decrypted.Length);
+                try
+                {
+                    if (unpadded.Length > 0)
+                    {
+                        var appId = new AppId(unpadded[0]);
+                        var appPayload = unpadded.AsMemory(1);
+                        var handlerResult = _appRouter.Resolve(appId);
+                        if (handlerResult.IsSuccess)
+                        {
+                            var channelId = ChannelId.DeterministicForDirect(envelope.RecipientIdentityId, envelope.SenderIdentityId);
+                            var appContext = new InboundPayloadContext(
+                                channelId,
+                                envelope.RecipientIdentityId,
+                                envelope.SenderIdentityId,
+                                envelope.SenderDeviceId,
+                                appId,
+                                appPayload,
+                                envelope.ReceivedAtUtc);
+
+                            var handleResult = await handlerResult.Value!.HandleInboundAsync(appContext, ct);
+                            if (handleResult.IsFailure)
+                            {
+                                return handleResult;
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(decrypted);
+                    CryptographicOperations.ZeroMemory(unpadded);
+                }
             }
         }
 

@@ -8,5 +8,4 @@ namespace Percolator.Application.Ports;
 public interface ISealedEnvelopeUnwrapper
 {
     DomainResult<InboundEnvelope> Unwrap(MailboxEnvelope envelope, PublicIdentityId recipientId);
-    DomainResult<InboundEnvelope> UnwrapDirect(ReadOnlyMemory<byte> payloadBytes, PublicIdentityId recipientId);
 }

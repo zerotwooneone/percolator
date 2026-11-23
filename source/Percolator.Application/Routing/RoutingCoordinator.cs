@@ -1,4 +1,3 @@
-using Percolator.Application.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
@@ -8,66 +7,65 @@ namespace Percolator.Application.Routing;
 
 public enum DeliveryRoutingMode
 {
-    DirectPeer = 1,
-    RelayMailbox = 2
+    Relayed = 2
 }
 
 public readonly record struct ResolvedDeliveryRoute(
     DeliveryRoutingMode Mode,
     PublicIdentityId TargetPeerId,
-    RelayEndpoint? TargetRelayEndpoint = null,
-    BlindedRoutingToken? TargetRoutingToken = null,
+    RelayEndpoint TargetRelayEndpoint,
+    BlindedRoutingToken TargetRoutingToken,
     DeliveryToken? TargetDeliveryToken = null);
 
 public interface IRoutingCoordinator
 {
     ValueTask<DomainResult<ResolvedDeliveryRoute>> ResolveRouteAsync(
         PublicIdentityId targetPeerId,
+        RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default);
 }
 
 public sealed class RoutingCoordinator : IRoutingCoordinator
 {
-    private readonly IStreamRegistry _streamRegistry;
     private readonly IPeerMailboxRoutingRepository _routingRepo;
     private readonly IDateTimeProvider _timeProvider;
 
     public RoutingCoordinator(
-        IStreamRegistry streamRegistry,
         IPeerMailboxRoutingRepository routingRepo,
         IDateTimeProvider timeProvider)
     {
-        _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
         _routingRepo = routingRepo ?? throw new ArgumentNullException(nameof(routingRepo));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
     public async ValueTask<DomainResult<ResolvedDeliveryRoute>> ResolveRouteAsync(
         PublicIdentityId targetPeerId,
+        RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default)
     {
-        // 1. Check if we already have an active open direct stream or registered direct endpoint to peer
-        if (_streamRegistry.HasActiveStream(targetPeerId) ||
-            (_streamRegistry is IStreamRegistryManagement mgmt && mgmt.GetDirectEndpoint(targetPeerId) != null))
+        PeerMailboxRoutingCapability? route = null;
+
+        if (relayEndpoint != null)
         {
-            return DomainResult<ResolvedDeliveryRoute>.Success(
-                new ResolvedDeliveryRoute(DeliveryRoutingMode.DirectPeer, targetPeerId));
+            route = await _routingRepo.GetRouteForExchangeAsync(targetPeerId, relayEndpoint, _timeProvider.UtcNow, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            route = await _routingRepo.GetBestRouteAsync(targetPeerId, _timeProvider.UtcNow, ct).ConfigureAwait(false);
         }
 
-        // 2. Query peer routing repository for best available relay route (filtering out backpressure cooldowns)
-        var bestRoute = await _routingRepo.GetBestRouteAsync(targetPeerId, _timeProvider.UtcNow, ct).ConfigureAwait(false);
-        if (bestRoute != null)
+        if (route != null)
         {
             return DomainResult<ResolvedDeliveryRoute>.Success(
                 new ResolvedDeliveryRoute(
-                    DeliveryRoutingMode.RelayMailbox,
+                    DeliveryRoutingMode.Relayed,
                     targetPeerId,
-                    bestRoute.RelayEndpoint,
-                    bestRoute.RoutingToken,
-                    bestRoute.DeliveryToken));
+                    route.RelayEndpoint,
+                    route.RoutingToken,
+                    route.DeliveryToken));
         }
 
         return DomainResult<ResolvedDeliveryRoute>.Failure(new DomainError(
-            "UNRESOLVABLE_ROUTE", $"Unable to resolve direct route or available relay route for peer {targetPeerId}."));
+            "NO_RELAY_ROUTE_AVAILABLE", $"Unable to resolve available relay route for peer {targetPeerId}."));
     }
 }

@@ -1,234 +1,326 @@
+namespace Percolator.Application.Tests.Connections;
+
 using System;
-using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Percolator.Application.Connections;
+using Percolator.Application.Handshake;
+using Percolator.Application.Ingress;
 using Percolator.Application.Invitations;
+using Percolator.Application.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
+using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Security.Model;
+using Percolator.Domain.Security.ValueObjects;
 using Percolator.Application.Tests.TestDoubles;
 using Percolator.PluginSdk;
-
-namespace Percolator.Application.Tests.Connections;
+using Percolator.PluginSdk.Profiles;
 
 [TestFixture]
 public sealed class OutboundConnectionWorkflowTests
 {
-    private FakePeerConnectionService _fakeConnectionService = null!;
+    private FakeRelayDirectory _relayDirectory = null!;
+    private InMemoryPeerContactRepository _contactRepo = null!;
+    private FakePreKeyBundleProvider _bundleProvider = null!;
+    private ApplicationTestCryptoEngine _cryptoEngine = null!;
     private InMemoryPeerMailboxRoutingRepository _routingRepo = null!;
+    private InMemoryChannelRepository _channelRepo = null!;
+    private FakeInitialHandshakePayloadProvider _initialPayloadProvider = null!;
+    private FakeHandshakeService _handshakeService = null!;
     private TestDateTimeProvider _timeProvider = null!;
     private OutboundConnectionWorkflow _sut = null!;
+
+    private PublicIdentityId _ownerId;
+    private PublicIdentityId _peerId;
+    private RelayEndpoint _relayEndpoint = null!;
+    private BlindedRoutingToken _routingToken;
+    private IdentityKey _peerIdentityKey = null!;
+    private PreKeyBundle _dummyBundle = null!;
+    private PeerInvitationPayload _validPayload = null!;
 
     [SetUp]
     public void SetUp()
     {
-        _fakeConnectionService = new FakePeerConnectionService();
+        _relayDirectory = new FakeRelayDirectory();
+        _contactRepo = new InMemoryPeerContactRepository();
+        _bundleProvider = new FakePreKeyBundleProvider();
+        _cryptoEngine = new ApplicationTestCryptoEngine();
         _routingRepo = new InMemoryPeerMailboxRoutingRepository();
+        _channelRepo = new InMemoryChannelRepository();
+        _initialPayloadProvider = new FakeInitialHandshakePayloadProvider();
+        _handshakeService = new FakeHandshakeService();
         _timeProvider = new TestDateTimeProvider();
+
+        _ownerId = PublicIdentityId.New();
+        _peerId = PublicIdentityId.New();
+        _relayEndpoint = RelayEndpoint.Create("percolator://relay.example.com").Value;
+        _routingToken = BlindedRoutingToken.New();
+        _peerIdentityKey = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
+
+        var relayId = PublicIdentityId.New();
+        _relayDirectory.AddEntry(new RelayDirectoryEntry(
+            relayId,
+            "Example Relay",
+            _relayEndpoint,
+            false,
+            new[] { _ownerId }));
+
+        _dummyBundle = new PreKeyBundle(
+            DeviceId.Primary,
+            _peerIdentityKey,
+            DhPublicKey.FromSpan(RandomNumberGenerator.GetBytes(32)),
+            DeviceLinkProof.FromSpan(RandomNumberGenerator.GetBytes(64)),
+            SignedPreKeyId.First);
+
+        _bundleProvider.BundleToReturn = _dummyBundle;
+
+        _validPayload = new PeerInvitationPayload(
+            _peerId,
+            _peerIdentityKey,
+            _relayEndpoint,
+            _routingToken);
+
         _sut = new OutboundConnectionWorkflow(
-            _fakeConnectionService,
+            _relayDirectory,
+            _contactRepo,
+            _bundleProvider,
+            _cryptoEngine,
             _routingRepo,
+            _channelRepo,
+            _initialPayloadProvider,
+            _handshakeService,
             _timeProvider,
             NullLogger<OutboundConnectionWorkflow>.Instance);
     }
 
     [Test]
-    public void Constructor_NullConnectionService_ThrowsArgumentNullException()
+    public void Constructor_NullDependencies_ThrowsArgumentNullException()
     {
-        var act = () => new OutboundConnectionWorkflow(null!, _routingRepo, _timeProvider, NullLogger<OutboundConnectionWorkflow>.Instance);
-        act.Should().Throw<ArgumentNullException>();
-    }
+        var logger = NullLogger<OutboundConnectionWorkflow>.Instance;
+        Action act1 = () => new OutboundConnectionWorkflow(null!, _contactRepo, _bundleProvider, _cryptoEngine, _routingRepo, _channelRepo, _initialPayloadProvider, _handshakeService, _timeProvider, logger);
+        Action act2 = () => new OutboundConnectionWorkflow(_relayDirectory, null!, _bundleProvider, _cryptoEngine, _routingRepo, _channelRepo, _initialPayloadProvider, _handshakeService, _timeProvider, logger);
+        Action act3 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, null!, _cryptoEngine, _routingRepo, _channelRepo, _initialPayloadProvider, _handshakeService, _timeProvider, logger);
+        Action act4 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, _bundleProvider, null!, _routingRepo, _channelRepo, _initialPayloadProvider, _handshakeService, _timeProvider, logger);
+        Action act5 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, _bundleProvider, _cryptoEngine, null!, _channelRepo, _initialPayloadProvider, _handshakeService, _timeProvider, logger);
+        Action act6 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, _bundleProvider, _cryptoEngine, _routingRepo, null!, _initialPayloadProvider, _handshakeService, _timeProvider, logger);
+        Action act7 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, _bundleProvider, _cryptoEngine, _routingRepo, _channelRepo, null!, _handshakeService, _timeProvider, logger);
+        Action act8 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, _bundleProvider, _cryptoEngine, _routingRepo, _channelRepo, _initialPayloadProvider, null!, _timeProvider, logger);
+        Action act9 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, _bundleProvider, _cryptoEngine, _routingRepo, _channelRepo, _initialPayloadProvider, _handshakeService, null!, logger);
+        Action act10 = () => new OutboundConnectionWorkflow(_relayDirectory, _contactRepo, _bundleProvider, _cryptoEngine, _routingRepo, _channelRepo, _initialPayloadProvider, _handshakeService, _timeProvider, null!);
 
-    [Test]
-    public void Constructor_NullRoutingRepo_ThrowsArgumentNullException()
-    {
-        var act = () => new OutboundConnectionWorkflow(_fakeConnectionService, null!, _timeProvider, NullLogger<OutboundConnectionWorkflow>.Instance);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Test]
-    public void Constructor_NullTimeProvider_ThrowsArgumentNullException()
-    {
-        var act = () => new OutboundConnectionWorkflow(_fakeConnectionService, _routingRepo, null!, NullLogger<OutboundConnectionWorkflow>.Instance);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Test]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        var act = () => new OutboundConnectionWorkflow(_fakeConnectionService, _routingRepo, _timeProvider, null!);
-        act.Should().Throw<ArgumentNullException>();
+        act1.Should().Throw<ArgumentNullException>().WithParameterName("relayDirectory");
+        act2.Should().Throw<ArgumentNullException>().WithParameterName("contactRepo");
+        act3.Should().Throw<ArgumentNullException>().WithParameterName("preKeyProvider");
+        act4.Should().Throw<ArgumentNullException>().WithParameterName("cryptoEngine");
+        act5.Should().Throw<ArgumentNullException>().WithParameterName("routingRepo");
+        act6.Should().Throw<ArgumentNullException>().WithParameterName("channelRepo");
+        act7.Should().Throw<ArgumentNullException>().WithParameterName("initialPayloadProvider");
+        act8.Should().Throw<ArgumentNullException>().WithParameterName("handshakeService");
+        act9.Should().Throw<ArgumentNullException>().WithParameterName("timeProvider");
+        act10.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
     [Test]
     public async Task ConnectAsync_NullPayload_ThrowsArgumentNullException()
     {
-        var act = () => _sut.ConnectAsync(null!, TimeSpan.FromSeconds(3));
+        var act = () => _sut.ConnectAsync(_ownerId, null!, TimeSpan.FromSeconds(3));
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
     [Test]
-    public async Task ConnectAsync_WithReachablePeer_ReturnsConnectedStatus()
+    public async Task ConnectAsync_ExchangeNotLinked_ReturnsFailure()
     {
-        using var deliv = DeliveryToken.GenerateRandom();
-        var peerId = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var payload = new PeerInvitationPayload(
-            peerId,
-            route,
-            deliv,
-            new List<string> { "127.0.0.1" },
-            new PortRange(5100, 5100));
+        _relayDirectory.ClearEntries();
 
-        _fakeConnectionService.Result = DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(
-            ChannelId.New(),
-            DeviceId.Primary));
-
-        var result = await _sut.ConnectAsync(payload, TimeSpan.FromSeconds(3));
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Status.Should().Be(OutboundConnectionStatus.Connected);
-        result.Value.PeerId.Should().Be(peerId);
-        result.Value.ResolvedEndpoint.Should().Be(new Uri("https://127.0.0.1:5100/"));
-        _fakeConnectionService.InvokedPeerId.Should().Be(peerId);
-    }
-
-    [Test]
-    public async Task ConnectAsync_WhenProbeFails_ReturnsPendingOfflineStatus()
-    {
-        using var deliv = DeliveryToken.GenerateRandom();
-        var peerId = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var payload = new PeerInvitationPayload(
-            peerId,
-            route,
-            deliv,
-            new List<string> { "192.168.1.100" },
-            new PortRange(5200, 5200));
-
-        _fakeConnectionService.Result = DomainResult<PeerConnectionResult>.Failure(
-            new DomainError("CONNECTION_REFUSED", "Host unreachable"));
-
-        var result = await _sut.ConnectAsync(payload, TimeSpan.FromSeconds(3));
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Status.Should().Be(OutboundConnectionStatus.PendingOffline);
-        result.Value.PeerId.Should().Be(peerId);
-    }
-
-    [Test]
-    public async Task ConnectAsync_WhenProbeTimesOut_ReturnsPendingOfflineStatus()
-    {
-        using var deliv = DeliveryToken.GenerateRandom();
-        var peerId = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var payload = new PeerInvitationPayload(
-            peerId,
-            route,
-            deliv,
-            new List<string> { "10.0.0.5" },
-            new PortRange(5150, 5150));
-
-        _fakeConnectionService.ThrowOnConnect = new OperationCanceledException();
-
-        var result = await _sut.ConnectAsync(payload, TimeSpan.FromMilliseconds(50));
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Status.Should().Be(OutboundConnectionStatus.PendingOffline);
-        result.Value.PeerId.Should().Be(peerId);
-    }
-
-    [Test]
-    public async Task ConnectAsync_WithInvalidHost_ReturnsDomainError()
-    {
-        using var deliv = DeliveryToken.GenerateRandom();
-        var peerId = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var payload = new PeerInvitationPayload(
-            peerId,
-            route,
-            deliv,
-            new List<string> { "invalid host name with spaces" },
-            new PortRange(5100, 5100));
-
-        var result = await _sut.ConnectAsync(payload, TimeSpan.FromSeconds(3));
+        var result = await _sut.ConnectAsync(_ownerId, _validPayload, TimeSpan.FromSeconds(3));
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("INVALID_ENDPOINT");
+        result.Error.Code.Should().Be("EXCHANGE_NOT_LINKED");
     }
 
     [Test]
-    public async Task ConnectAsync_WithRelayEndpoint_PersistsCapabilityAndConnectsViaRelay()
+    public async Task ConnectAsync_ContactBlocked_ReturnsFailure()
     {
-        using var deliv = DeliveryToken.GenerateRandom();
-        var peerId = PublicIdentityId.New();
-        var route = BlindedRoutingToken.New();
-        var relay = RelayEndpoint.FromHostAndPort("127.0.0.1", 5100);
-        var payload = new PeerInvitationPayload(
-            peerId,
-            route,
-            deliv,
-            new List<string> { "127.0.0.1" },
-            new PortRange(5100, 5100),
-            relay);
+        var contact = new PeerContact(
+            _ownerId,
+            _peerId,
+            ContactNickname.Create("Blocked", _peerId),
+            PeerTrustLevel.Blocked,
+            _timeProvider.UtcNow,
+            _peerIdentityKey);
+        await _contactRepo.SaveAsync(contact);
 
-        _fakeConnectionService.Result = DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(
-            ChannelId.New(),
-            DeviceId.Primary));
+        var result = await _sut.ConnectAsync(_ownerId, _validPayload, TimeSpan.FromSeconds(3));
 
-        var result = await _sut.ConnectAsync(payload, TimeSpan.FromSeconds(3));
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("CONTACT_BLOCKED");
+    }
+
+    [Test]
+    public async Task ConnectAsync_IdentityKeyChanged_ReturnsFailure()
+    {
+        var differentKey = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
+        var contact = new PeerContact(
+            _ownerId,
+            _peerId,
+            ContactNickname.Create("Other", _peerId),
+            PeerTrustLevel.Tofu,
+            _timeProvider.UtcNow,
+            differentKey);
+        await _contactRepo.SaveAsync(contact);
+
+        var result = await _sut.ConnectAsync(_ownerId, _validPayload, TimeSpan.FromSeconds(3));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("IDENTITY_KEY_CHANGED");
+    }
+
+    [Test]
+    public async Task ConnectAsync_PreKeyIdentityMismatch_ReturnsSecurityError()
+    {
+        var mismatchKey = IdentityKey.FromSpan(RandomNumberGenerator.GetBytes(32));
+        _bundleProvider.BundleToReturn = new PreKeyBundle(
+            DeviceId.Primary,
+            mismatchKey,
+            DhPublicKey.FromSpan(RandomNumberGenerator.GetBytes(32)),
+            DeviceLinkProof.FromSpan(RandomNumberGenerator.GetBytes(64)),
+            SignedPreKeyId.First);
+
+        var result = await _sut.ConnectAsync(_ownerId, _validPayload, TimeSpan.FromSeconds(3));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("IDENTITY_KEY_MISMATCH");
+    }
+
+    [Test]
+    public async Task ConnectAsync_PreKeyBundleFetchFails_ReturnsFailure()
+    {
+        _bundleProvider.ErrorToReturn = new DomainError("PREKEY_UNAVAILABLE", "Remote bundle not found");
+
+        var result = await _sut.ConnectAsync(_ownerId, _validPayload, TimeSpan.FromSeconds(3));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("PREKEY_UNAVAILABLE");
+    }
+
+    [Test]
+    public async Task ConnectAsync_HandshakeFails_ReturnsFailure()
+    {
+        _handshakeService.ErrorToReturn = new DomainError("HANDSHAKE_FAILED", "Failed to initiate handshake");
+
+        var result = await _sut.ConnectAsync(_ownerId, _validPayload, TimeSpan.FromSeconds(3));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("HANDSHAKE_FAILED");
+    }
+
+    [Test]
+    public async Task ConnectAsync_SuccessfulConnection_ReturnsConnectedResult()
+    {
+        var result = await _sut.ConnectAsync(_ownerId, _validPayload, TimeSpan.FromSeconds(3));
 
         result.IsSuccess.Should().BeTrue();
         result.Value!.Status.Should().Be(OutboundConnectionStatus.Connected);
-        result.Value.PeerId.Should().Be(peerId);
-        result.Value.ResolvedEndpoint.Should().BeNull();
-        _fakeConnectionService.InvokedPeerId.Should().Be(peerId);
+        result.Value.PeerId.Should().Be(_peerId);
+        result.Value.Invitation.Should().Be(_validPayload);
 
-        var stored = await _routingRepo.GetByPeerIdAsync(peerId);
-        stored.Should().NotBeNull();
-        stored!.RelayEndpoint.Should().Be(relay);
-        stored.RoutingToken.Should().Be(route);
+        var expectedChannelId = ChannelId.DeterministicForDirect(_ownerId, _peerId, _relayEndpoint);
+        var channel = await _channelRepo.GetDirectByIdAsync(expectedChannelId);
+        channel.Should().NotBeNull();
+        channel!.OwnerIdentityId.Should().Be(_ownerId);
+        channel.RemotePeerId.Should().Be(_peerId);
+
+        var contact = await _contactRepo.GetByPeerIdAsync(_ownerId, _peerId);
+        contact.Should().NotBeNull();
+
+        var route = await _routingRepo.GetByPeerIdAsync(_peerId);
+        route.Should().NotBeNull();
+        route!.RelayEndpoint.Should().Be(_relayEndpoint);
     }
 
-    private sealed class FakePeerConnectionService : IPeerConnectionService
+    private sealed class FakePreKeyBundleProvider : IPreKeyBundleProvider
     {
-        public DomainResult<PeerConnectionResult> Result { get; set; } =
-            DomainResult<PeerConnectionResult>.Success(new PeerConnectionResult(ChannelId.New(), DeviceId.Primary));
+        public PreKeyBundle? BundleToReturn { get; set; }
+        public DomainError? ErrorToReturn { get; set; }
 
-        public Exception? ThrowOnConnect { get; set; }
-        public PublicIdentityId? InvokedPeerId { get; private set; }
-
-        public Task<DomainResult<PeerConnectionResult>> ConnectToPeerAsync(
-            PublicIdentityId targetPeerId,
-            DeviceId? targetDeviceId = null,
+        public Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
+            PublicIdentityId peerId,
+            DeviceId? deviceId = null,
             RelayEndpoint? relayEndpoint = null,
             CancellationToken ct = default)
         {
-            InvokedPeerId = targetPeerId;
-            return Task.FromResult(Result);
+            if (ErrorToReturn.HasValue) return Task.FromResult(DomainResult<PreKeyBundle>.Failure(ErrorToReturn.Value));
+            return Task.FromResult(DomainResult<PreKeyBundle>.Success(BundleToReturn!));
         }
 
-        public Task<DomainResult<PeerConnectionResult>> ConnectToDirectPeerAsync(
-            PublicIdentityId targetPeerId,
-            BlindedRoutingToken routingToken,
-            DeliveryToken deliveryToken,
-            Uri directEndpoint,
-            DeviceId? targetDeviceId = null,
+        public Task<DomainResult<PreKeyBundle>> FetchAuthenticatedAsync(
+            PublicIdentityId callerOwnerId,
+            RelayEndpoint relayEndpoint,
+            BlindedRoutingToken targetRoutingToken,
+            DeviceId? deviceId = null,
             CancellationToken ct = default)
         {
-            InvokedPeerId = targetPeerId;
-            if (ThrowOnConnect != null)
+            if (ErrorToReturn.HasValue) return Task.FromResult(DomainResult<PreKeyBundle>.Failure(ErrorToReturn.Value));
+            return Task.FromResult(DomainResult<PreKeyBundle>.Success(BundleToReturn!));
+        }
+    }
+
+    private sealed class FakeInitialHandshakePayloadProvider : IInitialHandshakePayloadProvider
+    {
+        public ValueTask<(AppId AppId, ReadOnlyMemory<byte> Payload)?> CreateInitialPayloadAsync(
+            PublicIdentityId localIdentityId,
+            ChannelId channelId,
+            CancellationToken ct = default)
+        {
+            return ValueTask.FromResult<(AppId AppId, ReadOnlyMemory<byte> Payload)?>((AppId.Chat, new byte[] { 1, 2, 3 }));
+        }
+    }
+
+    private sealed class FakeHandshakeService : IHandshakeService
+    {
+        public DomainError? ErrorToReturn { get; set; }
+
+        public ValueTask<DomainResult<DirectRatchetSession>> InitiateHandshakeAsync(
+            PublicIdentityId ownerId,
+            DeviceId ownerDeviceId,
+            PublicIdentityId remotePeerId,
+            RelayEndpoint relayEndpoint,
+            PreKeyBundle remoteBundle,
+            AppId? initialAppId = null,
+            ReadOnlyMemory<byte>? initialPayload = null,
+            CancellationToken ct = default)
+        {
+            if (ErrorToReturn.HasValue)
             {
-                throw ThrowOnConnect;
+                return ValueTask.FromResult(DomainResult<DirectRatchetSession>.Failure(ErrorToReturn.Value));
             }
 
-            return Task.FromResult(Result);
+            return ValueTask.FromResult(DomainResult<DirectRatchetSession>.Success(null!));
+        }
+
+        public ValueTask<DomainResult> ReceiveInvitationAsync(
+            InboundHandshakeEnvelope envelope,
+            CancellationToken ct = default)
+        {
+            return ValueTask.FromResult(DomainResult.Success());
+        }
+
+        public ValueTask<DomainResult> CompletePendingHandshakeAsync(
+            PublicIdentityId personaId,
+            PublicIdentityId requesterId,
+            CancellationToken ct = default)
+        {
+            return ValueTask.FromResult(DomainResult.Success());
         }
     }
 }

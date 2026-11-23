@@ -61,7 +61,6 @@ public sealed class TestPeerMailboxRoutingRepository : IPeerMailboxRoutingReposi
 [TestFixture]
 public sealed class RoutingCoordinatorTests
 {
-    private InMemoryStreamRegistry _streamRegistry = null!;
     private TestPeerMailboxRoutingRepository _routingRepo = null!;
     private TestDateTimeProvider _timeProvider = null!;
     private RoutingCoordinator _coordinator = null!;
@@ -75,10 +74,9 @@ public sealed class RoutingCoordinatorTests
     [SetUp]
     public void SetUp()
     {
-        _streamRegistry = new InMemoryStreamRegistry();
         _routingRepo = new TestPeerMailboxRoutingRepository();
         _timeProvider = new TestDateTimeProvider();
-        _coordinator = new RoutingCoordinator(_streamRegistry, _routingRepo, _timeProvider);
+        _coordinator = new RoutingCoordinator(_routingRepo, _timeProvider);
 
         _peerId = PublicIdentityId.New();
         _token1 = BlindedRoutingToken.New();
@@ -95,40 +93,9 @@ public sealed class RoutingCoordinatorTests
     }
 
     [Test]
-    public async Task ResolveRoute_WhenPeerHasActiveStream_SelectsDirect()
+    public async Task ResolveRoute_WhenRelayRouteExists_SelectsRelay()
     {
         // Arrange
-        _streamRegistry.SetStreamActive(_peerId, true);
-
-        // Act
-        var result = await _coordinator.ResolveRouteAsync(_peerId);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Mode.Should().Be(DeliveryRoutingMode.DirectPeer);
-        result.Value!.TargetPeerId.Should().Be(_peerId);
-    }
-
-    [Test]
-    public async Task ResolveRoute_WhenPeerHasDirectEndpointRegistered_SelectsDirect()
-    {
-        // Arrange
-        _streamRegistry.RegisterDirectEndpoint(_peerId, new Uri("https://192.168.1.100:5100"));
-
-        // Act
-        var result = await _coordinator.ResolveRouteAsync(_peerId);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        result.Value!.Mode.Should().Be(DeliveryRoutingMode.DirectPeer);
-        result.Value!.TargetPeerId.Should().Be(_peerId);
-    }
-
-    [Test]
-    public async Task ResolveRoute_WhenNoStreamButRelayRouteExists_SelectsRelay()
-    {
-        // Arrange
-        _streamRegistry.SetStreamActive(_peerId, false);
         var route = new PeerMailboxRoutingCapability(
             _peerId,
             _token1,
@@ -142,7 +109,7 @@ public sealed class RoutingCoordinatorTests
 
         // Assert
         result.IsSuccess.Should().BeTrue();
-        result.Value!.Mode.Should().Be(DeliveryRoutingMode.RelayMailbox);
+        result.Value!.Mode.Should().Be(DeliveryRoutingMode.Relayed);
         result.Value!.TargetRelayEndpoint.Should().Be(RelayEndpoint.Parse("relay-1.example.com"));
         result.Value!.TargetRoutingToken.Should().Be(_token1);
         result.Value!.TargetDeliveryToken.Should().Be(_deliveryToken1);
@@ -152,7 +119,6 @@ public sealed class RoutingCoordinatorTests
     public async Task ResolveRoute_WhenPrimaryRelayInBackpressureCooldown_SwitchesToNextAvailableRelay()
     {
         // Arrange
-        _streamRegistry.SetStreamActive(_peerId, false);
 
         // Route 1 (Most recently observed)
         var primaryRoute = new PeerMailboxRoutingCapability(
@@ -181,7 +147,7 @@ public sealed class RoutingCoordinatorTests
 
         // Assert: coordinator bypasses relay-1 and resolves to relay-2
         result.IsSuccess.Should().BeTrue();
-        result.Value!.Mode.Should().Be(DeliveryRoutingMode.RelayMailbox);
+        result.Value!.Mode.Should().Be(DeliveryRoutingMode.Relayed);
         result.Value!.TargetRelayEndpoint.Should().Be(RelayEndpoint.Parse("relay-2.example.com"));
         result.Value!.TargetRoutingToken.Should().Be(_token2);
     }
@@ -190,7 +156,6 @@ public sealed class RoutingCoordinatorTests
     public async Task ResolveRoute_WhenAllRelaysInBackpressureCooldown_ReturnsFailure()
     {
         // Arrange
-        _streamRegistry.SetStreamActive(_peerId, false);
         var route = new PeerMailboxRoutingCapability(
             _peerId,
             _token1,
@@ -205,20 +170,19 @@ public sealed class RoutingCoordinatorTests
 
         // Assert
         result.IsSuccess.Should().BeFalse();
-        result.Error!.Code.Should().Be("UNRESOLVABLE_ROUTE");
+        result.Error!.Code.Should().Be("NO_RELAY_ROUTE_AVAILABLE");
     }
 
     [Test]
     public async Task ResolveRoute_WhenNoDirectAndNoRelay_ReturnsFailure()
     {
         // Arrange
-        _streamRegistry.SetStreamActive(_peerId, false);
 
         // Act
         var result = await _coordinator.ResolveRouteAsync(_peerId);
 
         // Assert
         result.IsSuccess.Should().BeFalse();
-        result.Error!.Code.Should().Be("UNRESOLVABLE_ROUTE");
+        result.Error!.Code.Should().Be("NO_RELAY_ROUTE_AVAILABLE");
     }
 }

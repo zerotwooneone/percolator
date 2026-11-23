@@ -254,7 +254,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 DeviceId.Primary,
                 AppId.FileTransferControl,
                 inBandBytes,
-                DeliveryRoute.DirectP2P);
+                DeliveryRoute.RelayedOneToOne);
 
             await _payloadSender.SendPayloadAsync(outboundContext, ct);
         }
@@ -392,7 +392,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             DeviceId.Primary,
             AppId.FileTransferControl,
             inBandBytes,
-            DeliveryRoute.DirectP2P);
+            DeliveryRoute.RelayedOneToOne);
 
         await _payloadSender.SendPayloadAsync(outboundContext, ct);
 
@@ -475,7 +475,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 DeviceId.Primary,
                 AppId.FileTransferControl,
                 inBandBytes,
-                DeliveryRoute.DirectP2P);
+                DeliveryRoute.RelayedOneToOne);
 
             await _payloadSender.SendPayloadAsync(outboundContext, ct);
         }
