@@ -12,6 +12,7 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Security.Ports;
+using Percolator.Domain.Channels.Ports;
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
 
@@ -27,19 +28,22 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
+    private readonly IChannelRepository _channelRepository;
 
     public ChatInitialPayloadProvider(
         ILocalIdentityKeyStore keyStore,
         IRelayDirectory relayDirectory,
         ICryptoEngine cryptoEngine,
         IPayloadSerializer serializer,
-        IDateTimeProvider timeProvider)
+        IDateTimeProvider timeProvider,
+        IChannelRepository channelRepository)
     {
         _keyStore = keyStore ?? throw new ArgumentNullException(nameof(keyStore));
         _relayDirectory = relayDirectory ?? throw new ArgumentNullException(nameof(relayDirectory));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _channelRepository = channelRepository ?? throw new ArgumentNullException(nameof(channelRepository));
     }
 
     public async ValueTask<(AppId AppId, ReadOnlyMemory<byte> Payload)?> CreateInitialPayloadAsync(
@@ -72,8 +76,14 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
 
             try
             {
+                var directChannel = await _channelRepository.GetDirectByIdAsync(channelId, ct).ConfigureAwait(false);
                 var relays = await _relayDirectory.ListAsync(ct).ConfigureAwait(false);
-                var linkedRelay = relays.FirstOrDefault(r => r.LinkedOwnerIdentityIds.Contains(localIdentityId));
+                RelayDirectoryEntry? linkedRelay = null;
+                if (directChannel?.RelayEndpoint != null)
+                {
+                    linkedRelay = relays.FirstOrDefault(r => r.Endpoint == directChannel.RelayEndpoint && r.LinkedOwnerIdentityIds.Contains(localIdentityId));
+                }
+                linkedRelay ??= relays.FirstOrDefault(r => r.LinkedOwnerIdentityIds.Contains(localIdentityId));
                 if (linkedRelay != null)
                 {
                     sourceEndpoint = linkedRelay.Endpoint.Value;
@@ -82,7 +92,7 @@ public sealed class ChatInitialPayloadProvider : IInitialHandshakePayloadProvide
                     if (tokensResult.IsSuccess)
                     {
                         mailboxRoutingTokenBytes = tokensResult.Value.RoutingToken.ToByteArray();
-                        deliveryTokenBytes = tokensResult.Value.DrainToken.Span.ToArray();
+                        deliveryTokenBytes = tokensResult.Value.DeliveryToken.Span.ToArray();
                     }
                 }
             }

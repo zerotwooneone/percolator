@@ -85,7 +85,23 @@ public sealed class SqlitePendingMailboxRegistrationRepository : IPendingMailbox
             existing.DecidedAtUtc = registration.DecidedAtUtc;
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            await using var retryDb = await _contextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+            var reloaded = await retryDb.PendingMailboxRegistrations
+                .FirstOrDefaultAsync(p => p.RelayId == relayIdStr && p.ApplicantRoutingToken == routingBytes, ct)
+                .ConfigureAwait(false);
+            if (reloaded != null)
+            {
+                reloaded.Status = (int)registration.Status;
+                reloaded.DecidedAtUtc = registration.DecidedAtUtc;
+                await retryDb.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+        }
     }
 
     public async Task UpdateStatusAsync(

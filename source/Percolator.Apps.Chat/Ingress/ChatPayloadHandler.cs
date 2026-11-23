@@ -115,9 +115,26 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             return DomainResult.Failure(new DomainError("UNAUTHORIZED_AUTHOR", "Inbound profile capability author does not match sender identity."));
         }
 
-        if (dto.ChannelId != context.ChannelId)
+        if (context.ChannelId != default && dto.ChannelId != context.ChannelId)
         {
-            return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target profile capability belongs to a different channel."));
+            var matchesScoped = false;
+            if (!string.IsNullOrWhiteSpace(dto.SourceEndpoint))
+            {
+                var epResult = RelayEndpoint.Create(dto.SourceEndpoint);
+                if (epResult.IsSuccess)
+                {
+                    var expectedScoped = ChannelId.DeterministicForDirect(context.RecipientIdentityId, context.SenderIdentityId, epResult.Value);
+                    if (dto.ChannelId == expectedScoped)
+                    {
+                        matchesScoped = true;
+                    }
+                }
+            }
+
+            if (!matchesScoped)
+            {
+                return DomainResult.Failure(new DomainError("CHANNEL_MISMATCH", "Target profile capability belongs to a different channel."));
+            }
         }
 
         using var profileKey = ProfileKey.FromBytes(dto.ProfileKeyBytes);
@@ -125,7 +142,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         // 1. Sealed Sender Delivery Token Derivation & Storage (must occur unconditionally before remote fetch)
         if (dto.MailboxRoutingTokenBytes.Length == 16)
         {
-            var routingToken = BlindedRoutingToken.FromGuid(new Guid(dto.MailboxRoutingTokenBytes));
+            var routingToken = BlindedRoutingToken.FromBytes(dto.MailboxRoutingTokenBytes);
             if (routingToken.Value != Guid.Empty)
             {
                 IdentityKey? authorPublicKey = null;
@@ -141,7 +158,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                     {
                         var relayEndpoint = endpointResult.Value;
 
-                        var deliveryToken = (dto.DeliveryTokenBytes != null && dto.DeliveryTokenBytes.Length == 16)
+                        var deliveryToken = (dto.DeliveryTokenBytes != null && dto.DeliveryTokenBytes.Length is 32 or 16)
                             ? DeliveryToken.FromBytes(dto.DeliveryTokenBytes)
                             : DeliveryToken.DeriveFromProfileKey(authorPublicKey, profileKey, _cryptoEngine);
 
@@ -153,10 +170,36 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                             _timeProvider.UtcNow);
                         await _peerMailboxRoutingRepo.SaveAsync(capability, ct).ConfigureAwait(false);
 
-                        var directChannel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
-                        if (directChannel != null && directChannel.RelayEndpoint != relayEndpoint)
+                        var targetChannelId = (dto.ChannelId != default && dto.ChannelId != context.ChannelId)
+                            ? dto.ChannelId
+                            : context.ChannelId;
+
+                        var directChannel = await _channelRepo.GetDirectByIdAsync(targetChannelId, ct).ConfigureAwait(false);
+                        if (directChannel == null && targetChannelId != default)
                         {
-                            directChannel.UpdateRelayEndpoint(relayEndpoint, _timeProvider);
+                            var createResult = DirectChannel.Create(
+                                targetChannelId,
+                                context.RecipientIdentityId,
+                                context.SenderIdentityId,
+                                _timeProvider,
+                                DirectChannelStatus.Active,
+                                relayEndpoint);
+                            if (createResult.IsSuccess)
+                            {
+                                directChannel = createResult.Value!;
+                                await _channelRepo.SaveDirectAsync(directChannel, ct).ConfigureAwait(false);
+                            }
+                        }
+                        else if (directChannel != null)
+                        {
+                            if (directChannel.RelayEndpoint != relayEndpoint)
+                            {
+                                directChannel.UpdateRelayEndpoint(relayEndpoint, _timeProvider);
+                            }
+                            if (directChannel.Status != DirectChannelStatus.Active)
+                            {
+                                directChannel.Activate(_timeProvider, relayEndpoint);
+                            }
                             await _channelRepo.SaveDirectAsync(directChannel, ct).ConfigureAwait(false);
                         }
                     }

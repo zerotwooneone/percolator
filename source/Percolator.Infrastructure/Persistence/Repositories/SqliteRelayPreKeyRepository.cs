@@ -18,7 +18,7 @@ using Percolator.Infrastructure.Persistence.Entities;
 public sealed class SqliteRelayPreKeyRepository : IRelayPreKeyRepository
 {
     private readonly IDbContextFactory<PercolatorDbContext> _contextFactory;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
 
     public SqliteRelayPreKeyRepository(IDbContextFactory<PercolatorDbContext> contextFactory)
     {

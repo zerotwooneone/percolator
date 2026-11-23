@@ -31,6 +31,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
     private readonly ILocalRelayAssociationRepository _localAssociationRepo;
     private readonly IPendingMailboxRegistrationRepository _pendingRegistrationRepo;
     private readonly IAuthenticatedMemberRateLimiter _rateLimiter;
+    private readonly PublicIdentityId _relayIdentityId;
 
     public AuthenticatedRelayEndpoint(
         IRelayMailboxCapabilityStore capabilityStore,
@@ -39,7 +40,8 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         IRelayHostingPolicyProvider policyProvider,
         ILocalRelayAssociationRepository localAssociationRepo,
         IPendingMailboxRegistrationRepository pendingRegistrationRepo,
-        IAuthenticatedMemberRateLimiter rateLimiter)
+        IAuthenticatedMemberRateLimiter rateLimiter,
+        PublicIdentityId? relayIdentityId = null)
     {
         _capabilityStore = capabilityStore ?? throw new ArgumentNullException(nameof(capabilityStore));
         _preKeyRepository = preKeyRepository ?? throw new ArgumentNullException(nameof(preKeyRepository));
@@ -48,6 +50,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         _localAssociationRepo = localAssociationRepo ?? throw new ArgumentNullException(nameof(localAssociationRepo));
         _pendingRegistrationRepo = pendingRegistrationRepo ?? throw new ArgumentNullException(nameof(pendingRegistrationRepo));
         _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
+        _relayIdentityId = relayIdentityId ?? PublicIdentityId.New();
     }
 
     public override async Task<RegisterMailboxResponse> RegisterMailbox(RegisterMailboxRequest request, ServerCallContext context)
@@ -105,7 +108,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
 
             // Stage into PendingMailboxRegistrations
             var registration = new PendingMailboxRegistration(
-                PublicIdentityId.New(),
+                _relayIdentityId,
                 routingToken,
                 RegistrationModerationStatus.PendingApproval,
                 DateTimeOffset.UtcNow);
@@ -547,7 +550,7 @@ public sealed class AuthenticatedRelayEndpoint : AuthenticatedRelayService.Authe
         var envelope = new MailboxEnvelope(
             EnvelopeId.New(),
             recipientRoutingToken,
-            request.Envelope.EncryptedPackage.ToByteArray(),
+            request.Envelope.ToByteArray(),
             now,
             now.Add(policy.EnvelopeTtl));
 

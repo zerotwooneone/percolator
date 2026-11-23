@@ -321,9 +321,33 @@ public sealed class SealedEnvelopeUnwrapperTests
     }
 
     [Test]
-    public void Constructor_WithNullIdentityKeyStore_ThrowsArgumentNullException()
+    public void EncodeGroupBroadcast_And_Unwrap_Succeeds()
     {
-        var act = () => new SealedEnvelopeUnwrapper(new ProtobufSessionWirePacker(), new FixedTimeProvider(), null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("identityKeyStore");
+        var channelId = ChannelId.New();
+        var authorId = PublicIdentityId.New();
+        var recipientId = PublicIdentityId.New();
+        var deviceId = new DeviceId(1);
+        var wirePacker = new ProtobufSessionWirePacker();
+        var timeProvider = new FixedTimeProvider();
+        var keyStore = new MockLocalIdentityKeyStore();
+
+        using var authorKeys = GenerateKeyPair();
+        using var recipientKeys = GenerateKeyPair();
+        keyStore.SetKey(recipientId, recipientKeys.Priv, recipientKeys.Pub);
+
+        var packedGroup = wirePacker.PackGroupMessage(channelId, iteration: 5, signature: new byte[64], ciphertext: new byte[] { 1, 2, 3, 4 });
+        var frame = SealedWireFraming.EncodeGroupBroadcast(channelId, authorId, deviceId, authorKeys.Pub, packedGroup);
+
+        var unwrapper = new SealedEnvelopeUnwrapper(wirePacker, timeProvider, keyStore);
+        var mailboxEnv = new MailboxEnvelope(EnvelopeId.New(), BlindedRoutingToken.New(), frame, timeProvider.UtcNow, timeProvider.UtcNow.AddDays(7));
+
+        var result = unwrapper.Unwrap(mailboxEnv, recipientId);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().BeOfType<InboundGroupEnvelope>();
+        var groupEnv = (InboundGroupEnvelope)result.Value!;
+        groupEnv.ChannelId.Should().Be(channelId);
+        groupEnv.AuthorIdentityId.Should().Be(authorId);
+        groupEnv.AuthorDeviceId.Should().Be(deviceId);
+        groupEnv.Iteration.Should().Be(5);
     }
 }

@@ -443,7 +443,7 @@ public sealed class ChatService : IChatService
             command.AuthorId,
             command.ProfileKey.ToArray(),
             command.BlindedLocator.ToArray(),
-            command.MailboxRoutingToken.Value.ToByteArray(),
+            command.MailboxRoutingToken.ToByteArray(),
             command.Revision,
             timestampUnixMs,
             command.AuthorPublicKey?.Span.ToArray(),

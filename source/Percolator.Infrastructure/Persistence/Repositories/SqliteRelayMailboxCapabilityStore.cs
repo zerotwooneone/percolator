@@ -130,6 +130,8 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
             .FirstOrDefaultAsync(c => c.RoutingToken == routing, ct)
             .ConfigureAwait(false);
 
+        Console.WriteLine($"[VERIFY] Routing: {Convert.ToHexString(routing)}, Delivery: {Convert.ToHexString(deliveryToken.Span)}, FoundCap: {capability != null}, CapDelivery: {(capability != null ? Convert.ToHexString(capability.DeliveryToken) : "null")}");
+
         if (capability == null)
         {
             return false;
@@ -247,7 +249,10 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
         bool isAuthorized = await VerifyDeliveryTokenAsync(routingToken, deliveryToken, ct).ConfigureAwait(false);
         if (!isAuthorized)
         {
-            return DomainResult.Failure(new DomainError("PERMISSION_DENIED", "Invalid delivery token capability."));
+            await using var db = _contextFactory.CreateDbContext();
+            var allCaps = await db.RelayMailboxCapabilities.ToListAsync(ct).ConfigureAwait(false);
+            var all = string.Join(";", allCaps.Select(c => Convert.ToHexString(c.RoutingToken) + ":" + Convert.ToHexString(c.DeliveryToken)));
+            return DomainResult.Failure(new DomainError("PERMISSION_DENIED", $"Invalid delivery token capability. Routing={Convert.ToHexString(routingToken.ToByteArray())}, Delivery={Convert.ToHexString(deliveryToken.Span)}, AllInDb=[{all}]"));
         }
 
         var routing = routingToken.ToByteArray();
@@ -273,10 +278,17 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
                 envelope.Ciphertext.ToArray(),
                 envelope.EnqueuedAtUtc);
 
+            var maxOrdinal = await db.RelayQueuedEnvelopes
+                .Where(e => e.RoutingToken == routing)
+                .Select(e => (long?)e.Ordinal)
+                .MaxAsync(ct)
+                .ConfigureAwait(false);
+
             var entity = new RelayQueuedEnvelopeEntity
             {
                 QueueId = record.QueueId.Value,
                 RoutingToken = routing,
+                Ordinal = (maxOrdinal ?? -1) + 1,
                 EnvelopePayload = record.EnvelopePayload.ToArray(),
                 EnqueuedAtUtc = record.EnqueuedAtUtc
             };
@@ -333,10 +345,17 @@ public sealed class SqliteRelayMailboxCapabilityStore : IRelayMailboxCapabilityS
                 envelope.Ciphertext.ToArray(),
                 envelope.EnqueuedAtUtc);
 
+            var maxOrdinal = await db.RelayQueuedEnvelopes
+                .Where(e => e.RoutingToken == routing)
+                .Select(e => (long?)e.Ordinal)
+                .MaxAsync(ct)
+                .ConfigureAwait(false);
+
             var entity = new RelayQueuedEnvelopeEntity
             {
                 QueueId = record.QueueId.Value,
                 RoutingToken = routing,
+                Ordinal = (maxOrdinal ?? -1) + 1,
                 EnvelopePayload = record.EnvelopePayload.ToArray(),
                 EnqueuedAtUtc = record.EnqueuedAtUtc
             };

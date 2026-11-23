@@ -60,7 +60,7 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         var envelope = new MailboxEnvelope(
             EnvelopeId.New(),
             routingToken,
-            request.Envelope.EncryptedPackage.ToByteArray(),
+            request.Envelope.ToByteArray(),
             now,
             now.Add(policy.EnvelopeTtl));
 

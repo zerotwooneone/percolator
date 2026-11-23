@@ -158,12 +158,28 @@ public sealed class TransportDispatcher : ITransportDispatcher
 
     private async Task<ReadOnlyMemory<byte>> EnsureSealedFrameAsync(OutboxJob job, CancellationToken ct)
     {
-        if (job.Payload.Length >= SealedWireFraming.HeaderSize && job.Payload.Span[0] == SealedWireFraming.SealedMagicByte)
+        if (job.Payload.Length >= 2 && job.Payload.Span[0] == SealedWireFraming.SealedMagicByte &&
+            (job.Payload.Span[1] == SealedWireFraming.Version1 || job.Payload.Span[1] == SealedWireFraming.VersionGroupBroadcast))
         {
             return job.Payload;
         }
 
         var kind = DetermineWireFrameKind(job.Payload, job.Route.Type);
+
+        if (kind == WireFrameKind.GroupBroadcast)
+        {
+            var senderPub = await _identityKeyStore.GetIdentityPublicKeyAsync(job.OwnerIdentityId, ct).ConfigureAwait(false);
+            if (senderPub != null)
+            {
+                return SealedWireFraming.EncodeGroupBroadcast(
+                    job.ChannelId,
+                    job.OwnerIdentityId,
+                    DeviceId.Primary,
+                    senderPub,
+                    job.Payload);
+            }
+            return job.Payload;
+        }
 
         IdentityKey? recipientKey = null;
         if (job.RecipientIdentityId.HasValue)
@@ -176,9 +192,9 @@ public sealed class TransportDispatcher : ITransportDispatcher
         }
 
         var senderPriv = await _identityKeyStore.GetIdentityPrivateKeyAsync(job.OwnerIdentityId, ct).ConfigureAwait(false);
-        var senderPub = await _identityKeyStore.GetIdentityPublicKeyAsync(job.OwnerIdentityId, ct).ConfigureAwait(false);
+        var senderPublicKey = await _identityKeyStore.GetIdentityPublicKeyAsync(job.OwnerIdentityId, ct).ConfigureAwait(false);
 
-        if (recipientKey == null || senderPriv == null || senderPub == null)
+        if (recipientKey == null || senderPriv == null || senderPublicKey == null)
         {
             return job.Payload;
         }
@@ -191,7 +207,7 @@ public sealed class TransportDispatcher : ITransportDispatcher
                 job.OwnerIdentityId,
                 DeviceId.Primary,
                 senderPriv.Span,
-                senderPub,
+                senderPublicKey,
                 recipientKey,
                 job.Payload);
 

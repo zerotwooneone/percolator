@@ -519,7 +519,7 @@ public class ChatPayloadHandlerTests
             channel.OwnerIdentityId, // Spoofed: context is from Bob, but DTO author is Alice
             profileKey.ToArray(),
             locator.ToArray(),
-            routingToken.Value.ToByteArray(),
+            routingToken.ToByteArray(),
             Revision: 1,
             _timeProvider.UtcNowUnixMs);
 
@@ -547,7 +547,7 @@ public class ChatPayloadHandlerTests
             channel.RemotePeerId,
             profileKey.ToArray(),
             locator.ToArray(),
-            routingToken.Value.ToByteArray(),
+            routingToken.ToByteArray(),
             Revision: 1,
             _timeProvider.UtcNowUnixMs);
 
@@ -586,7 +586,7 @@ public class ChatPayloadHandlerTests
             channel.RemotePeerId,
             profileKey.ToArray(),
             locator.ToArray(),
-            routingToken.Value.ToByteArray(),
+            routingToken.ToByteArray(),
             Revision: 2,
             _timeProvider.UtcNowUnixMs);
 
@@ -621,7 +621,7 @@ public class ChatPayloadHandlerTests
             channel.RemotePeerId,
             profileKey.ToArray(),
             locator.ToArray(),
-            routingToken.Value.ToByteArray(),
+            routingToken.ToByteArray(),
             Revision: 5,
             _timeProvider.UtcNowUnixMs);
 
@@ -661,7 +661,7 @@ public class ChatPayloadHandlerTests
             channel.RemotePeerId,
             profileKey.ToArray(),
             locator.ToArray(),
-            routingToken.Value.ToByteArray(),
+            routingToken.ToByteArray(),
             Revision: 1,
             _timeProvider.UtcNowUnixMs);
 
@@ -695,7 +695,7 @@ public class ChatPayloadHandlerTests
             channel.RemotePeerId,
             profileKey.ToArray(),
             locator.ToArray(),
-            routingToken.Value.ToByteArray(),
+            routingToken.ToByteArray(),
             Revision: 1,
             _timeProvider.UtcNowUnixMs,
             authorKey.Span.ToArray(),
@@ -737,7 +737,7 @@ public class ChatPayloadHandlerTests
             channel.RemotePeerId,
             profileKey.ToArray(),
             locator.ToArray(),
-            routingToken.Value.ToByteArray(),
+            routingToken.ToByteArray(),
             Revision: 1,
             _timeProvider.UtcNowUnixMs,
             AuthorPublicKeyBytes: null,

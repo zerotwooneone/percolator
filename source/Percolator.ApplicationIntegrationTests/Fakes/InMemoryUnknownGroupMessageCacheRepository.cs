@@ -1,7 +1,7 @@
 using Percolator.Apps.Chat.Ingress;
 using Percolator.Domain.Channels.ValueObjects;
 
-namespace Percolator.Application2IntegrationTests.Fakes;
+namespace Percolator.ApplicationIntegrationTests.Fakes;
 
 /// <summary>
 /// Minimal in-memory unknown-group message cache for integration nodes.

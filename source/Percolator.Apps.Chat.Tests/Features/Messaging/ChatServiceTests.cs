@@ -432,7 +432,7 @@ public class ChatServiceTests
         dto.Revision.Should().Be(1);
         dto.ProfileKeyBytes.Should().Equal(profileKey.ToArray());
         dto.BlindedLocatorBytes.Should().Equal(locator.ToArray());
-        dto.MailboxRoutingTokenBytes.Should().Equal(routingToken.Value.ToByteArray());
+        dto.MailboxRoutingTokenBytes.Should().Equal(routingToken.ToByteArray());
     }
 
     private sealed class FakeBlobStorageService : IBlobStorageService

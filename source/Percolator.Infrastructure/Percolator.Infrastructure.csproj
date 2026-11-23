@@ -36,6 +36,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Percolator.Infrastructure.Tests" />
+    <InternalsVisibleTo Include="Percolator.ApplicationIntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>

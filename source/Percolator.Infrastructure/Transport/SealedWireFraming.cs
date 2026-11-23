@@ -20,6 +20,7 @@ public static class SealedWireFraming
 {
     public const byte SealedMagicByte = 0x53; // 'S'
     public const byte Version1 = 0x01;
+    public const byte VersionGroupBroadcast = 0x02;
     public const int EphemeralPubKeySize = 32;
     public const int NonceSize = 12;
     public const int TagSize = 16;
@@ -27,8 +28,29 @@ public static class SealedWireFraming
 
     public const int HeaderSize = 1 + 1 + EphemeralPubKeySize + NonceSize + TagSize + EncryptedSenderKeySize + NonceSize + TagSize; // 122 bytes
     public const int InnerHeaderSize = 1 + 16 + 16 + 4 + 12 + 4; // 53 bytes
+    public const int GroupHeaderSize = 1 + 1 + 16 + 16 + 4 + 32 + 4; // 74 bytes
 
     private static readonly byte[] UnidentifiedDeliveryInfoPrefix = "UnidentifiedDelivery"u8.ToArray();
+
+    public static byte[] EncodeGroupBroadcast(
+        ChannelId channelId,
+        Domain.Identities.PublicIdentityId senderId,
+        DeviceId senderDeviceId,
+        IdentityKey senderPublicKey,
+        ReadOnlyMemory<byte> packedWireBytes)
+    {
+        ArgumentNullException.ThrowIfNull(senderPublicKey);
+        var output = new byte[GroupHeaderSize + packedWireBytes.Length];
+        output[0] = SealedMagicByte;
+        output[1] = VersionGroupBroadcast;
+        channelId.TryWriteBytes(output.AsSpan(2, 16));
+        senderId.TryWriteBytes(output.AsSpan(18, 16));
+        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(34, 4), senderDeviceId.Value);
+        senderPublicKey.Span.CopyTo(output.AsSpan(38, 32));
+        BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(70, 4), (uint)packedWireBytes.Length);
+        packedWireBytes.Span.CopyTo(output.AsSpan(GroupHeaderSize));
+        return output;
+    }
 
     public static byte[] Encode(
         WireFrameKind kind,
@@ -158,17 +180,54 @@ public static class SealedWireFraming
         ReadOnlySpan<byte> recipientPrivateKey,
         IdentityKey recipientPublicKey)
     {
+        if (frameBytes.Length < 2)
+        {
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Failure(
+                new DomainError("FRAME_TOO_SHORT", $"Frame length {frameBytes.Length} is shorter than minimum header size."));
+        }
+
+        var span = frameBytes.Span;
+        if (span[0] != SealedMagicByte)
+        {
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Failure(
+                new DomainError("UNKNOWN_FRAME_KIND", $"Unknown sealed frame magic: 0x{span[0]:X2}."));
+        }
+
+        if (span[1] == VersionGroupBroadcast)
+        {
+            if (span.Length < GroupHeaderSize)
+            {
+                return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Failure(
+                    new DomainError("FRAME_TOO_SHORT", $"Group frame length {frameBytes.Length} is shorter than required header size {GroupHeaderSize}."));
+            }
+
+            var groupChannelId = ChannelId.FromBytes(span.Slice(2, 16));
+            var groupSenderId = Domain.Identities.PublicIdentityId.FromBytes(span.Slice(18, 16));
+            uint groupDeviceIdVal = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(34, 4));
+            var groupSenderKey = IdentityKey.FromSpan(span.Slice(38, 32));
+            uint groupPayloadLen = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(70, 4));
+
+            if (GroupHeaderSize + groupPayloadLen > (uint)span.Length)
+            {
+                return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Failure(
+                    new DomainError("FRAME_TRUNCATED", "Group frame payload length exceeds available bytes."));
+            }
+
+            var groupPackedBytes = frameBytes.Slice(GroupHeaderSize, (int)groupPayloadLen);
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Success(
+                (WireFrameKind.GroupBroadcast, groupChannelId, groupSenderId, new DeviceId(groupDeviceIdVal), groupSenderKey, groupPackedBytes));
+        }
+
+        if (span[1] != Version1)
+        {
+            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Failure(
+                new DomainError("UNKNOWN_FRAME_KIND", $"Unknown sealed frame version: 0x{span[1]:X2}."));
+        }
+
         if (frameBytes.Length < HeaderSize)
         {
             return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Failure(
                 new DomainError("FRAME_TOO_SHORT", $"Frame length {frameBytes.Length} is shorter than required header size {HeaderSize}."));
-        }
-
-        var span = frameBytes.Span;
-        if (span[0] != SealedMagicByte || span[1] != Version1)
-        {
-            return DomainResult<(WireFrameKind, ChannelId, Domain.Identities.PublicIdentityId, DeviceId, IdentityKey, ReadOnlyMemory<byte>)>.Failure(
-                new DomainError("UNKNOWN_FRAME_KIND", $"Unknown sealed frame magic/version: 0x{span[0]:X2} 0x{span[1]:X2}."));
         }
 
         var ephPub = span.Slice(2, 32);

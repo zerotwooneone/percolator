@@ -11,6 +11,7 @@ using Percolator.Application.Ports;
 using Percolator.Application.Security;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -172,7 +173,14 @@ public sealed class OutboundEgressPipeline : IPayloadSender
         if (context.RecipientIdentityId.HasValue)
         {
             var directChannel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
-            if (directChannel == null || directChannel.RelayEndpoint == null)
+            RelayEndpoint? relayEndpoint = directChannel?.RelayEndpoint;
+            if (relayEndpoint == null)
+            {
+                var groupChannel = await _channelRepo.GetGroupByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
+                relayEndpoint = groupChannel?.RelayEndpoint;
+            }
+
+            if (relayEndpoint == null)
             {
                 return DomainResult.Failure(new DomainError(
                     "MISSING_RELAY_ENDPOINT", "Channel has no associated RelayEndpoint."));
@@ -180,14 +188,14 @@ public sealed class OutboundEgressPipeline : IPayloadSender
 
             var cap = await _routingRepo.GetRouteForExchangeAsync(
                 context.RecipientIdentityId.Value,
-                directChannel.RelayEndpoint,
+                relayEndpoint,
                 _timeProvider.UtcNow,
                 ct).ConfigureAwait(false);
 
             if (cap == null)
             {
                 return DomainResult.Failure(new DomainError(
-                    "NO_RELAY_ROUTE_AVAILABLE", $"No active relay route available for peer {context.RecipientIdentityId.Value} on {directChannel.RelayEndpoint.Value}."));
+                    "NO_RELAY_ROUTE_AVAILABLE", $"No active relay route available for peer {context.RecipientIdentityId.Value} on {relayEndpoint.Value}."));
             }
 
             route = new Delivery.DeliveryRoute(

@@ -51,7 +51,34 @@ public sealed class InMemoryTransportCertificateProvider : ITransportCertificate
             }
 
             _disposed = true;
-            _certificate?.Dispose();
+            CleanupCertificateUnderLock();
+        }
+    }
+
+    private void CleanupCertificateUnderLock()
+    {
+        if (_certificate == null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows() && _certificate.GetECDsaPrivateKey() is ECDsaCng cngKey)
+            {
+                try
+                {
+                    cngKey.Key.Delete();
+                }
+                catch
+                {
+                    // Best effort CNG key deletion
+                }
+            }
+        }
+        finally
+        {
+            _certificate.Dispose();
             _certificate = null;
         }
     }
@@ -77,8 +104,45 @@ public sealed class InMemoryTransportCertificateProvider : ITransportCertificate
         TransportCertificateSanBuilder.PopulateSan(sanBuilder);
         req.CertificateExtensions.Add(sanBuilder.Build());
 
-        return req.CreateSelfSigned(
+        using var selfSigned = req.CreateSelfSigned(
             DateTimeOffset.UtcNow.AddMinutes(-5),
             DateTimeOffset.UtcNow.AddYears(1));
+
+        if (OperatingSystem.IsWindows())
+        {
+            var tempPfxPath = Path.Combine(Path.GetTempPath(), $"ephemeral-{Guid.NewGuid():N}.pfx");
+            var passwordBytes = new byte[32];
+            RandomNumberGenerator.Fill(passwordBytes);
+            var passwordChars = Convert.ToHexString(passwordBytes);
+
+            try
+            {
+                var pfxBytes = selfSigned.Export(X509ContentType.Pfx, passwordChars);
+                try
+                {
+                    File.WriteAllBytes(tempPfxPath, pfxBytes);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(pfxBytes);
+                }
+
+                return X509CertificateLoader.LoadPkcs12FromFile(
+                    tempPfxPath,
+                    passwordChars,
+                    X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.Exportable);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(passwordBytes);
+                if (File.Exists(tempPfxPath))
+                {
+                    try { File.Delete(tempPfxPath); } catch { }
+                }
+            }
+        }
+
+        var unencryptedPfx = selfSigned.Export(X509ContentType.Pfx);
+        return X509CertificateLoader.LoadPkcs12(unencryptedPfx, null, X509KeyStorageFlags.EphemeralKeySet);
     }
 }
