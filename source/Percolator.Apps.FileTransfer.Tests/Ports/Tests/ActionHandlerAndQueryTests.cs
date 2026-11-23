@@ -9,7 +9,6 @@ using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Infrastructure.Serialization;
 using Percolator.PluginSdk;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -27,7 +26,7 @@ private InMemoryBlobStorageService _blobStorage = null!;
     private FileTransferIngressFilter _ingressFilter = null!;
     private FakeNetworkEndpointDiscoveryPort _endpointDiscovery = null!;
     private FakeTransferStreamPool _streamPool = null!;
-    private ProtobufPayloadSerializer _serializer = null!;
+    private TestPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
     private FileTransferQueryService _queryService = null!;
     private TransferOfferReaperService _reaperService = null!;
@@ -43,7 +42,7 @@ private InMemoryBlobStorageService _blobStorage = null!;
         _blobStorage = new InMemoryBlobStorageService();
         _endpointDiscovery = new FakeNetworkEndpointDiscoveryPort();
         _streamPool = new FakeTransferStreamPool();
-        _serializer = new ProtobufPayloadSerializer();
+        _serializer = new TestPayloadSerializer();
         _ingressFilter = new FileTransferIngressFilter(new InMemoryFilterPolicyRepository()) { IsEnabled = true };
 
         _handler = new FileTransferActionHandler(

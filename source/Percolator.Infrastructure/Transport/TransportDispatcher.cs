@@ -66,22 +66,19 @@ public sealed class TransportDispatcher : ITransportDispatcher
     private readonly IGroupCredentialsRepository _groupCredentialsRepository;
     private readonly IPeerMailboxRoutingRepository _mailboxRoutingRepository;
     private readonly IChannelRelayResolver _channelRelayResolver;
-    private readonly IStreamRegistryManagement _streamRegistry;
 
     public TransportDispatcher(
         ITransportClientInvoker invoker,
         IZkProofEngine zkProofEngine,
         IGroupCredentialsRepository groupCredentialsRepository,
         IPeerMailboxRoutingRepository mailboxRoutingRepository,
-        IChannelRelayResolver channelRelayResolver,
-        IStreamRegistryManagement streamRegistry)
+        IChannelRelayResolver channelRelayResolver)
     {
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
         _zkProofEngine = zkProofEngine ?? throw new ArgumentNullException(nameof(zkProofEngine));
         _groupCredentialsRepository = groupCredentialsRepository ?? throw new ArgumentNullException(nameof(groupCredentialsRepository));
         _mailboxRoutingRepository = mailboxRoutingRepository ?? throw new ArgumentNullException(nameof(mailboxRoutingRepository));
         _channelRelayResolver = channelRelayResolver ?? throw new ArgumentNullException(nameof(channelRelayResolver));
-        _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
     }
 
     public static WireFrameKind DetermineWireFrameKind(ReadOnlyMemory<byte> payload, DeliveryRouteType routeType)
@@ -166,36 +163,6 @@ public sealed class TransportDispatcher : ITransportDispatcher
         {
             switch (route.Type)
             {
-                case DeliveryRouteType.DirectP2P:
-                {
-                    var directEndpoint = route.DirectEndpoint ?? (job.RecipientIdentityId.HasValue ? _streamRegistry.GetDirectEndpoint(job.RecipientIdentityId.Value) : null);
-                    if (directEndpoint == null)
-                    {
-                        return DomainResult.Failure(new DomainError("MISSING_DIRECT_ENDPOINT", "Direct endpoint is required for DirectP2P route and could not be resolved from StreamRegistry."));
-                    }
-
-                    var framedPayload = EnsureSealedFrame(job);
-
-                    var envelopeProto = new SealedEnvelopeProto
-                    {
-                        RecipientRoutingToken = route.TargetToken.HasValue
-                            ? ByteString.CopyFrom(route.TargetToken.Value.ToByteArray())
-                            : ByteString.Empty,
-                        DeliveryToken = route.TargetDeliveryToken != null
-                            ? ByteString.CopyFrom(route.TargetDeliveryToken.Span)
-                            : ByteString.Empty,
-                        EncryptedPackage = ByteString.CopyFrom(framedPayload.Span),
-                        ExpiresAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddDays(7))
-                    };
-
-                    var ack = await _invoker.DeliverDirectAsync(directEndpoint, envelopeProto, ct);
-                    if (!ack.Success)
-                    {
-                        return DomainResult.Failure(new DomainError("DELIVERY_FAILED", ack.ErrorMessage ?? "Direct delivery rejected."));
-                    }
-
-                    return DomainResult.Success();
-                }
 
                 case DeliveryRouteType.RelayedOneToOne:
                 {

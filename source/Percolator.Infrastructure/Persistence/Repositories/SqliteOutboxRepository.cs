@@ -159,50 +159,47 @@ public sealed class SqliteOutboxRepository : IOutboxRepository
         var dto = new DeliveryRouteDto
         {
             Type = (int)route.Type,
-            DirectEndpoint = route.DirectEndpoint?.ToString(),
-            TargetToken = route.TargetToken.HasValue ? route.TargetToken.Value.Value.ToString() : null,
-            RelayEndpoint = route.RelayEndpoint?.ToString(),
+            TargetToken = route.TargetToken != default ? route.TargetToken.ToByteArray() : null,
+            RelayEndpoint = route.RelayEndpoint?.Value,
             TargetDeliveryToken = route.TargetDeliveryToken != null ? Convert.ToHexString(route.TargetDeliveryToken.Span) : null
         };
         return JsonSerializer.Serialize(dto);
     }
     private static DeliveryRoute DeserializeRoute(int routeType, string? json)
     {
+        var fallbackEndpoint = RelayEndpoint.Create("percolator://fallback.local").Value;
         if (string.IsNullOrEmpty(json))
         {
-            return new DeliveryRoute((DeliveryRouteType)routeType, null, null);
+            return new DeliveryRoute((DeliveryRouteType)routeType, default, fallbackEndpoint);
         }
         try
         {
             var dto = JsonSerializer.Deserialize<DeliveryRouteDto>(json);
-            if (dto == null) return new DeliveryRoute((DeliveryRouteType)routeType, null, null);
-            var directUri = !string.IsNullOrEmpty(dto.DirectEndpoint) ? new Uri(dto.DirectEndpoint) : null;
-            BlindedRoutingToken? targetToken = !string.IsNullOrEmpty(dto.TargetToken) && Guid.TryParse(dto.TargetToken, out var ttGuid)
-                ? new BlindedRoutingToken(ttGuid)
-                : null;
-            RelayEndpoint? relayEndpoint = !string.IsNullOrEmpty(dto.RelayEndpoint)
-                ? RelayEndpoint.Parse(dto.RelayEndpoint)
-                : null;
+            if (dto == null) return new DeliveryRoute((DeliveryRouteType)routeType, default, fallbackEndpoint);
+            BlindedRoutingToken targetToken = dto.TargetToken != null && dto.TargetToken.Length == 16
+                ? BlindedRoutingToken.FromBytes(dto.TargetToken)
+                : default;
+            RelayEndpoint relayEndpoint = !string.IsNullOrEmpty(dto.RelayEndpoint)
+                ? RelayEndpoint.Create(dto.RelayEndpoint).Value
+                : fallbackEndpoint;
             DeliveryToken? targetDeliveryToken = !string.IsNullOrEmpty(dto.TargetDeliveryToken)
                 ? DeliveryToken.FromSpan(Convert.FromHexString(dto.TargetDeliveryToken))
                 : null;
             return new DeliveryRoute(
                 (DeliveryRouteType)dto.Type,
-                directUri,
                 targetToken,
                 relayEndpoint,
                 targetDeliveryToken);
         }
         catch
         {
-            return new DeliveryRoute((DeliveryRouteType)routeType, null, null);
+            return new DeliveryRoute((DeliveryRouteType)routeType, default, fallbackEndpoint);
         }
     }
     private sealed class DeliveryRouteDto
     {
         public int Type { get; set; }
-        public string? DirectEndpoint { get; set; }
-        public string? TargetToken { get; set; }
+        public byte[]? TargetToken { get; set; }
         public string? RelayEndpoint { get; set; }
         public string? TargetDeliveryToken { get; set; }
     }

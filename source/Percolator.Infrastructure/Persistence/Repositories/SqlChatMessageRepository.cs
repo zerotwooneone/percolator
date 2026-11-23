@@ -114,7 +114,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
                     MimeType = attachment.ContentType ?? string.Empty,
                     EncryptionKey = attachment.OutOfBandReference?.EncryptionKey ?? Array.Empty<byte>(),
                     BaseNonce = attachment.OutOfBandReference?.BaseNonce ?? Array.Empty<byte>(),
-                    StorageMode = (int)(attachment.OutOfBandReference?.StorageMode ?? BlobStorageMode.DirectP2P),
+                    StorageMode = (int)(attachment.OutOfBandReference?.StorageMode ?? BlobStorageMode.RelayHosted),
                     RelayEndpointUri = attachment.OutOfBandReference?.RelayEndpointUri,
                     CiphertextSizeBytes = attachment.OutOfBandReference?.CiphertextSizeBytes ?? 0,
                     Width = attachment.Width,
@@ -363,7 +363,7 @@ public sealed class SqlChatMessageRepository : IChatMessageRepository
                     CiphertextSizeBytes = entity.LinkPreviewThumbnailCiphertextSize ?? 0,
                     MimeType = entity.LinkPreviewThumbnailMimeType ?? "image/jpeg",
                     ExpiresAtUtc = DateTimeOffset.UtcNow.AddDays(7),
-                    StorageMode = (BlobStorageMode)(entity.LinkPreviewThumbnailStorageMode ?? (int)BlobStorageMode.DirectP2P),
+                    StorageMode = (BlobStorageMode)(entity.LinkPreviewThumbnailStorageMode ?? (int)BlobStorageMode.RelayHosted),
                     RelayEndpointUri = entity.LinkPreviewThumbnailRelayUri
                 };
             }

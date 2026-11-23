@@ -7,7 +7,6 @@ using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
-using Percolator.Infrastructure.Serialization;
 using Percolator.PluginSdk;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -27,7 +26,7 @@ public sealed class IngressControlTests
         _clock = new FakeDateTimeProvider();
         _sessionRepository = new InMemoryTransferSessionRepository();
         _policyRepository = new InMemoryFilterPolicyRepository();
-        _serializer = new ProtobufPayloadSerializer();
+        _serializer = new TestPayloadSerializer();
     }
 
     [Test]

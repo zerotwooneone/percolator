@@ -33,6 +33,17 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
         _routingRepository = routingRepository;
     }
 
+    public Task<DomainResult<PreKeyBundle>> FetchAuthenticatedAsync(
+        Domain.Identities.PublicIdentityId requesterId,
+        RelayEndpoint relayEndpoint,
+        BlindedRoutingToken targetRoutingToken,
+        DeviceId? targetDeviceId = null,
+        CancellationToken ct = default)
+    {
+        return Task.FromResult(DomainResult<PreKeyBundle>.Failure(
+            new DomainError("NOT_IMPLEMENTED", "FetchAuthenticatedAsync will be fully implemented in Step 5.")));
+    }
+
     public async Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
         Domain.Identities.PublicIdentityId peerId,
         DeviceId? deviceId = null,

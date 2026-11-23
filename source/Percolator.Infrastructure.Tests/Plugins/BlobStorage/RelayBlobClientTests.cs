@@ -163,7 +163,6 @@ public sealed class RelayBlobClientTests
         // IPeerGrpcChannelFactory), and bootstrap (IDateTimeProvider) slices, which this
         // isolated-slice test intentionally omits; stub them for ValidateOnBuild.
         services.AddScoped<IChannelRepository, StubChannelRepository>();
-        services.AddSingleton<IStreamRegistry, StubStreamRegistry>();
         services.AddSingleton<IPeerGrpcChannelFactory, StubPeerGrpcChannelFactory>();
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         var provider = services.BuildServiceProvider(new ServiceProviderOptions
@@ -176,23 +175,10 @@ public sealed class RelayBlobClientTests
         scope.ServiceProvider.GetRequiredService<IBlobCryptoService>().Should().BeOfType<StreamingAesGcmCryptoService>();
         scope.ServiceProvider.GetRequiredService<ILocalChunkStore>().Should().BeOfType<LocalFileChunkStore>();
         scope.ServiceProvider.GetRequiredService<IRelayBlobClient>().Should().BeOfType<RelayBlobClient>();
-        scope.ServiceProvider.GetRequiredService<IPeerStreamBlobClient>().Should().BeOfType<PeerStreamBlobClient>();
         scope.ServiceProvider.GetRequiredService<IChannelRelayResolver>().Should().BeOfType<ChannelRelayResolver>();
 
         var hostedServices = provider.GetServices<IHostedService>();
         hostedServices.Should().ContainSingle(s => s is RelayBlobRetentionPruner);
-    }
-
-    /// <summary>DI-validation stand-in — the real port is registered by the transport slice.</summary>
-    private sealed class StubStreamRegistry : IStreamRegistry
-    {
-        public bool HasActiveStream(PublicIdentityId targetId) => false;
-
-        public bool HasActiveRelayStream(PublicIdentityId relayId) => false;
-
-        public ValueTask<StreamWriteResult> TryWriteAsync(
-            PublicIdentityId targetId, ReadOnlyMemory<byte> framedPayload, CancellationToken ct = default) =>
-            new(StreamWriteResult.Closed("DI-validation stub"));
     }
 
     /// <summary>DI-validation stand-in — the real port is registered by the transport slice.</summary>

@@ -244,11 +244,6 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<PeerGrpcChannelFactoryOptions>();
         services.AddSingleton<IPeerGrpcChannelFactory, PeerGrpcChannelFactory>();
         services.AddSingleton<ITransportClientInvoker, GrpcTransportClientInvoker>();
-        services.AddSingleton<StreamRegistryOptions>();
-        services.AddSingleton<StreamRegistry>();
-        services.AddSingleton<IStreamRegistry>(sp => sp.GetRequiredService<StreamRegistry>());
-        services.AddSingleton<IStreamRegistryManagement>(sp => sp.GetRequiredService<StreamRegistry>());
-        services.AddSingleton<IDirectEndpointRegistry>(sp => sp.GetRequiredService<StreamRegistry>());
         services.AddSingleton<PeerTransportServerOptions>();
         services.AddSingleton<KestrelPeerTransportServer>();
         services.AddSingleton<IPeerTransportServer>(sp => sp.GetRequiredService<KestrelPeerTransportServer>());
@@ -389,7 +384,6 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ILocalChunkStore, LocalFileChunkStore>();
         services.AddScoped<IBlobStorageService, BlobStorageService>();
         services.AddScoped<IRelayBlobClient, RelayBlobClient>();
-        services.AddScoped<IPeerStreamBlobClient, PeerStreamBlobClient>();
         services.AddSingleton<IChannelRelayResolver, ChannelRelayResolver>();
 
         services.AddHostedService<RelayBlobRetentionPruner>();

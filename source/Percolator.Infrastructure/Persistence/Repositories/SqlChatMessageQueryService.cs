@@ -126,7 +126,7 @@ public sealed class SqlChatMessageQueryService : IChatMessageQueryService
                         CiphertextSizeBytes = entity.LinkPreviewThumbnailCiphertextSize ?? 0,
                         MimeType = entity.LinkPreviewThumbnailMimeType ?? "image/jpeg",
                         ExpiresAtUtc = DateTimeOffset.UtcNow.AddDays(7),
-                        StorageMode = (BlobStorageMode)(entity.LinkPreviewThumbnailStorageMode ?? (int)BlobStorageMode.DirectP2P),
+                        StorageMode = (BlobStorageMode)(entity.LinkPreviewThumbnailStorageMode ?? (int)BlobStorageMode.RelayHosted),
                         RelayEndpointUri = entity.LinkPreviewThumbnailRelayUri
                     };
                 }

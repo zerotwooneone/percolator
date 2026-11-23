@@ -81,88 +81,13 @@ public sealed class UnauthenticatedDeliveryEndpoint : UnauthenticatedDeliverySer
         _activeIdentities = null;
     }
 
-    public override async Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
+    public override Task<DeliveryAckProto> DeliverDirect(SealedEnvelopeProto request, ServerCallContext context)
     {
-        if (request.EncryptedPackage.IsEmpty)
+        return Task.FromResult(new DeliveryAckProto
         {
-            return new DeliveryAckProto
-            {
-                Success = false,
-                ErrorMessage = "Encrypted package cannot be empty."
-            };
-        }
-
-        if (_unwrapper == null || _ingressPipeline == null || _activeIdentities == null)
-        {
-            return new DeliveryAckProto
-            {
-                Success = false,
-                ErrorMessage = "Direct delivery is not supported on this endpoint."
-            };
-        }
-
-        var activeIdentities = _activeIdentities.Current;
-        if (activeIdentities.Count == 0)
-        {
-            return new DeliveryAckProto
-            {
-                Success = false,
-                ErrorMessage = "No active local identities to receive direct delivery."
-            };
-        }
-
-        InboundEnvelope? envelope = null;
-        DomainError? lastError = null;
-        foreach (var candidateId in activeIdentities)
-        {
-            var unwrapResult = _unwrapper.UnwrapDirect(request.EncryptedPackage.Memory, candidateId);
-            if (unwrapResult.IsSuccess)
-            {
-                envelope = unwrapResult.Value;
-                break;
-            }
-            lastError = unwrapResult.Error;
-        }
-
-        if (envelope == null)
-        {
-            return new DeliveryAckProto
-            {
-                Success = false,
-                ErrorMessage = "Failed to unwrap direct delivery package."
-            };
-        }
-        if (_ingressFilter != null)
-        {
-            var filterResult = await _ingressFilter.CheckIngressAllowedAsync(
-                envelope.RecipientIdentityId,
-                envelope.SenderIdentityId,
-                context.CancellationToken);
-
-            if (filterResult.IsFailure)
-            {
-                return new DeliveryAckProto
-                {
-                    Success = false,
-                    ErrorMessage = filterResult.Error!.Description
-                };
-            }
-        }
-
-        var ingressResult = await _ingressPipeline.ProcessInboundAsync(envelope, context.CancellationToken);
-        if (ingressResult.IsFailure && ingressResult.Error.Code != "EXPIRED_OR_DUPLICATE_MESSAGE")
-        {
-            return new DeliveryAckProto
-            {
-                Success = false,
-                ErrorMessage = ingressResult.Error.Description
-            };
-        }
-
-        return new DeliveryAckProto
-        {
-            Success = true
-        };
+            Success = false,
+            ErrorMessage = "Direct delivery is deprecated and removed."
+        });
     }
 
     public override async Task<EnqueueAckProto> EnqueueMailbox(SealedEnvelopeProto request, ServerCallContext context)

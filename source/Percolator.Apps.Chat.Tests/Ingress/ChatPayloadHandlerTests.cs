@@ -675,7 +675,7 @@ public class ChatPayloadHandlerTests
     }
 
     [Test]
-    public async Task HandleInboundAsync_ProfileCapability_DirectP2P_RegistersDirectEndpoint()
+    public async Task HandleInboundAsync_ProfileCapability_Relay_RegistersRelayEndpoint()
     {
         var channel = ChatTestFactory.CreateDirectChannel(_timeProvider);
         await _channelRepo.SaveDirectAsync(channel);
