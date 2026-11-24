@@ -106,8 +106,8 @@ public sealed class OfflineBufferingIntegrationTests
         // Alice sends "Msg 4" while relay is stopped
         await alice.SendChatAsync(aliceChannelId, "Msg 4").ConfigureAwait(false);
 
-        // Allow Alice's outbox worker to attempt delivery, fail, and schedule exponential backoff
-        await Task.Delay(200).ConfigureAwait(false);
+        // Wait deterministically for Alice's outbox worker to attempt delivery, fail, and record retry
+        await alice.WaitForOutboxRetryAsync(TimeSpan.FromSeconds(10), minRetryCount: 1).ConfigureAwait(false);
 
         // Restart R1
         await relay.RestartAsync().ConfigureAwait(false);

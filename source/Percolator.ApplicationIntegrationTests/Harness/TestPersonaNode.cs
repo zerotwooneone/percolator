@@ -64,7 +64,6 @@ public sealed class TestPersonaNode : IAsyncDisposable
     private readonly MasterKeyHandle _masterKeyHandle;
     private CancellationTokenSource _drainCts = new();
     private Task? _drainLoopTask;
-    private bool _drainManuallyStopped;
 
     public PublicIdentityId IdentityId { get; }
     public DeviceId DeviceId { get; } = DeviceId.Primary;
@@ -141,9 +140,6 @@ public sealed class TestPersonaNode : IAsyncDisposable
             new NotifyingChatMessageRepository(
                 sp.GetRequiredService<SqlChatMessageRepository>(),
                 sp.GetRequiredService<IEventPublisher>()));
-
-        // Minimal in-memory unknown group message cache
-        services.AddSingleton<IUnknownGroupMessageCacheRepository, Fakes.InMemoryUnknownGroupMessageCacheRepository>();
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -466,7 +462,7 @@ public sealed class TestPersonaNode : IAsyncDisposable
         }
     }
 
-    public async Task WaitForGroupReceiverSessionAsync(ChannelId channelId, PublicIdentityId authorId, TimeSpan timeout)
+    public async Task WaitForGroupReceiverSessionAsync(ChannelId channelId, PublicIdentityId authorId, TimeSpan timeout, uint minKeyId = 1)
     {
         using var cts = new CancellationTokenSource(timeout);
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
@@ -475,14 +471,36 @@ public sealed class TestPersonaNode : IAsyncDisposable
             using var scope = Services.CreateScope();
             var repo = scope.ServiceProvider.GetRequiredService<IGroupReceiverSessionRepository>();
             var session = await repo.GetReceiverSessionAsync(channelId, authorId, DeviceId.Primary).ConfigureAwait(false);
-            if (session != null) return;
+            if (session != null && session.KeyId >= minKeyId) return;
             try
             {
                 if (!await timer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false)) break;
             }
             catch (OperationCanceledException) { break; }
         }
-        throw new TimeoutException($"Timed out waiting for group receiver session for author {authorId.Value}");
+        throw new TimeoutException($"Timed out waiting for group receiver session (keyId >= {minKeyId}) for author {authorId.Value}");
+    }
+
+    public async Task WaitForOutboxRetryAsync(TimeSpan timeout, int minRetryCount = 1)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
+        while (!cts.IsCancellationRequested)
+        {
+            using var scope = Services.CreateScope();
+            var outboxRepo = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
+            var jobs = await outboxRepo.GetPendingJobsForOwnerAsync(IdentityId, cts.Token).ConfigureAwait(false);
+            if (jobs.Any(j => j.RetryCount >= minRetryCount))
+            {
+                return;
+            }
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false)) break;
+            }
+            catch (OperationCanceledException) { break; }
+        }
+        throw new TimeoutException($"Timed out waiting for outbox retry count >= {minRetryCount}");
     }
 
     public async Task EvictGroupMemberAsync(TestRelayServer relay, ChannelId channelId, TestPersonaNode memberToEvict, IReadOnlyList<TestPersonaNode> remainingMembers)
@@ -658,7 +676,7 @@ public sealed class TestPersonaNode : IAsyncDisposable
                 {
                     OwnerIdentityId = IdentityId,
                     RemotePeerId = pending.RemotePeerId,
-                    PrimaryPublicKey = pending.PrimaryPublicKey
+                    PrimaryPublicKey = pending.PrimaryPublicKey!
                 };
             }
 
@@ -731,7 +749,6 @@ public sealed class TestPersonaNode : IAsyncDisposable
 
     public async Task StopDrainAsync()
     {
-        _drainManuallyStopped = true;
         _drainCts.Cancel();
         if (_drainLoopTask != null)
         {
@@ -746,7 +763,6 @@ public sealed class TestPersonaNode : IAsyncDisposable
 
     public async Task ResumeDrainAsync()
     {
-        _drainManuallyStopped = false;
         _drainCts = new CancellationTokenSource();
         var scheduler = Services.GetRequiredService<DrainScheduler>();
         _drainLoopTask = Task.Run(() => scheduler.RunAsync(_drainCts.Token));

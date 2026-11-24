@@ -102,8 +102,8 @@ public sealed class RelayedGroupChatIntegrationTests
         // Alice removes Carol; Alice rotates group epoch and distributes new Sender Key to Bob only
         await alice.EvictGroupMemberAsync(relay, channelId, carol, [alice, bob]).ConfigureAwait(false);
 
-        // Allow Alice's rotated key distribution to reach Bob
-        await Task.Delay(200).ConfigureAwait(false);
+        // Wait deterministically for Alice's rotated key distribution to reach Bob
+        await bob.WaitForGroupReceiverSessionAsync(channelId, alice.IdentityId, TimeSpan.FromSeconds(10), minKeyId: 2).ConfigureAwait(false);
 
         // Alice sends message -> Bob decrypts successfully; Carol receives envelope but cannot decrypt (ratchet rejection)
         await alice.SendChatAsync(channelId, "Post-eviction message for Bob only.").ConfigureAwait(false);
