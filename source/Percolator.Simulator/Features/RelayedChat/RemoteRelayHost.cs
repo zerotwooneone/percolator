@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Percolator.Application.Hosting;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Domain.Delivery.Hosting;
@@ -23,6 +24,8 @@ internal sealed class RemoteRelayHost : ISimulatedRelayHost
     public string DisplayName { get; }
     public int BoundPort { get; }
     public Uri BoundEndpoint { get; }
+    public RelayEndpoint Endpoint => RelayEndpoint.FromHostAndPort(BoundEndpoint.Host, BoundPort);
+    public RelayHostingPolicy Policy { get; set; } = RelayHostingPolicy.Default;
     public IServiceProvider Services => null!;
     public PublicIdentityId RelayIdentityId { get; }
 
@@ -31,6 +34,7 @@ internal sealed class RemoteRelayHost : ISimulatedRelayHost
     public IRelayQueueChaosController ChaosController => null!;
     public IRelayPeerDirectory PeerDirectory => null!;
     public IPrivateRendezvousService RendezvousService => null!;
+    public IExchangeRegistrationModerationService ModerationService => null!;
 
     public int TotalHeldEnvelopeCount => 0;
     public int TotalHostedOpkCount => 0;

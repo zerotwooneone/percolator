@@ -76,73 +76,28 @@ internal sealed partial class PersonaConnectPeerFlyoutViewModel : ViewModelBase
                 return;
             }
 
-            var input = rawInput;
-            if (input.StartsWith("percolator://", StringComparison.OrdinalIgnoreCase))
+            PeerInvitationPayload payload;
+            var codec = new PeerInvitationCodec();
+            var decodeResult = codec.Decode(rawInput);
+            if (decodeResult.IsFailure)
             {
-                input = input["percolator://".Length..].Trim();
+                ErrorMessage = $"Invalid invitation format: {decodeResult.Error.Description}";
+                return;
             }
+            payload = decodeResult.Value;
 
-            // 1. Try decoding as PeerInvitationPayload (query param or base64 format)
-            var decodeResult = _codec.Decode(input);
-            if (decodeResult.IsSuccess)
+            var result = await _workflow.ConnectAsync(_host.PublicIdentityId, payload, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+            if (result.IsFailure)
             {
-                var payload = decodeResult.Value!;
-                var result = await _workflow.ConnectAsync(payload, TimeSpan.FromSeconds(3)).ConfigureAwait(true);
-                if (result.IsFailure)
-                {
-                    ErrorMessage = result.Error.Description;
-                    return;
-                }
-
-                _toastService.ShowToast(
-                    "Connected",
-                    $"Direct connection initiated to {payload.IdentityId.Value.ToString()[..8]}.",
-                    ToastSeverity.Informational);
-                InvitationInput = string.Empty;
+                ErrorMessage = result.Error.Description;
                 return;
             }
 
-            // 2. Try decoding as InvitationLink (relayed base64 or direct URL format)
-            if (InvitationLink.TryParse(rawInput, out var link, out _) ||
-                InvitationLink.TryParse(input, out link, out _))
-            {
-                if (link?.Kind == InvitationKind.Relayed && link.PeerIdentityId.HasValue && link.RelayEndpoint != null)
-                {
-                    using var scope = _host.Services.CreateScope();
-                    var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                    var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-                    var peerConnService = scope.ServiceProvider.GetRequiredService<IPeerConnectionService>();
-
-                    var cap = new PeerMailboxRoutingCapability(
-                        link.PeerIdentityId.Value,
-                        link.RoutingToken ?? BlindedRoutingToken.New(),
-                        link.DeliveryToken ?? DeliveryToken.GenerateRandom(),
-                        link.RelayEndpoint,
-                        timeProvider.UtcNow);
-
-                    await routingRepo.SaveAsync(cap).ConfigureAwait(false);
-
-                    var connResult = await peerConnService.ConnectToPeerAsync(
-                        link.PeerIdentityId.Value,
-                        link.PeerDeviceId,
-                        link.RelayEndpoint).ConfigureAwait(true);
-
-                    if (connResult.IsFailure)
-                    {
-                        ErrorMessage = connResult.Error.Description;
-                        return;
-                    }
-
-                    _toastService.ShowToast(
-                        "Connected",
-                        $"Relayed connection initiated to {link.PeerIdentityId.Value.ToString()[..8]} via {link.RelayEndpoint}.",
-                        ToastSeverity.Informational);
-                    InvitationInput = string.Empty;
-                    return;
-                }
-            }
-
-            ErrorMessage = $"Invalid invitation: {decodeResult.Error.Description}";
+            _toastService.ShowToast(
+                "Connected",
+                $"⚡ Handshake initiated to {payload.IdentityId.Value.ToString()[..8]}.",
+                ToastSeverity.Success);
+            InvitationInput = string.Empty;
         }
         catch (Exception ex)
         {

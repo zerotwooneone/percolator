@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using NUnit.Framework;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
@@ -151,6 +152,35 @@ public sealed class SimulatorChaosDecoratorTests
         {
             EnqueuedEnvelopes.Add((routingToken, envelope));
             return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<DomainResult> EnqueueEnvelopeAsync(
+            BlindedRoutingToken routingToken,
+            DeliveryToken deliveryToken,
+            MailboxEnvelope envelope,
+            long maxMailboxBytes,
+            CancellationToken ct = default)
+        {
+            var record = new RelayQueuedEnvelopeRecord(
+                MailboxQueueId.Parse(Guid.NewGuid().ToString()),
+                envelope.Ciphertext.Span.ToArray(),
+                DateTimeOffset.UtcNow);
+            EnqueuedEnvelopes.Add((routingToken, record));
+            return ValueTask.FromResult(DomainResult.Success());
+        }
+
+        public ValueTask<DomainResult> EnqueueAuthenticatedInitialAsync(
+            BlindedRoutingToken routingToken,
+            MailboxEnvelope envelope,
+            long maxMailboxBytes,
+            CancellationToken ct = default)
+        {
+            var record = new RelayQueuedEnvelopeRecord(
+                MailboxQueueId.Parse(Guid.NewGuid().ToString()),
+                envelope.Ciphertext.Span.ToArray(),
+                DateTimeOffset.UtcNow);
+            EnqueuedEnvelopes.Add((routingToken, record));
+            return ValueTask.FromResult(DomainResult.Success());
         }
 
         public ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(BlindedRoutingToken routingToken, CancellationToken ct = default)

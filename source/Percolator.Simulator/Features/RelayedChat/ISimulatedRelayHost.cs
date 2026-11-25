@@ -1,10 +1,12 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Percolator.Application.Hosting;
 using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Transport;
 using Percolator.Simulator.Features.Topology;
@@ -18,6 +20,8 @@ internal interface ISimulatedRelayHost : IAsyncDisposable
     string DisplayName { get; }
     int BoundPort { get; }
     Uri BoundEndpoint { get; }
+    RelayEndpoint Endpoint { get; }
+    RelayHostingPolicy Policy { get; set; }
     IServiceProvider Services { get; }
     PublicIdentityId RelayIdentityId { get; }
 
@@ -26,6 +30,7 @@ internal interface ISimulatedRelayHost : IAsyncDisposable
     IRelayQueueChaosController ChaosController { get; }
     IRelayPeerDirectory PeerDirectory { get; }
     IPrivateRendezvousService RendezvousService { get; }
+    IExchangeRegistrationModerationService ModerationService { get; }
 
     int TotalHeldEnvelopeCount { get; }
     int TotalHostedOpkCount { get; }

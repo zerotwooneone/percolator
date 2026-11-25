@@ -51,8 +51,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 {
     private readonly IStatusToastService _toastService;
     private readonly ISimulatorStateBus _stateBus;
-    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
-    private readonly DirectChatCoordinator _chatCoordinator;
+    private readonly RelayChatCoordinator _chatCoordinator;
     private readonly AutopilotPongResponder _pongResponder;
     private readonly ISelectionStateService _selectionState = null!;
     private readonly ISimulatedWorldStateService _worldState = null!;
@@ -183,7 +182,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _boundEndpoint = summary.Subtitle;
         _toastService = deps.ToastService;
         _stateBus = deps.StateBus;
-        _handshakeOrchestrator = deps.HandshakeOrchestrator;
         _chatCoordinator = deps.ChatCoordinator;
         _pongResponder = deps.PongResponder;
         _selectionState = deps.SelectionState ?? throw new ArgumentNullException(nameof(deps.SelectionState));
@@ -220,7 +218,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             _hostScope = host.Services.CreateScope();
             var outboundWorkflow = _hostScope.ServiceProvider.GetRequiredService<Percolator.Application.Connections.IOutboundConnectionWorkflow>();
-            InvitationExport = new PersonaInvitationExportFlyoutViewModel(host, deps.InvitationCodec, _toastService);
+            InvitationExport = new PersonaInvitationExportFlyoutViewModel(host, _toastService);
             ConnectPeer = new PersonaConnectPeerFlyoutViewModel(host, _worldState, deps.InvitationCodec, outboundWorkflow, _toastService);
             RelayRegistration = new RelayRegistrationFlyoutViewModel(host, _worldState, _relayCoordinator, _toastService, _flightRecorder);
 
@@ -954,7 +952,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         var senderId = _pendingSenderId.Value;
 
         var success = await UiTaskRunner.RunAsync(
-            () => _handshakeOrchestrator.AcceptHandshakeAsync(NodeId, senderId),
+            () => _chatCoordinator.AcceptHandshakeAsync(NodeId, senderId),
             category: "Handshake",
             logSink: _logSink,
             toastService: _toastService,
@@ -976,7 +974,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         var senderId = _pendingSenderId.Value;
 
         var success = await UiTaskRunner.RunAsync(
-            () => _handshakeOrchestrator.RejectHandshakeAsync(NodeId, senderId, block: false),
+            () => _chatCoordinator.RejectHandshakeAsync(NodeId, senderId, block: false),
             category: "Handshake",
             logSink: _logSink,
             toastService: _toastService,
@@ -998,7 +996,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         var senderId = _pendingSenderId.Value;
 
         await UiTaskRunner.RunAsync(
-            () => _handshakeOrchestrator.RejectHandshakeAsync(NodeId, senderId, block: true),
+            () => _chatCoordinator.RejectHandshakeAsync(NodeId, senderId, block: true),
             category: "Handshake",
             logSink: _logSink,
             toastService: _toastService,

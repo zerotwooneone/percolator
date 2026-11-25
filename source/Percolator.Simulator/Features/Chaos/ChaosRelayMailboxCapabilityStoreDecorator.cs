@@ -94,6 +94,57 @@ internal sealed class ChaosRelayMailboxCapabilityStoreDecorator : IRelayMailboxC
         }
     }
 
+    public async ValueTask<DomainResult> EnqueueEnvelopeAsync(
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        var action = _chaosController.EvaluateDeliveryFault(_relayNodeId);
+        switch (action)
+        {
+            case ChaosFaultAction.DropEnvelope:
+                return DomainResult.Success();
+
+            case ChaosFaultAction.SimulateTransientError:
+                throw new InvalidOperationException("Injected transient relay failure.");
+
+            case ChaosFaultAction.InjectArtificialDelay:
+                await Task.Delay(500, ct).ConfigureAwait(false);
+                return await _inner.EnqueueEnvelopeAsync(routingToken, deliveryToken, envelope, maxMailboxBytes, ct).ConfigureAwait(false);
+
+            case ChaosFaultAction.Pass:
+            default:
+                return await _inner.EnqueueEnvelopeAsync(routingToken, deliveryToken, envelope, maxMailboxBytes, ct).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<DomainResult> EnqueueAuthenticatedInitialAsync(
+        BlindedRoutingToken routingToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        var action = _chaosController.EvaluateDeliveryFault(_relayNodeId);
+        switch (action)
+        {
+            case ChaosFaultAction.DropEnvelope:
+                return DomainResult.Success();
+
+            case ChaosFaultAction.SimulateTransientError:
+                throw new InvalidOperationException("Injected transient relay failure.");
+
+            case ChaosFaultAction.InjectArtificialDelay:
+                await Task.Delay(500, ct).ConfigureAwait(false);
+                return await _inner.EnqueueAuthenticatedInitialAsync(routingToken, envelope, maxMailboxBytes, ct).ConfigureAwait(false);
+
+            case ChaosFaultAction.Pass:
+            default:
+                return await _inner.EnqueueAuthenticatedInitialAsync(routingToken, envelope, maxMailboxBytes, ct).ConfigureAwait(false);
+        }
+    }
+
     public ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(
         BlindedRoutingToken routingToken,
         CancellationToken ct = default)

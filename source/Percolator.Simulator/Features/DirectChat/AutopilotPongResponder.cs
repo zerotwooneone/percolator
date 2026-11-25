@@ -16,13 +16,15 @@ using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
 using R3;
 
+using Percolator.Simulator.Features.RelayedChat;
+
 namespace Percolator.Simulator.Features.DirectChat;
 
 internal sealed class AutopilotPongResponder : IDisposable
 {
     private readonly ISimulatedWorldStateService _worldState;
     private readonly ISimulatorStateBus _stateBus;
-    private readonly DirectChatCoordinator _chatCoordinator;
+    private readonly RelayChatCoordinator _chatCoordinator;
     private readonly ISimulatorLogSink _logSink;
     private readonly ConcurrentDictionary<SimulatedNodeId, bool> _autoPongEnabled = new();
     private readonly ConcurrentDictionary<SimulatedNodeId, int> _pongCounters = new();
@@ -32,7 +34,7 @@ internal sealed class AutopilotPongResponder : IDisposable
     public AutopilotPongResponder(
         ISimulatedWorldStateService worldState,
         ISimulatorStateBus stateBus,
-        DirectChatCoordinator chatCoordinator,
+        RelayChatCoordinator chatCoordinator,
         ISimulatorLogSink logSink)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));

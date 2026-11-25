@@ -182,34 +182,22 @@ internal sealed class ProfileSyncCoordinator
                 return false;
             }
 
-            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-            var route = DeliveryRoute.DirectP2P;
-            if (streamRegistry.GetDirectEndpoint(recipient.PublicIdentityId) == null && recipient.HomeRelay != null)
+            var route = DeliveryRoute.RelayedOneToOne;
+            if (sender.HomeRelay == null)
             {
-                var now = timeProvider.UtcNow;
-                var bestRoute = await routingRepo.GetBestRouteAsync(recipient.PublicIdentityId, now, ct);
-                if (bestRoute != null)
-                {
-                    route = DeliveryRoute.RelayedOneToOne;
-                }
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Warning,
+                    sender.DisplayName,
+                    sender.Id,
+                    "ProfileSync",
+                    $"Cannot share profile capability: '{sender.DisplayName}' has no linked relay."));
+                return false;
             }
 
-            string sourceEndpoint;
-            BlindedRoutingToken mailboxRoutingToken;
-            ProfileSourceType sourceType;
-
-            if (sender.HomeRelay != null)
-            {
-                sourceEndpoint = sender.HomeRelay.BoundEndpoint.ToString();
-                mailboxRoutingToken = sender.MailboxRoutingToken;
-                sourceType = ProfileSourceType.Relay;
-            }
-            else
-            {
-                sourceEndpoint = sender.BoundEndpoint.ToString();
-                mailboxRoutingToken = default;
-                sourceType = ProfileSourceType.DirectP2P;
-            }
+            var sourceEndpoint = sender.HomeRelay.BoundEndpoint.ToString();
+            var mailboxRoutingToken = sender.MailboxRoutingToken;
+            var sourceType = ProfileSourceType.Relay;
 
             var locator = BlindedProfileLocator.Derive(sender.IdentityPublicKey, sender.ProfileKey, cryptoEngine);
 

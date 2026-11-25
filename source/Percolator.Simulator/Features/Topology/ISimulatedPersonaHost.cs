@@ -15,10 +15,9 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
 {
     SimulatedNodeId Id { get; }
     string DisplayName { get; }
-    int BoundPort { get; }
-    Uri BoundEndpoint { get; }
     byte[] IdenticonPng { get; }
     IServiceProvider Services { get; }
+    ISimulatedRelayHost? GetPrimaryLinkedRelay();
 
     PublicIdentityId PublicIdentityId { get; }
     IdentityKey IdentityPublicKey { get; }
@@ -49,6 +48,8 @@ internal interface ISimulatedPersonaHost : IAsyncDisposable
 
     ReadOnlyReactiveProperty<bool> IsListening { get; }
     Task SetListeningAsync(bool isListening, CancellationToken ct = default);
+    Task StopDrainAsync(CancellationToken ct = default);
+    Task ResumeDrainAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Assigns <see cref="HomeRelay"/> and records the binding in the relay directory

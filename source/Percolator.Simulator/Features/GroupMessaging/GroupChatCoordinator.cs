@@ -173,10 +173,7 @@ internal sealed class GroupChatCoordinator : IDisposable
                 if (member.PublicIdentityId == admin.PublicIdentityId) continue;
 
                 var directChannelId = ChannelId.DeterministicForDirect(admin.PublicIdentityId, member.PublicIdentityId);
-                var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-                var route = (streamRegistry.GetDirectEndpoint(member.PublicIdentityId) == null && member.HomeRelay != null)
-                    ? DeliveryRoute.RelayedOneToOne
-                    : DeliveryRoute.DirectP2P;
+                var route = DeliveryRoute.RelayedOneToOne;
 
                 var allMemberIds = members.Select(m => m.PublicIdentityId).Append(admin.PublicIdentityId).Distinct().ToList();
                 var inviteDto = new GroupInvitationDto(
@@ -271,10 +268,7 @@ internal sealed class GroupChatCoordinator : IDisposable
         }
 
         var directChannelId = ChannelId.DeterministicForDirect(persona.PublicIdentityId, invitation.InviterId);
-        var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-        var route = (streamRegistry.GetDirectEndpoint(invitation.InviterId) == null && persona.HomeRelay != null)
-            ? DeliveryRoute.RelayedOneToOne
-            : DeliveryRoute.DirectP2P;
+        var route = DeliveryRoute.RelayedOneToOne;
 
         var inviteService = scope.ServiceProvider.GetRequiredService<GroupInvitationService>();
         var acceptResult = await inviteService.AcceptInvitationAsync(
@@ -567,10 +561,7 @@ internal sealed class GroupChatCoordinator : IDisposable
             {
                 var existingHost = _worldState.FindPersonaHostByIdentity(existingMemberId);
                 var directChannelId = ChannelId.DeterministicForDirect(admin.PublicIdentityId, existingMemberId);
-                var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-                var route = (streamRegistry.GetDirectEndpoint(existingMemberId) == null && existingHost?.HomeRelay != null)
-                    ? DeliveryRoute.RelayedOneToOne
-                    : DeliveryRoute.DirectP2P;
+                var route = DeliveryRoute.RelayedOneToOne;
 
                 await payloadSender.SendPayloadAsync(new OutboundPayloadContext(
                     directChannelId,
@@ -600,10 +591,7 @@ internal sealed class GroupChatCoordinator : IDisposable
                 expiryMs,
                 allMemberIds);
 
-            var adminStreamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-            var inviteRoute = (adminStreamRegistry.GetDirectEndpoint(newMember.PublicIdentityId) == null && newMember.HomeRelay != null)
-                ? DeliveryRoute.RelayedOneToOne
-                : DeliveryRoute.DirectP2P;
+            var inviteRoute = DeliveryRoute.RelayedOneToOne;
 
             await inviteService.SendInvitationAsync(
                 inviteDto,
@@ -752,10 +740,7 @@ internal sealed class GroupChatCoordinator : IDisposable
             {
                 var targetHost = _worldState.FindPersonaHostByIdentity(targetId);
                 var directChannelId = ChannelId.DeterministicForDirect(admin.PublicIdentityId, targetId);
-                var streamRegistry = adminScope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-                var route = (streamRegistry.GetDirectEndpoint(targetId) == null && targetHost?.HomeRelay != null)
-                    ? DeliveryRoute.RelayedOneToOne
-                    : DeliveryRoute.DirectP2P;
+                var route = DeliveryRoute.RelayedOneToOne;
 
                 await payloadSender.SendPayloadAsync(new OutboundPayloadContext(
                     directChannelId,
@@ -1225,10 +1210,10 @@ internal sealed class GroupChatCoordinator : IDisposable
                         if (msg.PayloadCase == GroupStreamServerMessage.PayloadOneofCase.Broadcast && msg.Broadcast != null)
                         {
                             var ciphertextBytes = msg.Broadcast.Ciphertext.ToByteArray();
-                            var decodeResult = SealedWireFraming.Decode(ciphertextBytes);
+                            var decodeResult = SealedWireFraming.Decode(ciphertextBytes, ReadOnlySpan<byte>.Empty, persona.IdentityPublicKey);
                             if (decodeResult.IsSuccess)
                             {
-                                var (_, _, senderId, _, _) = decodeResult.Value;
+                                var (_, _, senderId, _, _, _) = decodeResult.Value;
                                 if (senderId == persona.PublicIdentityId)
                                 {
                                     // Skip self-broadcast echo

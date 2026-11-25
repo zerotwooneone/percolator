@@ -1,12 +1,17 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using NUnit.Framework;
 using Percolator.Application.Invitations;
+using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
 
@@ -17,195 +22,79 @@ public sealed class PersonaInvitationExportFlyoutViewModelTests
 {
     private Mock<ISimulatedPersonaHost> _hostMock = null!;
     private Mock<IStatusToastService> _toastServiceMock = null!;
-    private IPeerInvitationCodec _codec = null!;
-    private PublicIdentityId _testIdentityId;
-    private BlindedRoutingToken _routingToken;
-    private DeliveryToken _deliveryToken;
+    private Mock<IPeerInvitationService> _invitationServiceMock = null!;
+    private Mock<ISimulatedRelayHost> _relayMock = null!;
+    private IServiceProvider _serviceProvider = null!;
+
+    private PublicIdentityId _personaId;
+    private RelayEndpoint _relayEndpoint;
 
     [SetUp]
     public void SetUp()
     {
-        _testIdentityId = new PublicIdentityId(Guid.NewGuid());
-        _routingToken = new BlindedRoutingToken(Guid.NewGuid());
-        _deliveryToken = DeliveryToken.GenerateRandom();
+        _personaId = PublicIdentityId.New();
+        _relayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", 5100);
 
         _hostMock = new Mock<ISimulatedPersonaHost>(MockBehavior.Strict);
-        _hostMock.SetupGet(h => h.PublicIdentityId).Returns(_testIdentityId);
-        _hostMock.SetupGet(h => h.MailboxRoutingToken).Returns(_routingToken);
-        _hostMock.SetupGet(h => h.MailboxDeliveryToken).Returns(_deliveryToken);
-        _hostMock.SetupGet(h => h.BoundPort).Returns(5155);
+        _hostMock.SetupGet(h => h.PublicIdentityId).Returns(_personaId);
+
+        _relayMock = new Mock<ISimulatedRelayHost>(MockBehavior.Strict);
+        _relayMock.SetupGet(r => r.Endpoint).Returns(_relayEndpoint);
 
         _toastServiceMock = new Mock<IStatusToastService>(MockBehavior.Loose);
-        _codec = new PeerInvitationCodec();
+        _invitationServiceMock = new Mock<IPeerInvitationService>(MockBehavior.Strict);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(_invitationServiceMock.Object);
+        _serviceProvider = services.BuildServiceProvider();
+
+        _hostMock.SetupGet(h => h.Services).Returns(_serviceProvider);
     }
 
     [TearDown]
     public void TearDown()
     {
-        _deliveryToken.Dispose();
+        (_serviceProvider as IDisposable)?.Dispose();
     }
 
     [Test]
-    public void UpdateGeneratedInvitation_WithAutoLan_EncodesLanEndpointInUrl()
+    public void WhenNoLinkedRelay_DisplaysNoExchangeLinked()
     {
-        const string mockLanIp = "192.168.1.123";
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: mockLanIp);
+        _hostMock.Setup(h => h.GetPrimaryLinkedRelay()).Returns((ISimulatedRelayHost?)null);
 
-        vm.SelectedHostKind = SimulatorAdvertisedHostKind.AutoLanIp;
-        vm.UpdateGeneratedInvitation();
+        var vm = new PersonaInvitationExportFlyoutViewModel(_hostMock.Object, _toastServiceMock.Object);
 
-        vm.GeneratedInvitationUrl.Should().StartWith("percolator://invite?");
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.EndpointHosts.Should().Contain(mockLanIp);
+        vm.AvailableExchanges.Should().BeEmpty();
+        vm.GeneratedInvitationUrl.Should().Contain("No Exchange linked");
     }
 
     [Test]
-    public void UpdateGeneratedInvitation_WithLoopback_EncodesLoopbackInUrl()
+    public void WhenRelayLinked_GeneratesValidPercolatorInviteUrl()
     {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
+        _hostMock.Setup(h => h.GetPrimaryLinkedRelay()).Returns(_relayMock.Object);
 
-        vm.SelectedHostKind = SimulatorAdvertisedHostKind.Loopback;
-        vm.UpdateGeneratedInvitation();
+        var identityKey = IdentityKey.FromSpan(new byte[32] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 });
+        var routingToken = new BlindedRoutingToken(Guid.NewGuid());
+        var domainInvite = PeerInvitation.Create(
+            _personaId,
+            identityKey,
+            _relayEndpoint,
+            routingToken).Value;
 
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.EndpointHosts.Should().Contain("127.0.0.1");
-    }
+        _invitationServiceMock
+            .Setup(s => s.CreatePeerInvitationAsync(_personaId, _relayEndpoint, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DomainResult<PeerInvitation>.Success(domainInvite));
 
-    [Test]
-    public void UpdateGeneratedInvitation_WithCustomHost_EncodesCustomHostInUrl()
-    {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
+        var vm = new PersonaInvitationExportFlyoutViewModel(_hostMock.Object, _toastServiceMock.Object);
 
-        vm.SelectedHostKind = SimulatorAdvertisedHostKind.Custom;
-        vm.CustomHostInput = "node.custom.net";
-        vm.UpdateGeneratedInvitation();
+        vm.AvailableExchanges.Should().ContainSingle().Which.Should().Be(_relayEndpoint.ToString());
+        vm.GeneratedInvitationUrl.Should().StartWith("percolator://invite/");
 
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.EndpointHosts.Should().Contain("node.custom.net");
-    }
-
-    [Test]
-    public void UpdateGeneratedInvitation_WithWhitespaceCustomHost_FallsBackToLoopback()
-    {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
-
-        vm.SelectedHostKind = SimulatorAdvertisedHostKind.Custom;
-        vm.CustomHostInput = "   ";
-        vm.UpdateGeneratedInvitation();
-
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.EndpointHosts.Should().Contain("127.0.0.1");
-    }
-
-    [Test]
-    public void UpdateGeneratedInvitation_WithPortPresetDefault_OmitsPortRange()
-    {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
-
-        vm.SelectedPortPreset = PortRangePrivacyPreset.DefaultRange;
-        vm.UpdateGeneratedInvitation();
-
-        vm.GeneratedInvitationUrl.Should().NotContain("&ports=");
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.PortRange.Should().Be(PortRange.DefaultDynamicRange);
-    }
-
-    [Test]
-    public void UpdateGeneratedInvitation_WithPortPresetCustom_EncodesPortRange()
-    {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
-
-        vm.SelectedPortPreset = PortRangePrivacyPreset.CustomRange;
-        vm.CustomPortMin = 6100;
-        vm.CustomPortMax = 6200;
-        vm.UpdateGeneratedInvitation();
-
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.PortRange.Should().NotBeNull();
-        decoded.Value!.PortRange!.MinPort.Should().Be(6100);
-        decoded.Value!.PortRange!.MaxPort.Should().Be(6200);
-    }
-
-    [Test]
-    public void UpdateGeneratedInvitation_WithInvertedCustomPortRange_NormalizesMinAndMax()
-    {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
-
-        vm.SelectedPortPreset = PortRangePrivacyPreset.CustomRange;
-        vm.CustomPortMin = 7000;
-        vm.CustomPortMax = 6500; // inverted
-        vm.UpdateGeneratedInvitation();
-
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.PortRange.Should().NotBeNull();
-        decoded.Value!.PortRange!.MinPort.Should().Be(6500);
-        decoded.Value!.PortRange!.MaxPort.Should().Be(7000);
-    }
-
-    [Test]
-    public void UpdateGeneratedInvitation_WithPortPresetSinglePort_EncodesSinglePort()
-    {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
-
-        vm.SelectedPortPreset = PortRangePrivacyPreset.SinglePort;
-        vm.UpdateGeneratedInvitation();
-
-        var decoded = _codec.Decode(vm.GeneratedInvitationUrl);
-        decoded.IsSuccess.Should().BeTrue();
-        decoded.Value!.PortRange.Should().NotBeNull();
-        decoded.Value!.PortRange!.IsSinglePort.Should().BeTrue();
-        decoded.Value!.PortRange!.MinPort.Should().Be(5155);
-    }
-
-    [Test]
-    public async Task CopyInvitationUrlAsync_ExecutesWithoutError()
-    {
-        var vm = new PersonaInvitationExportFlyoutViewModel(
-            _hostMock.Object,
-            _codec,
-            _toastServiceMock.Object,
-            lanIpOverride: "192.168.1.123");
-
-        var act = () => vm.CopyInvitationUrlAsync();
-        await act.Should().NotThrowAsync();
+        var codec = new PeerInvitationCodec();
+        var decodeResult = codec.Decode(vm.GeneratedInvitationUrl);
+        decodeResult.IsSuccess.Should().BeTrue();
+        decodeResult.Value.IdentityId.Should().Be(_personaId);
+        decodeResult.Value.RelayEndpoint.Should().Be(_relayEndpoint);
+        decodeResult.Value.RoutingToken.Should().Be(routingToken);
     }
 }

@@ -75,7 +75,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
             host.Id,
             host.DisplayName,
             SimulatedNodeType.Persona,
-            $"127.0.0.1:{host.BoundPort} (Direct Loopback)",
+            $"#{host.PublicIdentityId.Value.ToString()[..8]} (Client Persona)",
             IsPinned: true);
 
         _worldState.RegisterPersona(summary, host);
@@ -95,7 +95,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
             _selectionState.SetSecondary(summary);
         }
 
-        _toastService.ShowToast("Persona Spawned", $"Spawned '{host.DisplayName}' on port {host.BoundPort}.", ToastSeverity.Success);
+        _toastService.ShowToast("Persona Spawned", $"Spawned '{host.DisplayName}'.", ToastSeverity.Success);
     }
 
     [RelayCommand]
@@ -130,7 +130,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
                 host.Id,
                 host.DisplayName,
                 SimulatedNodeType.Persona,
-                $"127.0.0.1:{host.BoundPort} (Direct Loopback)",
+                $"#{host.PublicIdentityId.Value.ToString()[..8]} (Client Persona)",
                 IsPinned: true);
 
             _worldState.RegisterPersona(summary, host);

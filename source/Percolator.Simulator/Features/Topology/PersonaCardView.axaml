@@ -97,32 +97,13 @@
                             <StackPanel DataContext="{Binding InvitationExport}" Spacing="8" MinWidth="280" Margin="4">
                                 <TextBlock Text="Share Invitation" FontWeight="Bold" FontSize="12" />
 
-                                <TextBlock Text="Host Candidate:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <ComboBox ItemsSource="{Binding AvailableHostKinds}"
-                                          SelectedItem="{Binding SelectedHostKind}"
+                                <TextBlock Text="Exchange Endpoint:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ComboBox ItemsSource="{Binding AvailableExchanges}"
+                                          SelectedItem="{Binding SelectedExchangeEndpoint}"
                                           HorizontalAlignment="Stretch" />
 
-                                <StackPanel Spacing="4" IsVisible="{Binding IsCustomHostVisible}">
-                                    <TextBlock Text="Custom Host / IP:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                    <TextBox Text="{Binding CustomHostInput}" Watermark="e.g. 192.168.1.50 or myhost.local" />
-                                </StackPanel>
-
-                                <TextBlock Text="Port Privacy Preset:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <ComboBox ItemsSource="{Binding AvailablePortPresets}"
-                                          SelectedItem="{Binding SelectedPortPreset}"
-                                          HorizontalAlignment="Stretch" />
-
-                                <StackPanel Spacing="4" IsVisible="{Binding IsCustomPortVisible}">
-                                    <TextBlock Text="Port Range (Min - Max):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                    <Grid ColumnDefinitions="*,Auto,*">
-                                        <NumericUpDown Grid.Column="0" Value="{Binding CustomPortMin}" Minimum="1" Maximum="65535" FormatString="0" />
-                                        <TextBlock Grid.Column="1" Text=" - " VerticalAlignment="Center" Margin="4,0" />
-                                        <NumericUpDown Grid.Column="2" Value="{Binding CustomPortMax}" Minimum="1" Maximum="65535" FormatString="0" />
-                                    </Grid>
-                                </StackPanel>
-
-                                <TextBlock Text="Generated URL:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <TextBox Text="{Binding GeneratedInvitationUrl}" IsReadOnly="True" FontSize="10" />
+                                <TextBlock Text="Generated URL (percolator://invite/...):" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBox Text="{Binding GeneratedInvitationUrl}" IsReadOnly="True" FontSize="10" TextWrapping="Wrap" MaxHeight="80" />
 
                                 <Button Content="📋 Copy Invitation URL"
                                         Command="{Binding CopyInvitationUrlCommand}"

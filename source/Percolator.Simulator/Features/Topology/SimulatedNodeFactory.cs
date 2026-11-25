@@ -41,9 +41,7 @@ internal sealed class SimulatedNodeFactory : ISimulatedNodeFactory
         var name = string.IsNullOrWhiteSpace(displayName) ? WordPairNameGenerator.Generate() : displayName.Trim();
         var seed = (uint)Random.Shared.Next();
         var identiconBytes = IdenticonGenerator.CreatePng(seed);
-        var port = _portReservationService.AllocateAvailablePort();
-
-        var host = new SimulatedPersonaHost(nodeId, name, identiconBytes, port, _logSink, _stateBus, _worldState, _virtualClock, _chaosController, _portReservationService);
+        var host = new SimulatedPersonaHost(nodeId, name, identiconBytes, _logSink, _stateBus, _worldState, _virtualClock, _chaosController);
         await host.StartAsync(ct);
         return host;
     }

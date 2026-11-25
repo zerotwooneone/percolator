@@ -69,32 +69,13 @@ internal sealed class SimulatorRelayQueryService : ISimulatorRelayQueryService
         var routingBytes = routingToken.ToByteArray();
         return WithContextAsync<IReadOnlyList<SimulatorHostedPreKeyReadModel>>(async dbContext =>
         {
-            var entity = await dbContext.RelayPreKeys
+            var opks = await dbContext.RelayOneTimePreKeys
                 .AsNoTracking()
-                .FirstOrDefaultAsync(k => k.RoutingToken == routingBytes && k.DeviceId == deviceId.Value, ct);
+                .Where(k => k.OwnerRoutingToken == routingBytes && k.DeviceId == deviceId.Value)
+                .OrderBy(k => k.PreKeyId)
+                .ToListAsync(ct);
 
-            if (entity == null || string.IsNullOrEmpty(entity.OneTimePreKeysJson))
-            {
-                return Array.Empty<SimulatorHostedPreKeyReadModel>();
-            }
-
-            try
-            {
-                var dtos = JsonSerializer.Deserialize<List<OpkDto>>(entity.OneTimePreKeysJson);
-                if (dtos == null) return Array.Empty<SimulatorHostedPreKeyReadModel>();
-
-                return dtos.Select(d => new SimulatorHostedPreKeyReadModel(d.KeyId, Convert.FromHexString(d.KeyHex))).ToList();
-            }
-            catch
-            {
-                return Array.Empty<SimulatorHostedPreKeyReadModel>();
-            }
+            return opks.Select(d => new SimulatorHostedPreKeyReadModel(d.PreKeyId, d.PublicKey)).ToList();
         });
-    }
-
-    private sealed class OpkDto
-    {
-        public uint KeyId { get; set; }
-        public string KeyHex { get; set; } = string.Empty;
     }
 }

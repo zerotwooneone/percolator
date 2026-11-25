@@ -65,18 +65,7 @@ internal sealed class RichChatActionCoordinator
             using var scope = actor.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
-            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-            var route = DeliveryRoute.DirectP2P;
-            if (streamRegistry.GetDirectEndpoint(peer.PublicIdentityId) == null && peer.HomeRelay != null)
-            {
-                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
-                var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
-                if (bestRoute != null)
-                {
-                    route = DeliveryRoute.RelayedOneToOne;
-                }
-            }
+            var route = DeliveryRoute.RelayedOneToOne;
 
             var command = new AddReactionCommand(
                 TargetPayloadId: PayloadId.FromGuid(messageId),
@@ -150,18 +139,7 @@ internal sealed class RichChatActionCoordinator
             using var scope = author.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
-            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-            var route = DeliveryRoute.DirectP2P;
-            if (streamRegistry.GetDirectEndpoint(peer.PublicIdentityId) == null && peer.HomeRelay != null)
-            {
-                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
-                var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
-                if (bestRoute != null)
-                {
-                    route = DeliveryRoute.RelayedOneToOne;
-                }
-            }
+            var route = DeliveryRoute.RelayedOneToOne;
 
             var command = new EditMessageCommand(
                 TargetPayloadId: PayloadId.FromGuid(messageId),
@@ -232,18 +210,7 @@ internal sealed class RichChatActionCoordinator
             using var scope = requestedBy.Services.CreateScope();
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
 
-            var streamRegistry = scope.ServiceProvider.GetRequiredService<IStreamRegistryManagement>();
-            var route = DeliveryRoute.DirectP2P;
-            if (streamRegistry.GetDirectEndpoint(peer.PublicIdentityId) == null && peer.HomeRelay != null)
-            {
-                var routingRepo = scope.ServiceProvider.GetRequiredService<IPeerMailboxRoutingRepository>();
-                var now = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>().UtcNow;
-                var bestRoute = await routingRepo.GetBestRouteAsync(peer.PublicIdentityId, now, ct);
-                if (bestRoute != null)
-                {
-                    route = DeliveryRoute.RelayedOneToOne;
-                }
-            }
+            var route = DeliveryRoute.RelayedOneToOne;
 
             var command = new DeleteMessageCommand(
                 TargetPayloadId: PayloadId.FromGuid(messageId),

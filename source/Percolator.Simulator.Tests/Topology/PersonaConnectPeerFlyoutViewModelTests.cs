@@ -29,9 +29,9 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     private SimulatedNodeId _hostNodeId;
     private PublicIdentityId _hostIdentityId;
     private PublicIdentityId _targetIdentityId;
+    private IdentityKey _targetIdentityKey;
     private BlindedRoutingToken _targetRoutingToken;
-    private DeliveryToken _targetDeliveryToken;
-    private Uri _targetEndpoint;
+    private RelayEndpoint _targetRelayEndpoint;
 
     [SetUp]
     public void SetUp()
@@ -39,9 +39,9 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         _hostNodeId = SimulatedNodeId.CreateNew();
         _hostIdentityId = new PublicIdentityId(Guid.NewGuid());
         _targetIdentityId = new PublicIdentityId(Guid.NewGuid());
+        _targetIdentityKey = IdentityKey.FromSpan(new byte[32] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 });
         _targetRoutingToken = new BlindedRoutingToken(Guid.NewGuid());
-        _targetDeliveryToken = DeliveryToken.GenerateRandom();
-        _targetEndpoint = new Uri("https://127.0.0.1:5105");
+        _targetRelayEndpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", 5105);
 
         _hostMock = new Mock<ISimulatedPersonaHost>(MockBehavior.Strict);
         _hostMock.SetupGet(h => h.Id).Returns(_hostNodeId);
@@ -53,34 +53,27 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         _toastServiceMock = new Mock<IStatusToastService>(MockBehavior.Loose);
     }
 
-    [TearDown]
-    public void TearDown()
-    {
-        _targetDeliveryToken.Dispose();
-    }
-
     [Test]
     public async Task ConnectAsync_WithValidDirectInvitation_InitiatesWorkflow()
     {
         var payload = new PeerInvitationPayload(
             _targetIdentityId,
-            _targetRoutingToken,
-            _targetDeliveryToken,
-            new[] { "192.168.1.99" },
-            PortRange.Single(5200));
+            _targetIdentityKey,
+            _targetRelayEndpoint,
+            _targetRoutingToken);
 
         var invitationUrl = _codec.Encode(payload);
 
         _workflowMock.Setup(w => w.ConnectAsync(
+                _hostIdentityId,
                 It.Is<PeerInvitationPayload>(p => p.IdentityId == _targetIdentityId),
                 It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DomainResult<OutboundConnectionResult>.Success(
-                new OutboundConnectionResult(OutboundConnectionStatus.Connected, _targetIdentityId, payload, new Uri("https://192.168.1.99:5200"))));
+                new OutboundConnectionResult(OutboundConnectionStatus.Connected, _targetIdentityId, payload, new Uri("https://127.0.0.1:5105"))));
 
         using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
-            _worldStateMock.Object,
             _codec,
             _workflowMock.Object,
             _toastServiceMock.Object);
@@ -92,6 +85,7 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         vm.ErrorMessage.Should().BeNull();
         vm.InvitationInput.Should().BeEmpty();
         _workflowMock.Verify(w => w.ConnectAsync(
+            _hostIdentityId,
             It.Is<PeerInvitationPayload>(p => p.IdentityId == _targetIdentityId),
             It.IsAny<TimeSpan>(),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -102,7 +96,6 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     {
         using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
-            _worldStateMock.Object,
             _codec,
             _workflowMock.Object,
             _toastServiceMock.Object);
@@ -119,7 +112,6 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     {
         using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
-            _worldStateMock.Object,
             _codec,
             _workflowMock.Object,
             _toastServiceMock.Object);
@@ -131,6 +123,7 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
         vm.ErrorMessage.Should().NotBeNull();
         vm.ErrorMessage.Should().Contain("Invalid invitation");
         _workflowMock.Verify(w => w.ConnectAsync(
+            It.IsAny<PublicIdentityId>(),
             It.IsAny<PeerInvitationPayload>(),
             It.IsAny<TimeSpan>(),
             It.IsAny<CancellationToken>()), Times.Never);
@@ -141,14 +134,14 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
     {
         var payload = new PeerInvitationPayload(
             _targetIdentityId,
-            _targetRoutingToken,
-            _targetDeliveryToken,
-            new[] { "127.0.0.1" },
-            PortRange.Single(5105));
+            _targetIdentityKey,
+            _targetRelayEndpoint,
+            _targetRoutingToken);
 
         var invitationUrl = _codec.Encode(payload);
 
         _workflowMock.Setup(w => w.ConnectAsync(
+                _hostIdentityId,
                 It.IsAny<PeerInvitationPayload>(),
                 It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()))
@@ -157,7 +150,6 @@ public sealed class PersonaConnectPeerFlyoutViewModelTests
 
         using var vm = new PersonaConnectPeerFlyoutViewModel(
             _hostMock.Object,
-            _worldStateMock.Object,
             _codec,
             _workflowMock.Object,
             _toastServiceMock.Object);

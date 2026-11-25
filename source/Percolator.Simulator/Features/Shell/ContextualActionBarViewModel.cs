@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.GroupMessaging;
+using Percolator.Simulator.Features.Pairing;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
 using Percolator.Simulator.Features.Scenarios.Model;
@@ -19,7 +20,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
 {
     private readonly ISelectionStateService _selectionState;
     private readonly IStatusToastService _toastService;
-    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
+    private readonly QuickPairCoordinator _quickPairCoordinator;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly GroupChatCoordinator _groupCoordinator;
     private readonly ISimulatedWorldStateService _worldState;
@@ -40,7 +41,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     public ContextualActionBarViewModel(
         ISelectionStateService selectionState,
         IStatusToastService toastService,
-        DirectHandshakeOrchestrator handshakeOrchestrator,
+        QuickPairCoordinator quickPairCoordinator,
         RelayProvisioningCoordinator relayCoordinator,
         GroupChatCoordinator groupCoordinator,
         ISimulatedWorldStateService worldState,
@@ -49,7 +50,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
     {
         _selectionState = selectionState ?? throw new ArgumentNullException(nameof(selectionState));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
-        _handshakeOrchestrator = handshakeOrchestrator ?? throw new ArgumentNullException(nameof(handshakeOrchestrator));
+        _quickPairCoordinator = quickPairCoordinator ?? throw new ArgumentNullException(nameof(quickPairCoordinator));
         _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
         _groupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
@@ -93,7 +94,7 @@ internal sealed partial class ContextualActionBarViewModel : ViewModelBase
         var secondaryId = _currentSecondary.Id;
 
         await UiTaskRunner.RunAsync(
-            () => _handshakeOrchestrator.InitiateDirectHandshakeAsync(primaryId, secondaryId),
+            () => _quickPairCoordinator.ExecutePairAsync(primaryId, secondaryId),
             category: "Handshake",
             toastService: _toastService);
     }

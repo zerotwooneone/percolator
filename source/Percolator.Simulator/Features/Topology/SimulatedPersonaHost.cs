@@ -83,14 +83,11 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     private readonly EphemeralPrivateKey _identityPrivateKey;
     private readonly EphemeralPrivateKey _signedPreKeyPrivate;
     private IHost? _host;
-    private KestrelPeerTransportServer? _transportServer;
     private IDisposable? _relayQueueSubscription;
     private IDisposable? _activeIdentitySubscription;
     private bool _disposed;
     public SimulatedNodeId Id { get; }
     public string DisplayName { get; private set; }
-    public int BoundPort { get; private set; }
-    public Uri BoundEndpoint { get; private set; }
     public byte[] IdenticonPng { get; private set; }
     public IServiceProvider Services => _host?.Services ?? throw new InvalidOperationException("Host not started.");
     public ReadOnlyReactiveProperty<bool> IsListening => _isListening;
@@ -103,6 +100,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public DeliveryToken MailboxDeliveryToken { get; private set; }
     public DeliveryToken MailboxDrainToken { get; }
     public ISimulatedRelayHost? HomeRelay { get; private set; }
+    public ISimulatedRelayHost? GetPrimaryLinkedRelay() => HomeRelay;
     public ProfileKey ProfileKey { get; private set; }
     public uint ProfileRevision { get; private set; } = 1;
     public bool AllowPeerDiscovery { get; set; } = true;
@@ -126,30 +124,25 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
     public bool AutoAcceptFileTransfers { get; set; } = false;
     public string NodeTempDirectory => _nodeTempDirectory;
     public string NodeDownloadsDirectory { get; }
-    private readonly IPortReservationService _portReservationService;
+
     public SimulatedPersonaHost(
         SimulatedNodeId id,
         string displayName,
         byte[] identiconPng,
-        int port,
         ISimulatorLogSink logSink,
         ISimulatorStateBus stateBus,
         ISimulatedWorldStateService worldState,
         IVirtualClockStateService virtualClock,
-        ISimulatorChaosController chaosController,
-        IPortReservationService portReservationService)
+        ISimulatorChaosController chaosController)
     {
         Id = id;
         DisplayName = displayName;
         IdenticonPng = identiconPng;
-        BoundPort = port;
-        BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         _chaosController = chaosController ?? throw new ArgumentNullException(nameof(chaosController));
-        _portReservationService = portReservationService ?? throw new ArgumentNullException(nameof(portReservationService));
         _masterKeyHandle = MasterKeyHandle.GenerateRandom();
         _nodeTempDirectory = Path.Combine(Path.GetTempPath(), "PercolatorSim", $"node_{Id.Value:N}");
         Directory.CreateDirectory(_nodeTempDirectory);
@@ -202,8 +195,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         {
             // 1. Core infrastructure registration
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
-            services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(BoundPort, allowLoopback: true));
-            services.AddSingleton<Percolator.PluginSdk.INetworkEndpointDiscoveryPort>(_ => new SimulatedNetworkEndpointDiscoveryPort(() => BoundEndpoint));
+            services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(50001, allowLoopback: true));
             services.AddSingleton<IRelayMailboxCapabilityStore, SqliteRelayMailboxCapabilityStore>();
             services.AddSingleton<IDateTimeProvider>(_virtualClock);
 #if WINDOWS
@@ -239,6 +231,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             services.AddScoped<IRoutingCoordinator, RoutingCoordinator>();
             services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
             services.AddScoped<IGroupKeyDistributionService, GroupKeyDistributionService>();
+            services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
             services.AddScoped<IPeerConnectionService>(sp => new PeerConnectionService(
                 PublicIdentityId,
                 DeviceId.Primary,
@@ -246,12 +239,11 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 sp.GetRequiredService<IHandshakeService>(),
                 sp.GetRequiredService<IChannelRepository>(),
                 sp.GetRequiredService<IDateTimeProvider>(),
-                sp.GetRequiredService<IStreamRegistryManagement>(),
                 sp.GetRequiredService<IPeerMailboxRoutingRepository>(),
                 sp.GetRequiredService<IPeerContactRepository>(),
                 sp.GetRequiredService<IEventPublisher>(),
-                sp.GetRequiredService<IInitialHandshakePayloadProvider>()));
-            services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
+                sp.GetRequiredService<IInitialHandshakePayloadProvider>(),
+                sp.GetRequiredService<IOutboundConnectionWorkflow>()));
             // 4b. Simulator-only read-model query services (isolated from core application/domain layers)
             services.AddScoped<ISimulatorChatQueryService, SimulatorChatQueryService>();
             services.AddScoped<ISimulatorRatchetQueryService, SimulatorRatchetQueryService>();
@@ -324,19 +316,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
                 oneTimePreKeys: null);
             await preKeyRepo.SaveAsync(hostedBundle, ct);
         }
-        // 2. Bind Kestrel transport server on the allocated BoundPort before IHostedService startup
-        _transportServer = _host.Services.GetRequiredService<KestrelPeerTransportServer>();
-        if (!_transportServer.IsRunning)
-        {
-            await _transportServer.StartAsync(IPAddress.Any, new PortNumber(BoundPort), ct: ct);
-        }
-        if (_transportServer.BoundPort.HasValue)
-        {
-            BoundPort = _transportServer.BoundPort.Value.Value;
-        }
-
-        BoundEndpoint = new Uri($"percolator://127.0.0.1:{BoundPort}");
-        // 3. Populate IActiveIdentitySet before hosted services start so the drain
+        // 2. Populate IActiveIdentitySet before hosted services start so the drain
         // scheduler's first reconciliation sees this persona; bridge IsListening so a
         // paused persona leaves the active set (scheduler cancels its stream).
         var activeIdentities = _host.Services.GetRequiredService<IActiveIdentitySet>();
@@ -380,7 +360,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             DisplayName,
             Id,
             "HostLifecycle",
-            $"Persona host started and listening on percolator://127.0.0.1:{BoundPort} (Identity: {PublicIdentityId})"));
+            $"Persona host started (Identity: {PublicIdentityId})"));
     }
     public void RotateProfileKey()
     {
@@ -435,8 +415,11 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             var avatarBlobId = BlobId.FromSha256(avatarPkg.CiphertextSha256);
             // Determine target upload endpoint
             var targetRelayUri = HomeRelay?.BoundEndpoint
-                ?? _worldState.GetAllRelayHosts().FirstOrDefault()?.BoundEndpoint
-                ?? BoundEndpoint;
+                ?? _worldState.GetAllRelayHosts().FirstOrDefault()?.BoundEndpoint;
+            if (targetRelayUri == null)
+            {
+                return DomainResult.Failure(new DomainError("NO_RELAY", "No relay available for blob upload."));
+            }
             // 2. Upload avatar blind blob via IRelayBlobClient (UploadBlindBlob over gRPC)
             var uploadBlobResult = await blobClient.UploadBlobAsync(
                 targetRelayUri,
@@ -710,13 +693,13 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         await relayDirectory.LinkIdentityAsync(
             relay.RelayIdentityId, PublicIdentityId, MailboxRoutingToken, MailboxDrainToken, ct).ConfigureAwait(false);
     }
+    public Task StopDrainAsync(CancellationToken ct = default) => SetListeningAsync(false, ct);
+    public Task ResumeDrainAsync(CancellationToken ct = default) => SetListeningAsync(true, ct);
+
     public async Task SetListeningAsync(bool isListening, CancellationToken ct = default)
     {
-        try
-        {
-            await _listeningGate.WaitAsync(ct).ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException)
+        await _listeningGate.WaitAsync(ct).ConfigureAwait(false);
+        if (_disposed)
         {
             return;
         }
@@ -725,35 +708,35 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             _isListening.Value = isListening;
             if (isListening)
             {
-                if (_transportServer is not null && !_transportServer.IsRunning)
+                if (_host is not null && _host.Services.GetService<IActiveIdentitySet>() is { } activeSet)
                 {
-                    await _transportServer.StartAsync(IPAddress.Any, new PortNumber(BoundPort), ct: ct).ConfigureAwait(false);
-                    _logSink.Log(new SimulatorLogEntry(
-                        DateTimeOffset.UtcNow,
-                        LogLevel.Information,
-                        DisplayName,
-                        Id,
-                        "HostLifecycle",
-                        "Ingress resumed (Listening)."));
+                    await activeSet.AddAsync(PublicIdentityId, ct).ConfigureAwait(false);
                 }
                 if (HomeRelay != null)
                 {
                     await DrainMailboxAsync(ct).ConfigureAwait(false);
                 }
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Information,
+                    DisplayName,
+                    Id,
+                    "HostLifecycle",
+                    "Mailbox drain resumed (Listening)."));
             }
             else
             {
-                if (_transportServer is not null && _transportServer.IsRunning)
+                if (_host is not null && _host.Services.GetService<IActiveIdentitySet>() is { } activeSet)
                 {
-                    await _transportServer.StopAsync(ct).ConfigureAwait(false);
-                    _logSink.Log(new SimulatorLogEntry(
-                        DateTimeOffset.UtcNow,
-                        LogLevel.Information,
-                        DisplayName,
-                        Id,
-                        "HostLifecycle",
-                        "Ingress muted (Transport stopped)."));
+                    await activeSet.RemoveAsync(PublicIdentityId, ct).ConfigureAwait(false);
                 }
+                _logSink.Log(new SimulatorLogEntry(
+                    DateTimeOffset.UtcNow,
+                    LogLevel.Information,
+                    DisplayName,
+                    Id,
+                    "HostLifecycle",
+                    "Mailbox drain paused (Offline)."));
             }
         }
         finally
@@ -767,6 +750,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             }
         }
     }
+
     public async ValueTask StopAsync(CancellationToken ct = default)
     {
         _activeIdentitySubscription?.Dispose();
@@ -777,10 +761,6 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         }
         _relayQueueSubscription?.Dispose();
         _relayQueueSubscription = null;
-        if (_transportServer is not null && _transportServer.IsRunning)
-        {
-            await _transportServer.StopAsync(ct);
-        }
         if (_host is not null)
         {
             await _host.StopAsync(ct);
@@ -793,12 +773,12 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
             "HostLifecycle",
             "Persona host stopped."));
     }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
         await StopAsync();
-        _portReservationService.ReleasePort(BoundPort);
         _host?.Dispose();
         _listeningGate.Dispose();
         _drainGate.Dispose();
@@ -820,10 +800,5 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         {
             // Best-effort temporary directory cleanup on node disposal
         }
-    }
-
-    private sealed class SimulatedNetworkEndpointDiscoveryPort(Func<Uri?> endpointProvider) : Percolator.PluginSdk.INetworkEndpointDiscoveryPort
-    {
-        public Uri? GetLocalDirectEndpoint() => endpointProvider();
     }
 }

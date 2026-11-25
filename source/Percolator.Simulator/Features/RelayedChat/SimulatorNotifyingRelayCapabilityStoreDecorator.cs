@@ -119,6 +119,35 @@ internal sealed class SimulatorNotifyingRelayCapabilityStoreDecorator : IRelayMa
         _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "EnvelopeEnqueued"));
     }
 
+    public async ValueTask<DomainResult> EnqueueEnvelopeAsync(
+        BlindedRoutingToken routingToken,
+        DeliveryToken deliveryToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        var result = await _inner.EnqueueEnvelopeAsync(routingToken, deliveryToken, envelope, maxMailboxBytes, ct).ConfigureAwait(false);
+        if (result.IsSuccess)
+        {
+            _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "EnvelopeEnqueued"));
+        }
+        return result;
+    }
+
+    public async ValueTask<DomainResult> EnqueueAuthenticatedInitialAsync(
+        BlindedRoutingToken routingToken,
+        MailboxEnvelope envelope,
+        long maxMailboxBytes,
+        CancellationToken ct = default)
+    {
+        var result = await _inner.EnqueueAuthenticatedInitialAsync(routingToken, envelope, maxMailboxBytes, ct).ConfigureAwait(false);
+        if (result.IsSuccess)
+        {
+            _stateBus.Publish(new SimulatorStateSignal(_nodeId, SignalCategory.RelayQueueChanged, "EnvelopeEnqueued"));
+        }
+        return result;
+    }
+
     public ValueTask<IReadOnlyList<RelayQueuedEnvelopeRecord>> GetEnvelopesAsync(
         BlindedRoutingToken routingToken,
         CancellationToken ct = default)

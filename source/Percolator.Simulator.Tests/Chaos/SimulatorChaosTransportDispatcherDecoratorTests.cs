@@ -9,6 +9,8 @@ using Percolator.Application.Delivery;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.Model;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.Logging;
@@ -46,7 +48,11 @@ public sealed class SimulatorChaosTransportDispatcherDecoratorTests
             new ChannelId(Guid.NewGuid()),
             PublicIdentityId.New(),
             PublicIdentityId.New(),
-            new DeliveryRoute(DeliveryRouteType.DirectP2P, new Uri("https://127.0.0.1:5100"), null),
+            new DeliveryRoute(
+                DeliveryRouteType.RelayedOneToOne,
+                new BlindedRoutingToken(Guid.NewGuid()),
+                RelayEndpoint.FromHostAndPort("127.0.0.1", 5100),
+                DeliveryToken.GenerateRandom()),
             new byte[] { 1, 2, 3, 4 },
             timeProvider).Value!;
     }

@@ -93,6 +93,25 @@ internal sealed class SimulatorNotifyingRelayPreKeyRepositoryDecorator : IRelayP
             Payload: new HostedPreKeyCountPayload(routingToken, 0)));
     }
 
+    public async Task<Percolator.Domain.Identities.ValueObjects.PreKeyBundle?> ConsumePreKeyBundleAsync(
+        BlindedRoutingToken routingToken,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var bundle = await _inner.ConsumePreKeyBundleAsync(routingToken, deviceId, cancellationToken);
+        if (bundle != null)
+        {
+            _availableOpkCounts.AddOrUpdate((routingToken, deviceId), 0, (_, current) => Math.Max(0, current - 1));
+            var remaining = _availableOpkCounts.GetValueOrDefault((routingToken, deviceId), 0);
+            _stateBus.Publish(new SimulatorStateSignal(
+                _nodeId,
+                SignalCategory.HostedPreKeyCountChanged,
+                $"{routingToken}:{remaining}",
+                Payload: new HostedPreKeyCountPayload(routingToken, remaining)));
+        }
+        return bundle;
+    }
+
     public int GetAvailableOpkCount(BlindedRoutingToken routingToken, DeviceId deviceId)
     {
         if (_availableOpkCounts.TryGetValue((routingToken, deviceId), out var count))

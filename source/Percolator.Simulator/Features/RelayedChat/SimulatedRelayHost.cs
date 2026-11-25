@@ -4,6 +4,8 @@ using System.Net;
 using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
+using Percolator.Application.Delivery.Ports;
+using Percolator.Application.Hosting;
 using Percolator.Application.Ports;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -21,6 +23,7 @@ using Percolator.Apps.Discovery.Ports;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
@@ -70,6 +73,8 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private IRelayMailboxCapabilityStore? _chaosCapabilityStore;
     private SimulatorNotifyingRelayPreKeyRepositoryDecorator? _preKeyRepository;
     private SimulatorRelayQueryService? _queryService;
+    private readonly RelayHostingPolicyHolder _policyHolder = new(RelayHostingPolicy.Default);
+    private IExchangeRegistrationModerationService? _moderationService;
     private IRelayPeerDirectory? _peerDirectory;
     private IPrivateRendezvousService? _rendezvousService;
     private WebApplication? _app;
@@ -80,6 +85,12 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public string DisplayName { get; }
     public int BoundPort { get; private set; }
     public Uri BoundEndpoint { get; private set; }
+    public RelayEndpoint Endpoint => RelayEndpoint.FromHostAndPort("127.0.0.1", BoundPort);
+    public RelayHostingPolicy Policy
+    {
+        get => _policyHolder.GetPolicy();
+        set => _policyHolder.UpdatePolicy(value);
+    }
     public IServiceProvider Services => _app?.Services ?? throw new InvalidOperationException("Relay host not started.");
     public PublicIdentityId RelayIdentityId => new(Id.Value);
 
@@ -89,6 +100,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public IRelayQueueChaosController ChaosController => _capabilityStore ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayPeerDirectory PeerDirectory => _peerDirectory ?? throw new InvalidOperationException("Relay host not started.");
     public IPrivateRendezvousService RendezvousService => _rendezvousService ?? throw new InvalidOperationException("Relay host not started.");
+    public IExchangeRegistrationModerationService ModerationService => _moderationService ?? throw new InvalidOperationException("Relay host not started.");
 
     public int TotalHeldEnvelopeCount => _capabilityStore?.TotalEnvelopeCount ?? 0;
     public int TotalHostedOpkCount => _preKeyRepository?.GetTotalHostedOpkCount() ?? 0;
@@ -228,13 +240,31 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             lb.SetMinimumLevel(LogLevel.Warning);
         });
 
-        var unauthEndpoint = UnauthenticatedDeliveryEndpoint.ForRelay(profileRepo, _preKeyRepository, chunkStore, _chaosCapabilityStore);
-        var authEndpoint = new AuthenticatedRelayEndpoint(_chaosCapabilityStore, _preKeyRepository, cryptoEngine);
+        var localAssociationRepo = new SqliteLocalRelayAssociationRepository(contextFactory);
+        var pendingRegistrationRepo = new SqlitePendingMailboxRegistrationRepository(contextFactory);
+        var rateLimiter = new InMemoryAuthenticatedMemberRateLimiter(new AuthenticatedMemberRateLimiterOptions());
+        _moderationService = new ExchangeRegistrationModerationService(pendingRegistrationRepo);
+
+        var unauthEndpoint = new UnauthenticatedDeliveryEndpoint(profileRepo, chunkStore, _chaosCapabilityStore, _policyHolder);
+        var authEndpoint = new AuthenticatedRelayEndpoint(
+            _chaosCapabilityStore,
+            _preKeyRepository,
+            cryptoEngine,
+            _policyHolder,
+            localAssociationRepo,
+            pendingRegistrationRepo,
+            rateLimiter,
+            RelayIdentityId);
         var timeProvider = new SystemDateTimeProvider();
         var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _chaosCapabilityStore, timeProvider, RelayIdentityId);
         var nearbyEndpoint = new NearbyDiscoveryEndpoint(_peerDirectory, _chaosCapabilityStore, _preKeyRepository, _virtualClock, BoundPort, cryptoEngine);
         var rendezvousEndpoint = new PrivateRendezvousRelayEndpoint(_rendezvousService);
 
+        builder.Services.AddSingleton<IRelayHostingPolicyProvider>(_policyHolder);
+        builder.Services.AddSingleton<ILocalRelayAssociationRepository>(localAssociationRepo);
+        builder.Services.AddSingleton<IPendingMailboxRegistrationRepository>(pendingRegistrationRepo);
+        builder.Services.AddSingleton<IAuthenticatedMemberRateLimiter>(rateLimiter);
+        builder.Services.AddSingleton<IExchangeRegistrationModerationService>(_moderationService);
         builder.Services.AddSingleton<IRelayLedgerRepository>(ledgerRepo);
         builder.Services.AddSingleton<IRelayPreKeyRepository>(_preKeyRepository);
         builder.Services.AddSingleton<IRelayMailboxCapabilityStore>(_chaosCapabilityStore);

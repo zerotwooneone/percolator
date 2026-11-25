@@ -300,18 +300,23 @@ internal sealed class RelayProvisioningCoordinator
             // 3. Connect via IOutboundConnectionWorkflow (unifies relay routing capability storage and handshake dispatch)
             var relayEndpoint = RelayEndpoint.FromHostAndPort(relay.BoundEndpoint.Host, relay.BoundPort);
 
+            PeerInvitationPayload payload;
+            using (var targetScope = target.Services.CreateScope())
+            {
+                var invService = targetScope.ServiceProvider.GetRequiredService<IPeerInvitationService>();
+                var inviteResult = await invService.CreatePeerInvitationAsync(target.PublicIdentityId, relayEndpoint, ct).ConfigureAwait(false);
+                if (!inviteResult.IsSuccess)
+                {
+                    _toastService.ShowToast("Invitation Failed", inviteResult.Error.Description, ToastSeverity.Error);
+                    return false;
+                }
+                payload = PeerInvitationPayload.FromDomain(inviteResult.Value);
+            }
+
             using (var scope = initiator.Services.CreateScope())
             {
                 var workflow = scope.ServiceProvider.GetRequiredService<IOutboundConnectionWorkflow>();
-                var payload = new PeerInvitationPayload(
-                    target.PublicIdentityId,
-                    target.MailboxRoutingToken,
-                    target.MailboxDeliveryToken,
-                    new[] { relay.BoundEndpoint.Host },
-                    Percolator.Domain.Identities.ValueObjects.PortRange.Single((ushort)relay.BoundPort),
-                    relayEndpoint);
-
-                var connectResult = await workflow.ConnectAsync(payload, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+                var connectResult = await workflow.ConnectAsync(initiator.PublicIdentityId, payload, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
                 if (!connectResult.IsSuccess)
                 {
                     if (connectResult.Error.Description?.Contains("Unable to consume") == true)

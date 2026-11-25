@@ -30,7 +30,6 @@ internal sealed class DiscoverySimulationCoordinator
     private readonly ISimulatorLogSink _logSink;
     private readonly IStatusToastService _toastService;
     private readonly IVirtualClockStateService _virtualClock;
-    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
 
     private readonly ConcurrentDictionary<PublicIdentityId, List<BlindedRendezvousMatchProto>> _resolvedLocators = new();
@@ -42,7 +41,6 @@ internal sealed class DiscoverySimulationCoordinator
         ISimulatorLogSink logSink,
         IStatusToastService toastService,
         IVirtualClockStateService virtualClock,
-        DirectHandshakeOrchestrator handshakeOrchestrator,
         RelayProvisioningCoordinator relayCoordinator)
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
@@ -50,7 +48,6 @@ internal sealed class DiscoverySimulationCoordinator
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
         _toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
         _virtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
-        _handshakeOrchestrator = handshakeOrchestrator ?? throw new ArgumentNullException(nameof(handshakeOrchestrator));
         _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
     }
 
@@ -138,7 +135,7 @@ internal sealed class DiscoverySimulationCoordinator
         var epoch = new DiscoveryEpoch(_virtualClock.CurrentDiscoveryEpoch);
         var locator = BlindedLocator.Derive(persona.PublicIdentityId, sharedSecret, epoch);
         var descriptor = string.IsNullOrWhiteSpace(routeDescriptor)
-            ? persona.BoundEndpoint.ToString()
+            ? (persona.GetPrimaryLinkedRelay()?.Endpoint.Value ?? relay.Endpoint.Value)
             : routeDescriptor;
 
         using var scope = persona.Services.CreateScope();
@@ -283,7 +280,7 @@ internal sealed class DiscoverySimulationCoordinator
                 }
             }
 
-            return await _handshakeOrchestrator.InitiateDirectHandshakeAsync(initiator.Id, targetHost.Id, ct).ConfigureAwait(false);
+            return await _relayCoordinator.InitiateRelayedHandshakeAsync(initiator.Id, targetHost.Id, null, ct).ConfigureAwait(false);
         }
 
         _logSink.Log(new SimulatorLogEntry(

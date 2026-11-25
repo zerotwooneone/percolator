@@ -12,6 +12,7 @@ using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.Pairing;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Scenarios;
@@ -61,8 +62,9 @@ public partial class App : Avalonia.Application
 
         // 3. Shell & Orchestration Services
         services.AddSingleton<DesignDataService>();
-        services.AddSingleton<DirectHandshakeOrchestrator>();
-        services.AddSingleton<DirectChatCoordinator>();
+        services.AddSingleton<ISimulatorSettingsService, SimulatorSettingsService>();
+        services.AddSingleton<QuickPairCoordinator>();
+        services.AddSingleton<RelayChatCoordinator>();
         services.AddSingleton<AutopilotPongResponder>();
         services.AddSingleton<RelayProvisioningCoordinator>();
         services.AddSingleton<GroupChatCoordinator>();

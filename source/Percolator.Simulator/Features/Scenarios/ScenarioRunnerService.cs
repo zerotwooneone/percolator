@@ -17,6 +17,7 @@ using Percolator.PluginSdk.Events;
 using Percolator.Simulator.Features.DirectChat;
 using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.Logging;
+using Percolator.Simulator.Features.Pairing;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.RichChatAndProfiles;
 using Percolator.Simulator.Features.Scenarios.Model;
@@ -37,8 +38,8 @@ internal sealed class ScenarioRunnerService
 {
     private readonly ISimulatedWorldStateService _worldState;
     private readonly ISimulatorStateBus _stateBus;
-    private readonly DirectHandshakeOrchestrator _handshakeOrchestrator;
-    private readonly DirectChatCoordinator _chatCoordinator;
+    private readonly QuickPairCoordinator _quickPairCoordinator;
+    private readonly RelayChatCoordinator _chatCoordinator;
     private readonly RelayProvisioningCoordinator _relayCoordinator;
     private readonly ISimulatorLogSink _logSink;
     private readonly ISimulatedNodeFactory _nodeFactory;
@@ -55,8 +56,8 @@ internal sealed class ScenarioRunnerService
     public ScenarioRunnerService(
         ISimulatedWorldStateService worldState,
         ISimulatorStateBus stateBus,
-        DirectHandshakeOrchestrator handshakeOrchestrator,
-        DirectChatCoordinator chatCoordinator,
+        QuickPairCoordinator quickPairCoordinator,
+        RelayChatCoordinator chatCoordinator,
         RelayProvisioningCoordinator relayCoordinator,
         ISimulatorLogSink logSink,
         ISimulatedNodeFactory nodeFactory,
@@ -71,7 +72,7 @@ internal sealed class ScenarioRunnerService
     {
         _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         _stateBus = stateBus ?? throw new ArgumentNullException(nameof(stateBus));
-        _handshakeOrchestrator = handshakeOrchestrator ?? throw new ArgumentNullException(nameof(handshakeOrchestrator));
+        _quickPairCoordinator = quickPairCoordinator ?? throw new ArgumentNullException(nameof(quickPairCoordinator));
         _chatCoordinator = chatCoordinator ?? throw new ArgumentNullException(nameof(chatCoordinator));
         _relayCoordinator = relayCoordinator ?? throw new ArgumentNullException(nameof(relayCoordinator));
         _logSink = logSink ?? throw new ArgumentNullException(nameof(logSink));
@@ -447,7 +448,7 @@ internal sealed class ScenarioRunnerService
                 host.Id,
                 host.DisplayName,
                 SimulatedNodeType.Persona,
-                $"127.0.0.1:{host.BoundPort} (Direct Loopback)",
+                $"#{host.PublicIdentityId.Value.ToString()[..8]} (Client Persona)",
                 IsPinned: true);
 
             _worldState.RegisterPersona(summary, host);
@@ -637,10 +638,10 @@ internal sealed class ScenarioRunnerService
                 .FirstAsync(cancellationToken: ct)
             : Task.CompletedTask;
 
-        var success = await _handshakeOrchestrator.InitiateDirectHandshakeAsync(initiator.Id, target.Id, ct);
+        var success = await _quickPairCoordinator.ExecutePairAsync(target.Id, initiator.Id, ct);
         if (!success)
         {
-            throw new ScenarioExecutionException($"InitiateDirectHandshakeAsync failed for '{step.InitiatorAlias}' -> '{step.TargetAlias}'.");
+            throw new ScenarioExecutionException($"InitiateDirectHandshake failed for '{step.InitiatorAlias}' -> '{step.TargetAlias}'.");
         }
 
         if (targetListening)
@@ -665,7 +666,7 @@ internal sealed class ScenarioRunnerService
             .Where(s => s.NodeId == owner.Id && s.Category == SignalCategory.RatchetSessionChanged)
             .FirstAsync(cancellationToken: ct);
 
-        var success = await _handshakeOrchestrator.AcceptHandshakeAsync(owner.Id, sender.PublicIdentityId, ct);
+        var success = await _chatCoordinator.AcceptHandshakeAsync(owner.Id, sender.PublicIdentityId, ct);
         if (!success)
         {
             throw new ScenarioExecutionException($"AcceptHandshakeAsync failed: '{step.OwnerAlias}' could not accept '{step.SenderAlias}'.");
@@ -686,7 +687,7 @@ internal sealed class ScenarioRunnerService
         if (!aliasMap.TryGetValue(step.SenderAlias, out var sender))
             throw new ScenarioExecutionException($"Sender persona '{step.SenderAlias}' not found.");
 
-        var success = await _handshakeOrchestrator.RejectHandshakeAsync(owner.Id, sender.PublicIdentityId, step.Block, ct);
+        var success = await _chatCoordinator.RejectHandshakeAsync(owner.Id, sender.PublicIdentityId, step.Block, ct);
         if (!success)
         {
             throw new ScenarioExecutionException($"RejectHandshakeAsync failed: '{step.OwnerAlias}' rejecting '{step.SenderAlias}'.");
