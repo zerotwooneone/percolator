@@ -1761,291 +1761,251 @@ public void ApplyPolicy()
 
 ---
 
-## Step 16: Inner-Layer Protocol Remediation & Architecture Plan — Discovery & Large File Transfer
+### Step 16: Inner-Layer Protocol Remediation & Architecture Plan — Discovery Removal, Chat Introductions & Large File Transfer
 
 > **Execution Ordering Rule (Inner Layers Before Outer Layers):**
-> Simulator scenarios (`07-peer-discovery.json`, `08-swarm-file-transfer.json`) and Desktop UI for Discovery and File Transfer **MUST NOT** be built or migrated until the inner-layer defects and missing data-plane protocols documented below are resolved in `Percolator.Domain`, `Percolator.Application`, `Percolator.Apps.Discovery`, `Percolator.Apps.FileTransfer`, and `Percolator.Infrastructure`.
+> Downstream Simulator and Desktop UX work for Chat Introductions and Large File Transfer **MUST NOT** be built until the inner-layer deletions, bug fixes, and data-plane protocols documented below are completed in `Percolator.Domain`, `Percolator.Application`, `Percolator.Apps.Chat`, `Percolator.Apps.FileTransfer`, and `Percolator.Infrastructure`.
 >
-> **QMS Lifecycle Gate (`qms-implementation-review-cycle`):** Design Inputs (`RiskRegister.md`, `SystemRequirements.md`, `Requirements.md`, `<Project>/Design.md`) MUST be updated and human-approved *before* any production code in `DISC-*` or `FT-*` is written. Implement **Part A (`DISC-001`..`DISC-005`) first**, then **Part B (`FT-001`..`FT-005`)**, then downstream Simulator/Desktop enablement (`DISC-006`, `FT-006`).
+> **QMS Lifecycle Gate (`qms-implementation-review-cycle`):** Design Inputs (`RiskRegister.md`, `SystemRequirements.md`, `Requirements.md`, `<Project>/Design.md`) MUST be updated and human-approved *before* any production code in `DISC-*`, `INTRO-*`, or `FT-*` is written.
+> - **Phase 1 (`DISC-001`..`DISC-003`):** Delete `Percolator.Apps.Discovery` & Exchange discovery/rendezvous server code + fix [`PreKeyBundleProviderAdapter`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/Adapters/PreKeyBundleProviderAdapter.cs#L132-L137).
+> - **Phase 2 (`FT-001`..`FT-005`):** Build Option 2 Direct P2P File Transfer (`DataChannelDotnet` ICE + STUN + DTLS + SCTP) + Exchange blinded `SwarmTrackerService` & embedded RFC 5389 UDP STUN + optional operator-opt-in zero-disk `TransferPipe` + Group V2 swarming & offline-author seeding while unlocked (zero custom crypto).
+> - **Phase 3 (`INTRO-001`..`INTRO-003` + `FT-006`):** Build E2E Friend-to-Friend Peer Introductions in `Percolator.Apps.Chat` (Ask-Before-Introducing Option A) and downstream Simulator/Desktop UI enablement.
 
 ### 16.1 QMS Impact Analysis (4-Question Rubric)
 
-Both Discovery remediation and File Transfer data-plane completion trigger **upfront QMS updates**:
-
-1. **New Hazards (`RiskRegister.md`):**
-   - **`HAZ-DISCOVERY-IDENTITY-EXPOSURE` (Unwanted Attention, Scraping, and Dogpiling via Opt-In Exchange Discovery Pool):**
-     - *Cause & Harm:* When a user opts a persona into an Exchange's blind discovery pool, their `PublicIdentityId`, `IdentityKey`, and `BlindedRoutingToken` can be handed to other opted-in members of that Exchange. Without authentication, reciprocity, rate limiting, random sampling, per-peer handout caps, lease expiry, and TOFU gating, adversaries could scrape the pool, correlate personas across Exchanges (compounding `HAZ-EXCHANGE-IDENTITY-LINKABILITY`), or flood specific humans with unwanted contact requests.
-     - *Controls:* Dual-sided default-OFF per-Exchange opt-in (`INV-DISCOVERY-DUAL-OPTIN`), **zero search/filter** (blind cryptographically random handout only), **mandatory reciprocity + active Signed PreKey gate** (non-optional invariant: only opted-in peers with published PreKeys can pull others), Exchange-configurable rate limits (`BatchSize`, `QueryCooldown`, `MaxHandoutsPerPeerPerHour`), auto-expiring lease (`MaxLeaseTtl` configurable up to 30 days) with instant opt-out, strict zero-metadata handout (no `DeliveryToken`, no IP, no presence, no plaintext profile/bio, no `ProfileKey`), mandatory `PendingApproval` TOFU staging (`SYS-CONTACT-CONSENT-GATE`), and explicit UI harm warning encouraging dedicated compartmentalized personas (`SYS-ISOLATED-PERSONAS`).
+1. **Discovery Removal & Obsolete Hazards/Requirements (`RiskRegister.md`, `SystemRequirements.md`, `Percolator.Infrastructure/Requirements.md`):**
+   - Because stranger discovery on an untrusted Exchange inherently exposes `RoutingToken ↔ IdentityKey` and creates a scraping/harassment oracle (`HAZ-PREKEY-POOL-STARVATION`, `HAZ-EXCHANGE-IDENTITY-LINKABILITY`), **Path 1** deletes Exchange-hosted stranger discovery completely.
+   - Update `SystemRequirements.md` (`SYS-DISCOVERY-PREKEY-ISOLATION`) and `Percolator.Infrastructure/Requirements.md` (`DEP-INFRA-DISCOVERY-RENDEZVOUS-STORE`) to retire Exchange-hosted discovery/rendezvous tables & RPCs, while preserving `DEP-INFRA-PREKEY-AVAILABILITY` (fixing [`PreKeyBundleProviderAdapter`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/Adapters/PreKeyBundleProviderAdapter.cs#L132-L137) for existing-contact handshakes).
+2. **Chat Peer Introductions (`Percolator.Apps.Chat/Design.md`, `RiskRegister.md`, `SystemRequirements.md`):**
+   - **No new global/exchange hazards:** Introductions travel exclusively inside existing, already-verified Double Ratchet 1:1 channels.
+   - **`HAZ-INTRO-UNSOLICITED-FORWARD` (Contact Card Forwarding Without Consent):** Mitigated by **Ask-Before-Introducing (Option A)**: the introducer sends an E2E consent prompt to the target contact first, only forwarding a freshly returned `PeerInvitation` upon explicit per-introduction approval (`Allow` vs. `Decline`), and keeping recipient `PendingApproval` TOFU staging (`SYS-CONTACT-CONSENT-GATE`) intact on the introduced peer. Zero new fields on [`ProfileMetadata`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.PluginSdk/Profiles/IProfilePorts.cs#L90-L95).
+3. **New File Transfer Hazards & SOUP Evaluation (`RiskRegister.md`, `soup/datachannel-dotnet.md`):**
    - **`HAZ-DIRECT-TRANSFER-IP-DISCLOSURE` (Peer-to-Peer IP Address & Network Topology Disclosure During Direct Bulk Transfer):**
-     - *Cause & Harm:* Direct P2P bulk transfer requires participating peers to exchange reachable network endpoints (LAN IP or public WAN `IP:Port` via STUN/UPnP/TCP simultaneous open), disclosing approximate geolocation, ISP/organization, and—if multiple personas share a host—potentially correlating personas (`UN-ADDRESS-PRIVACY` / `SYS-RELAY-ONLY-CLOAKING` trade-off). In multi-peer swarms, PEX and the blinded tracker expose direct endpoints among participating swarm members.
-     - *Controls:* Direct bulk transfers are restricted strictly to **approved contacts / authorized swarm holders** of the ephemeral `TransferKey` (never unknown/pending peers), messaging/chat/profile traffic remains strictly Exchange-relayed (`SYS-RELAY-ONLY-CLOAKING`), and the UI displays an explicit, unavoidable **IP-disclosure notice** before initiating or accepting any file transfer (*"Direct P2P transfer shares your IP address with `<Contact>` (and swarm participants) to transfer at full speed without relaying through the Exchange."*).
-   - **`HAZ-DIRECT-TRANSFER-LISTENER-EXPOSURE` (Transient Listening Socket Surface for Direct File Transfer):**
-     - *Cause & Harm:* Allowing a Desktop Persona to open a listening socket for inbound P2P file chunks introduces a transient local network attack surface (port scanning, connection floods, or lingering sockets violating `HAZ-PRE-UNLOCK-NETWORK-EXPOSURE`, `HAZ-POST-LOCK-MEMORY-RESIDUE`, and `HAZ-INGRESS-RESOURCE-EXHAUSTION`).
-     - *Controls:* Zero listening ports at startup, while idle, or during chat/group/profile traffic (`SYS-PRE-ACTIVATION-STEALTH`); listener is strictly **ephemeral and session-scoped** (OS-allocated port bound only while an active file transfer session is running), authenticated via TLS 1.3 (cert fingerprint pinned in Double Ratchet `FileTransferOffer`/`Accept`) + constant-time `StreamAuthToken` + `TransferSessionId` within a 5-second handshake deadline, bounded by strict per-session connection caps, and torn down atomically upon transfer completion, pause, cancellation, or vault lock (`SYS-LOCK-TEARDOWN-AND-ZEROIZATION`).
-2. **System Capabilities (`SystemRequirements.md`):**
-   - Add **`SYS-DISCOVERY-HARM-MINIMIZATION`**: Per-Exchange opt-in blind random pool (default OFF on Exchange and Persona), mandatory reciprocity + active Signed PreKey gate, Exchange-configurable rate & anti-dogpiling caps, auto-expiring lease (up to 30 days) with instant opt-out, strict zero-metadata handout (no `DeliveryToken`, no plaintext bio/profile, no `ProfileKey`, no IP, no presence).
-   - Add **`SYS-FILETRANSFER-DIRECT-DATAPLANE-AND-DISCLOSURE`**: Bulk file transfers execute directly peer-to-peer over ephemeral session-scoped TLS 1.3 TCP sockets with zero mandatory bulk relay traffic (relays assist only with lightweight blinded swarm tracking/signaling), require explicit user IP-disclosure notice before send/accept, restrict access strictly to approved contacts / `TransferKey` holders, and guarantee atomic socket teardown on completion, pause, cancel, or vault lock.
-3. **Software Allocations (`Percolator.Infrastructure/Requirements.md`, `Percolator.Desktop/spec/deployable-requirements.md`):**
-   - Update `DEP-INFRA-DISCOVERY-RENDEZVOUS-STORE` → `DEP-INFRA-DISCOVERY-BLIND-POOL-STORE` (delete unused `PrivateRendezvous` dead-drop; enforce authenticated reciprocal queries, random sampling, anti-dogpiling caps, `IdentityKey` + `ExpiresAtUtc` persistence, zero `DeliveryToken`).
-   - Add `DEP-INFRA-FILETRANSFER-DATAPLANE` allocating the Exchange blinded `SwarmTrackerService`, ephemeral session-scoped TLS 1.3 TCP listener/client pool, STUN/UPnP/simultaneous-open NAT traversal, and removal of the broken `RelayTransferPipeClient`.
-   - Update `DEP-DESKTOP-PRE-ACTIVATION-STEALTH` and `DEP-DESKTOP-PERSONA-ISOLATION` to explicitly document the ephemeral session-scoped direct file-transfer socket exception (zero always-on listeners; bound only during active user-initiated/accepted transfers; atomic teardown on lock).
-4. **Architectural Invariants (`Percolator.Apps.Discovery/Design.md`, `Percolator.Apps.FileTransfer/Design.md`):**
-   - Document `INV-DISCOVERY-ZERO-DELIVERY-TOKEN`, `INV-DISCOVERY-MANDATORY-RECIPROCITY`, `INV-DISCOVERY-ZERO-METADATA-HANDOUT`, `DEC-DISCOVERY-BLIND-RANDOM-POOL`, `DEC-FILETRANSFER-DATAPLANE-TRANSPORT` (Option B), and `INV-EPHEMERAL-SESSION-LISTENER`.
+     - *Cause & Harm:* Direct P2P bulk transfer requires participating peers to exchange ICE network candidates (LAN IP and STUN-discovered public WAN `IP:Port`) over their E2E channel, disclosing approximate geolocation, ISP/organization, and—if multiple personas share a host—potentially correlating personas (`UN-ADDRESS-PRIVACY` / `SYS-RELAY-ONLY-CLOAKING` trade-off). In multi-peer Group V2 swarms, ICE signaling and direct DataChannel connections expose direct endpoints among participating group members.
+     - *Controls:* Direct bulk transfers are restricted strictly to **approved contacts / authorized Group V2 swarm peers** holding E2E-negotiated session credentials (never unknown/pending peers), ICE signaling travels strictly over Double Ratchet / Group V2 (never plaintext on the Exchange), chat/group/profile traffic remains strictly Exchange-relayed (`SYS-RELAY-ONLY-CLOAKING`), and the UI displays an explicit, unavoidable **IP-disclosure notice** before initiating or accepting any file transfer (*"Direct P2P transfer shares your IP address with `<Contact>` (and group swarm participants) to transfer at full speed without relaying through the Exchange."*).
+   - **`HAZ-DIRECT-TRANSFER-LISTENER-EXPOSURE` (Transient UDP/ICE Socket Surface for Direct File Transfer & Seeding):**
+     - *Cause & Harm:* Allowing a Desktop Persona to open ephemeral UDP/ICE sockets for P2P file transfer and post-download seeding introduces a transient local network attack surface (UDP floods, stale sockets violating `HAZ-PRE-UNLOCK-NETWORK-EXPOSURE`, `HAZ-POST-LOCK-MEMORY-RESIDUE`, and `HAZ-INGRESS-RESOURCE-EXHAUSTION`).
+     - *Controls:* Zero listening ports at startup, while idle, or during chat/group/profile traffic (`SYS-PRE-ACTIVATION-STEALTH`); UDP ICE agents are strictly **ephemeral and transfer-scoped**, authenticated via **standard DTLS** (both peers' ephemeral cert SHA-256 fingerprints pinned strictly from Double Ratchet / Group V2 `FileTransferOffer`/`Accept`/`PeerJoin`, zero cert trust on tracker) and bounded by per-session peer/connection caps. Completed downloads may continue seeding **only while the app remains unlocked** (until manually stopped or seeding TTL expires), and all ICE agents, sockets, and tracker registrations tear down atomically upon cancellation, pause, or vault lock (`SYS-LOCK-TEARDOWN-AND-ZEROIZATION`).
+   - **Class C SOUP Specification (`soup/datachannel-dotnet.md` per `spec/soup-spec.md`):**
+     - `DataChannelDotnet` (`libdatachannel` + `libjuice`, MIT/MPL-2.0) is a native C/C++ network/DTLS transport primitive and MUST be documented as a **Class C SOUP** item, strictly quarantined inside `Percolator.Infrastructure` behind abstract transport ports (zero vendor types or native handles in `Domain`/`Application`/`Apps.FileTransfer`; unused WebRTC media/RTP/SRTP/audio/video surfaces explicitly excluded).
+4. **File Transfer System Capabilities & Allocations (`SystemRequirements.md`, `Percolator.Infrastructure/Requirements.md`, `Percolator.Desktop/spec/deployable-requirements.md`, `Percolator.Apps.FileTransfer/Design.md`):**
+   - Add **`SYS-FILETRANSFER-DIRECT-DATAPLANE-AND-DISCLOSURE`**: Bulk file transfers execute directly peer-to-peer over ephemeral session-scoped ICE + STUN + DTLS + SCTP DataChannels (with zero mandatory bulk relay traffic, optional operator-opt-in zero-disk encrypted `TransferPipe` fallback for symmetric NATs, and lightweight RAM-only blinded swarm presence tracking + stateless UDP STUN on the Exchange), validate every chunk against standard SHA-256 Merkle trees negotiated over Double Ratchet / Group V2 (`INV-VERIFY-BEFORE-WRITE`), support offline-author group seeding while the app stays unlocked with Group V2 eviction cert pruning, require explicit user IP-disclosure notice before send/accept, and guarantee atomic socket teardown on stop, cancel, or vault lock.
+   - Add **`DEP-INFRA-FILETRANSFER-DATAPLANE`**: Allocates the quarantined `DataChannelDotnet` ICE/DTLS/SCTP transport adapter, Exchange blinded `SwarmTrackerService`, embedded stateless RFC 5389 UDP STUN responder, optional operator-opt-in zero-disk `TransferPipe` (TLS 1.3 mTLS passthrough with bounded RAM ring buffer and quotas), and deletes broken `RelayTransferPipeClient` & custom `ChunkCryptoService`.
+   - Update **`DEP-DESKTOP-PRE-ACTIVATION-STEALTH`** & **`DEP-DESKTOP-PERSONA-ISOLATION`**: Document the ephemeral transfer/seeding-scoped ICE socket exception (zero always-on listeners; bound only during active user-initiated/accepted transfers or unlocked seeding; atomic teardown on vault lock).
 
 ---
 
-### 16.2 Part A — Privacy-Preserving Peer Discovery (Per-Exchange Blind Random Pool)
+### 16.2 Part A — Path 1: Delete Exchange Stranger Discovery & Fix `PreKeyBundleProviderAdapter`
 
-#### Architectural Design (Locked)
-Percolator intentionally uses a **two-tier model** and **deletes** the unused `PrivateRendezvous` dead-drop mechanism (which had zero production client, accepted unauthenticated plaintext `RouteDescriptor`s, and required a pre-shared out-of-band secret that already sufficed for a `PeerInvitation`):
+#### Rationale (Privacy-First Architecture)
+Academic and protocol audit confirms that stranger discovery on a single untrusted relay forces an unavoidable trade-off (`RoutingToken ↔ IdentityKey`, Sybil scraping, cross-Exchange correlation). Removing Exchange-hosted stranger discovery preserves Percolator's core privacy model: new connections bootstrap strictly via out-of-band `PeerInvitation` (`percolator://invite/...`) or E2E Friend-to-Friend Chat Introductions (`Part C`), with **zero custom discovery crypto**.
 
-| Tier | Mechanism | Relay Sees | Other Peers See | Scraping / Harassment Risk | Default Posture |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Tier 0** | Out-of-band `PeerInvitation` (`percolator://invite/...`) | Nothing until 1st handshake (`HAZ-FIRST-CONTACT-ASSOCIATION`) | Only whoever you manually give the link | **Zero** (capability-only) | **Default** |
-| **Tier 1** | **Per-Exchange Blind Random Pool** (`NearbyDiscoveryService`) | Registered `PublicIdentityId`, `IdentityKey`, `RoutingToken`, `ExpiresAtUtc` (zero plaintext bio/profile, zero `ProfileKey`) | Only other **opted-in, PreKey-published** members of *that specific Exchange* receiving a rate-limited, cryptographically random sample of `(PeerId, IdentityKey, RoutingToken, RelayEndpoint)` — **no search, no `DeliveryToken`, no IP, no presence, no profile** | **Minimized** — no targeted lookup/stalking oracle, mandatory reciprocity, per-peer anti-dogpiling cap, auto-expiring lease (max 30d), asymmetric X3DH profile reveal (initiator reveals profile to recipient in 0-RTT; recipient's encrypted profile stays hidden until `Approve`), wire-indistinguishable Reject/Block | **OFF by default** on `RelayHostingPolicy.HostManaged` and on every Persona |
-
-#### Asymmetric Encrypted-Profile Consent Flow (Choice A — Strict Zero-Metadata)
-- Real profiles are stored on Exchanges as opaque 1040-byte AES-GCM ciphertexts (`ProfileCiphertextPackage`) indexed by `BlindedProfileLocator = HMAC(IdentityKey, ProfileKey)`. They are **never** accessible before handshake, and `ProfileKey` is **never** placed in the discovery pool.
-- When Alice pulls Bob from the blind pool, Alice sees **only** `(PeerId, IdentityKey, RoutingToken, RelayEndpoint)`.
-- When Alice chooses to connect, `ChatInitialPayloadProvider` attaches **Alice's** `ProfileKey` inside the 0-RTT encrypted X3DH initial payload. **Bob** decrypts Alice's profile while deciding whether to `Approve`, `Reject`, or `Block` the `PendingApproval` contact request — while **Bob's** encrypted profile remains completely hidden from Alice unless Bob clicks `Approve`.
-
-#### Root Causes Fixed in Part A
-1. `NearbyDiscoveryEndpoint` leaks secret `DeliveryToken` publicly and discards verified `IdentityKey`.
-2. `NearbyPeerDiscoveryWorkflow.ConnectToDiscoveredPeerAsync` hardcodes `relayEndpoint: null`, guaranteeing `MISSING_RELAY_ENDPOINT`, and fails to persist `RoutingToken`.
-3. `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` passes remote `peerId` as `requesterId` to `FetchAuthenticatedAsync`, guaranteeing `EXCHANGE_NOT_LINKED`.
-4. `NearbyDiscoveryEndpoint` is never mapped in production `KestrelPeerTransportServer`, never enforces `RelayFeatureFlags.Discovery`, never authenticates `QueryNearby`, never enforces reciprocity/PreKeys/rate limits, and returns deterministic slices instead of random anti-dogpiled samples.
-5. `DiscoveryQueryClient` resolves relay URI via `IPeerMailboxRoutingRepository` instead of `IRelayDirectory`.
-6. Dead/unused `PrivateRendezvous` code (`PrivateRendezvousRelayEndpoint`, `SqlitePrivateRendezvousService`, `Features/PrivateRendezvous/*`) carries unauthenticated plaintext route-publishing surface with zero production client.
-
----
-
-#### Ticket `DISC-001` — Upfront QMS Updates for Blind-Pool Discovery & `PrivateRendezvous` Removal
-- **Layer / Scope:** QMS Design Inputs (`RiskRegister.md`, `SystemRequirements.md`, `Percolator.Infrastructure/Requirements.md`, `Percolator.Apps.Discovery/Design.md`)
-- **QMS Links:** Adds `HAZ-DISCOVERY-IDENTITY-EXPOSURE`, `SYS-DISCOVERY-HARM-MINIMIZATION`; updates `DEP-INFRA-DISCOVERY-BLIND-POOL-STORE`, `INV-DISCOVERY-DUAL-OPTIN`, `INV-DISCOVERY-ZERO-DELIVERY-TOKEN`, `INV-DISCOVERY-MANDATORY-RECIPROCITY`, `INV-DISCOVERY-ZERO-METADATA-HANDOUT`.
+#### Ticket `DISC-001` — Upfront QMS Updates for Discovery Retirement
+- **Layer / Scope:** QMS Design Inputs (`RiskRegister.md`, `SystemRequirements.md`, `Percolator.Infrastructure/Requirements.md`) + delete obsolete `Percolator.Apps.Discovery/Design.md` & `Percolator.Apps.Discovery/README.md` in `DISC-002`.
 - **Implementation Details:**
-  - Add `HAZ-DISCOVERY-IDENTITY-EXPOSURE` to `RiskRegister.md` (`S3 / L3` initial → `S3 / L1` residual via blind random sampling, mandatory reciprocity + PreKey gate, per-peer handout cap, zero-metadata handout, TOFU approval gate, and compartmentalized-persona warning).
-  - Add `SYS-DISCOVERY-HARM-MINIMIZATION` to `SystemRequirements.md` Section 2 referencing `HAZ-DISCOVERY-IDENTITY-EXPOSURE`, `HAZ-PREKEY-POOL-STARVATION`, and `HAZ-EXCHANGE-IDENTITY-LINKABILITY`.
-  - Update `Percolator.Infrastructure/Requirements.md` and `Percolator.Apps.Discovery/Design.md` to remove `PrivateRendezvous` / `BlindedContactsOnly` references and specify the Per-Exchange Blind Random Pool invariants and `DiscoveryPoolPolicy` bounds (including 30-day max lease TTL).
-  - Run `pwsh -File scripts/validate-qms-compliance.ps1` to confirm traceability links pass before writing code.
+  - Retire/update `DEP-INFRA-DISCOVERY-RENDEZVOUS-STORE` and `SYS-DISCOVERY-PREKEY-ISOLATION` references cleanly (ensuring [`validate-qms-compliance.ps1`](file:///C:/Users/squir/source/repos/percolator/source/scripts/validate-qms-compliance.ps1) has zero broken tags/links).
+  - Run `pwsh -File scripts/validate-qms-compliance.ps1` and get human sign-off prior to `DISC-002`.
 - **Acceptance Criteria:**
-  - [ ] QMS documents updated and approved by human reviewer prior to `DISC-002`.
+  - [ ] QMS documents updated and approved prior to code deletion.
   - [ ] `scripts/validate-qms-compliance.ps1` passes with 0 errors.
 
-#### Ticket `DISC-002` — Delete `PrivateRendezvous`, Harden Discovery Domain/Policy & Wire Protocol
-- **Layer / Scope:** `Percolator.Domain` (`RelayHostingPolicy`, new `DiscoveryPoolPolicy`), `Percolator.Apps.Discovery`, `Percolator.Infrastructure/Protos/discovery.proto`, `Percolator.Infrastructure/Transport/DiscoveryWireFraming.cs`
-- **QMS Links:** `SYS-DISCOVERY-PREKEY-ISOLATION`, `SYS-DISCOVERY-HARM-MINIMIZATION`, `SYS-CONTACT-CONSENT-GATE`, `HAZ-DISCOVERY-IDENTITY-EXPOSURE`, `HAZ-PREKEY-POOL-STARVATION`.
+#### Ticket `DISC-002` — Remove `Percolator.Apps.Discovery`, Exchange Discovery Endpoints, Protos & Schema
+- **Layer / Scope:** `Percolator.sln`, `Percolator.Domain` (`RelayFeatureFlags`), `Percolator.Apps.Discovery` (delete project), `Percolator.Apps.Discovery.Tests` (delete project), `Percolator.Infrastructure` (`Protos/discovery.proto`, `NearbyDiscoveryEndpoint`, `PrivateRendezvousRelayEndpoint`, `DiscoveryWireFraming`, `DiscoveryQueryClient`, `SqliteRelayPeerDirectory`, `SqlitePrivateRendezvousService`, `RelayDiscoveryRegistrationPruner`, EF Core migration)
+- **QMS Links:** `DEP-INFRA-VAULT-SCHEMA-MIGRATION`, `SYS-VAULT-UPGRADE-DATA-PRESERVATION`.
 - **Implementation Details:**
-  - **Delete Dead `PrivateRendezvous` Code Completely:**
-    - Remove `Percolator.Apps.Discovery/Features/PrivateRendezvous/*`, `Percolator.Apps.Discovery.Tests/PrivateRendezvous/*`, `Percolator.Apps.Discovery.Tests/TestDoubles/PrivateRendezvousService.cs`, `PrivateRendezvousRelayEndpoint.cs`, `SqlitePrivateRendezvousService.cs`, `SqlitePrivateRendezvousServiceTests.cs`, `PrivateRendezvousRelayService` (and its messages) from `discovery.proto`, DI registrations in `InfrastructureServiceCollectionExtensions.cs`, Kestrel mapping in `KestrelPeerTransportServer.cs`, and references in `Percolator.Simulator` (`ISimulatedRelayHost`, `SimulatedRelayHost`, `RemoteRelayHost`, `VirtualClockStateService`, `DiscoverySimulationCoordinator`).
-    - Simplify `RelayDiscoveryPolicy` enum to `Disabled = 0`, `BlindRandomPool = 1` (removing `BlindedContactsOnly` and ambiguous `Open`).
-  - **Relay-Configurable `DiscoveryPoolPolicy` (value object on `RelayHostingPolicy`):**
-    - `BatchSize`: default `3`, valid range `[1 .. 10]`.
-    - `QueryCooldown`: default `TimeSpan.FromMinutes(5)`, minimum `TimeSpan.FromSeconds(5)` (configurable lower in tests via policy).
-    - `MaxLeaseTtl`: default `TimeSpan.FromDays(7)`, hard ceiling `TimeSpan.FromDays(30)` (1 month), minimum `TimeSpan.FromMinutes(5)`.
-    - `MaxHandoutsPerPeerPerHour`: default `10`, valid range `[1 .. 1000]` (anti-dogpiling cap).
-    - Note: **Reciprocity & Active PreKey are NOT configurable toggles** — they are hard protocol invariants (`INV-DISCOVERY-MANDATORY-RECIPROCITY`).
-  - **`Percolator.Infrastructure/Protos/discovery.proto`:**
-    - `DiscoveryRegistrationProto`: **remove `delivery_token`**; add `bytes drain_token` (32-byte mailbox ownership proof) and `int64 lease_duration_seconds` (clamped by Exchange to `[300 .. policy.MaxLeaseTtl]`, max 30 days = `2,592,000`). Update canonical Ed25519 signature payload to `PeerId || Visibility || TimestampUnixMs || LeaseDurationSeconds || RoutingToken`.
-    - `PeerDiscoveryDescriptorProto`: **remove `delivery_token`**; **add `bytes identity_key = 5`** (32-byte Ed25519 key verified on registration) and `int64 expires_at_unix_ms = 6`. Strict zero-metadata: zero IP, zero presence, zero nickname/bio, zero `ProfileKey`.
-    - `NearbyDiscoveryQueryProto`: add `bytes caller_routing_token = 3` (16 bytes), `bytes caller_drain_token = 4` (32 bytes), and `string caller_peer_id = 5` (bound to authenticated mailbox) so the Exchange verifies caller authentication, active opt-in lease, active Signed PreKey, and per-caller cooldown. Clamp `requested_limit` to `policy.BatchSize`.
-  - **`Percolator.Apps.Discovery`:**
-    - `RelayPeerRegistration` & `PeerDiscoveryDescriptor`: remove `DeliveryToken`; add `IdentityKey` and `ExpiresAtUtc`.
-    - `DiscoveryAdmissionGate`: enforce both registration admission (`RelayDiscoveryPolicy.BlindRandomPool`, `Visibility == Discoverable`, authenticated mailbox, active Signed PreKey) AND **query admission** (`EvaluateQueryAdmission`: caller has active non-expired `Discoverable` lease AND active Signed PreKey on this Exchange).
-    - `DiscoveryWireFraming.BuildVisibilitySignaturePayload`: update binary framing (remove `deliveryToken`, add `leaseDurationSeconds`).
+  - Remove `Percolator.Apps.Discovery` and `Percolator.Apps.Discovery.Tests` projects from `Percolator.sln` and delete their directories cleanly (git history preserves everything).
+  - Delete `Percolator.Infrastructure/Protos/discovery.proto`, `NearbyDiscoveryEndpoint.cs`, `PrivateRendezvousRelayEndpoint.cs`, `DiscoveryWireFraming.cs`, `DiscoveryQueryClient.cs`, `SqliteRelayPeerDirectory.cs`, `SqlitePrivateRendezvousService.cs`, `RelayDiscoveryRegistrationPruner.cs`, and all corresponding `Percolator.Infrastructure.Tests` / `Percolator.Simulator` references (note `RelayFeatureFlags.Discovery` removal in `Percolator.Domain/Delivery/Hosting/RelayHostingPolicy.cs`).
+  - Remove DI registrations in `InfrastructureServiceCollectionExtensions.cs` and gRPC endpoint mappings in `KestrelPeerTransportServer.cs`.
+  - Add an EF Core additive/safe schema migration dropping obsolete `RelayPeerDirectory` and `PrivateRendezvousEntries` tables without disturbing any mailbox/ratchet/contact data (`SYS-VAULT-UPGRADE-DATA-PRESERVATION`).
 - **Acceptance Criteria:**
-  - [ ] Zero references to `PrivateRendezvous` or `DeliveryToken` remain in `Percolator.Apps.Discovery` or `discovery.proto`.
-  - [ ] `DiscoveryPoolPolicy` validates `MaxLeaseTtl <= 30 days`, `BatchSize in [1..10]`, `MaxHandoutsPerPeerPerHour >= 1`, and enforces non-optional reciprocity + PreKey invariants.
-  - [ ] `PeerDiscoveryDescriptor` carries strictly `(PeerId, IdentityKey, RelayEndpoint, RoutingToken)` — zero plaintext bio/profile or secret tokens.
+  - [ ] Zero references to `Percolator.Apps.Discovery`, `NearbyDiscoveryService`, `PrivateRendezvous`, or `DiscoveryWireFraming` remain anywhere in the solution.
+  - [ ] `dotnet build Percolator.sln` succeeds with zero warnings/errors.
 
-#### Ticket `DISC-003` — Fix `NearbyPeerDiscoveryWorkflow` & `PreKeyBundleProviderAdapter` Bugs
-- **Layer / Scope:** `Percolator.Apps.Discovery`, `Percolator.Application`, `Percolator.Infrastructure/Adapters/PreKeyBundleProviderAdapter.cs`
-- **QMS Links:** `SYS-DISCOVERY-PREKEY-ISOLATION`, `SYS-KEY-CHANGE-TRUST-HALT`, `DEP-INFRA-PREKEY-AVAILABILITY`, `HAZ-KEY-SUBSTITUTION-MITM`.
+#### Ticket `DISC-003` — Fix `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` Bug
+- **Layer / Scope:** `Percolator.Application` (`IPreKeyBundleProvider`, `PeerConnectionService`), `Percolator.Infrastructure` (`PreKeyBundleProviderAdapter`)
+- **QMS Links:** `DEP-INFRA-PREKEY-AVAILABILITY`, `SYS-CONTACT-CONSENT-GATE`.
 - **Implementation Details:**
-  - **`Percolator.Apps.Discovery/Features/NearbyPeerDiscovery/NearbyPeerDiscoveryWorkflow.cs`:**
-    - Update `ConnectToDiscoveredPeerAsync`: validate `candidate.IdentityKey != null`, `candidate.RelayEndpoint != null`, and `candidate.RoutingToken.HasValue`.
-    - Construct `PeerInvitation.Create(candidate.PeerId, candidate.IdentityKey, candidate.RelayEndpoint, candidate.RoutingToken.Value)` and invoke `_connectionService.ConnectWithInvitationAsync(localOwnerId, invitation, ct)`.
-    - Routes every discovered-peer handshake through `OutboundConnectionWorkflow.ConnectAsync`: verifies blocked/key-change safety → fetches consumable `PreKeyBundle` via authenticated `FetchPreKeyBundle` → pins fetched `IdentityKey` + SPK signature against directory-advertised `IdentityKey` → persists `PeerMailboxRoutingCapability` (`TargetDeliveryToken = null`) → sends 4-DH `PreKeyMessage` with initiator's 0-RTT encrypted `ProfileCapabilityDto` via rate-limited `SendInitialHandshake` → stages in recipient's `PendingApproval` inbox.
-  - **`Percolator.Infrastructure/Adapters/PreKeyBundleProviderAdapter.cs`:**
-    - Fix `FetchConsumableBundleAsync` bug (line 136): add explicit `PublicIdentityId requesterId` parameter on `IPreKeyBundleProvider.FetchConsumableBundleAsync` so it NEVER passes remote `peerId` as `requesterId` to `FetchAuthenticatedAsync`.
-    - Update `PeerConnectionService.ConnectToPeerAsync` to pass `_localIdentityId` as `requesterId`.
+  - Fix [`PreKeyBundleProviderAdapter.FetchConsumableBundleAsync`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/Adapters/PreKeyBundleProviderAdapter.cs#L132-L137): currently passes the remote `peerId` as `requesterId` to `FetchAuthenticatedAsync`, guaranteeing `EXCHANGE_NOT_LINKED`.
+  - Add explicit `PublicIdentityId requesterId` parameter to `IPreKeyBundleProvider.FetchConsumableBundleAsync` and update [`PeerConnectionService.ConnectToPeerAsync`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application/Services/PeerConnectionService.cs#L156) to pass `_localIdentityId` as `requesterId`.
+  - Verify existing integration/unit tests cover `PeerConnectionService.ConnectToPeerAsync` authenticating with the local caller's mailbox tokens and targeting the remote peer's `RoutingToken`.
 - **Acceptance Criteria:**
-  - [ ] `NearbyPeerDiscoveryWorkflow.ConnectToDiscoveredPeerAsync` never passes `relayEndpoint: null` and delegates to `ConnectWithInvitationAsync`.
-  - [ ] `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` resolves caller mailbox tokens using local `requesterId` and passes remote `routingCapability.RoutingToken` as `targetRoutingToken`.
-
-#### Ticket `DISC-004` — Exchange Blind-Pool Server Wiring, Random Anti-Dogpiling Sampler, Schema Migration & Client Adapters
-- **Layer / Scope:** `Percolator.Infrastructure` (`KestrelPeerTransportServer`, `NearbyDiscoveryEndpoint`, `DiscoveryQueryClient`, `SqliteRelayPeerDirectory`, `PercolatorDbContext` migration, new `GrpcDiscoveryRegistrationClient`, new `DiscoveryHandoutRateTracker`)
-- **QMS Links:** `DEP-INFRA-DISCOVERY-BLIND-POOL-STORE`, `DEP-INFRA-VAULT-SCHEMA-MIGRATION`, `SYS-PRE-CRYPTO-INGRESS-PROTECTION`, `SYS-BOUNDED-RELAY-QUOTAS`, `SYS-BLINDED-RELAY-ENVELOPES`.
-- **Implementation Details:**
-  - **EF Core Versioned Migration (`SYS-VAULT-UPGRADE-DATA-PRESERVATION`):**
-    - Update `RelayPeerDirectoryEntity`: drop `DeliveryToken`, add `IdentityKey` (`byte[]`, 32 bytes) and `ExpiresAtUtc` (`DateTimeOffset`); drop obsolete `PrivateRendezvousEntries` table via clean additive/safe migration.
-  - **`NearbyDiscoveryEndpoint`:**
-    - Non-nullable constructor DI for `IRelayHostingPolicyProvider`, `IPreKeyAvailabilityPort`, `IAuthenticatedMemberRateLimiter`, `IDiscoveryHandoutRateTracker`, and `IDateTimeProvider`.
-    - **`RegisterVisibility`:**
-      - Reject (`PermissionDenied`) if `!policy.IsFeatureEnabled(RelayFeatureFlags.Discovery)` or `policy.DiscoveryPolicy != RelayDiscoveryPolicy.BlindRandomPool`.
-      - Authenticate caller mailbox via `VerifyDrainTokenAsync(routingToken, drainToken)` + verify Ed25519 signature + verify caller owns an **active Signed PreKey bundle** whose `IdentityKey == request.IdentityKey` (`FailedPrecondition` if PreKey missing).
-      - If `Visibility == Hidden`, delete caller's directory row immediately (instant opt-out).
-      - If `Visibility == Discoverable`, clamp `LeaseDurationSeconds` to `[300 .. policy.DiscoveryPool.MaxLeaseTtl]` (max 30 days) and persist `(PeerId, IdentityKey, RoutingToken, ExpiresAtUtc)`.
-    - **`QueryNearby`:**
-      - Reject (`PermissionDenied`) if `!policy.IsFeatureEnabled(RelayFeatureFlags.Discovery)` or `policy.DiscoveryPolicy != RelayDiscoveryPolicy.BlindRandomPool`.
-      - Authenticate caller via `VerifyDrainTokenAsync(callerRoutingToken, callerDrainToken)`.
-      - **Mandatory Reciprocity & PreKey Gate:** Verify caller currently holds a **non-expired `Discoverable` registration** on this Exchange AND currently has an **active Signed PreKey bundle** published on this Exchange (`FailedPrecondition` if either is absent).
-      - Enforce per-caller `QueryCooldown` (`StatusCode.ResourceExhausted` if called before cooldown elapses).
-      - Query non-expired opted-in peers excluding caller, filter out candidates that have hit `MaxHandoutsPerPeerPerHour` in the sliding 1-hour window, select up to `min(requested_limit, policy.DiscoveryPool.BatchSize)` candidates using **`RandomNumberGenerator` Fisher-Yates sampling** (never deterministic `ORDER BY`), record handout counts, and return `(PeerId, IdentityKey, RoutingToken, ExpiresAtUtc)` (zero `DeliveryToken`).
-  - **`KestrelPeerTransportServer`:**
-    - Register `IGrpcServiceActivator<NearbyDiscoveryEndpoint>` and call `app.MapGrpcService<NearbyDiscoveryEndpoint>()` (and remove `PrivateRendezvousRelayEndpoint`).
-  - **Client Ports & Adapters:**
-    - Fix `DiscoveryQueryClient`: inject `IRelayDirectory` (instead of `IPeerMailboxRoutingRepository`), resolve Exchange URI and caller `(RoutingToken, DrainToken)` for `requesterId`, and dial over `ChannelPoolKind.Authenticated`.
-    - Add `IDiscoveryRegistrationClient` (`GrpcDiscoveryRegistrationClient`) on `ChannelPoolKind.Authenticated` for per-Exchange opt-in (`Discoverable` + lease duration) and instant opt-out (`Hidden`).
-- **Acceptance Criteria:**
-  - [ ] `KestrelPeerTransportServer` maps `NearbyDiscoveryEndpoint` and enforces `RelayFeatureFlags.Discovery` dynamically on hot-reload.
-  - [ ] A peer who is `Hidden`, has an expired lease, or has no active Signed PreKey on the Exchange is rejected on `QueryNearby` (`FailedPrecondition`).
-  - [ ] Sampling uses `RandomNumberGenerator` and enforces `QueryCooldown`, `BatchSize`, and `MaxHandoutsPerPeerPerHour` anti-dogpiling caps.
-
-#### Ticket `DISC-005` — Inner-Layer Blind-Pool Discovery Unit + Round-Trip Integration Tests
-- **Layer / Scope:** `Percolator.Apps.Discovery.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.ApplicationIntegrationTests`
-- **QMS Links:** `[Verify: Unit]` & `[Verify: Integration]` for `SYS-DISCOVERY-PREKEY-ISOLATION`, `SYS-DISCOVERY-HARM-MINIMIZATION`, `DEP-INFRA-DISCOVERY-BLIND-POOL-STORE`.
-- **Test Plan (Zero Fake Stubs; Real Loopback TLS 1.3 gRPC):**
-  - **Reciprocity & Admission Matrix:** `RelayFeatureFlags.Discovery == false` rejects; `Hidden` caller querying returns `FailedPrecondition`; opted-in caller whose PreKeys expired/missing returns `FailedPrecondition`; opting in without PreKeys returns `FailedPrecondition`; lease > 30 days clamped to 30 days; expired lease (`ExpiresAtUtc <= now`) disappears immediately without pruner tick; `Visibility.Hidden` deletes row immediately; unauthenticated `QueryNearby` returns `Unauthenticated`.
-  - **Rate-Limit & Anti-Dogpiling Tests:** Caller querying twice within `QueryCooldown` gets `ResourceExhausted`; peer hitting `MaxHandoutsPerPeerPerHour` is skipped by subsequent random pulls until window rolls over; returned batch never exceeds `policy.DiscoveryPool.BatchSize`.
-  - **PreKey Isolation (`SYS-DISCOVERY-PREKEY-ISOLATION`):** 10 consecutive `QueryNearby` calls across opted-in peers consume **0** OPKs on the Exchange.
-  - **Full Zero-Peeking End-to-End Round-Trip Integration Test:** Alice & Bob link to a real `KestrelPeerTransportServer` Exchange and publish PreKeys → both opt in (`Discoverable`, 7-day lease) → Alice queries via `NearbyPeerDiscoveryWorkflow.QueryNearbyPeersAsync` (receives Bob's `(PeerId, IdentityKey, RoutingToken)`, zero `DeliveryToken`, zero profile) → Alice calls `ConnectToDiscoveredPeerAsync` → Bob receives inbound handshake in `PendingApproval` with Alice's decrypted 0-RTT profile (`SYS-CONTACT-CONSENT-GATE`) while Bob's profile remains hidden from Alice → Bob approves → Bob's profile becomes readable and bidirectional Double Ratchet chat succeeds.
-- **Acceptance Criteria:**
-  - [ ] All unit and real loopback gRPC integration tests pass 100% with zero cross-host peeking.
-
-#### Ticket `DISC-006` — Downstream Simulator (`07-peer-discovery.json`) & Desktop UX Enablement
-- **Layer / Scope:** `Percolator.Simulator` (after `DISC-001`..`DISC-005`), `Percolator.Desktop` (future UX milestone)
-- **Implementation Details:**
-  - Migrate `07-peer-discovery.json` onto `IPersonaNodeFacade` (zero `_worldState` peeking) exercising per-Exchange opt-in via `IDiscoveryRegistrationClient`, blind random pull + connect via `INearbyPeerDiscoveryWorkflow`, and reciprocity rejection assertions.
-  - Desktop UX rules when exposing Discovery:
-    - Opt-in toggle lives **per-Exchange** and defaults to **OFF**.
-    - Displays explicit harm-minimization warning (*"Opting in lets other opted-in members of `<Exchange>` randomly receive your persona ID and send contact requests. Your encrypted profile stays hidden until you approve a request. Use a dedicated persona on public or untrusted Exchanges."*).
-    - Lease selector up to the Exchange's `MaxLeaseTtl` (max 30 days), remaining lease countdown, and 1-click `[Hide Now]`.
-    - "Discover Random Peers" button disabled unless the Persona is opted-in on that Exchange and has active PreKeys.
+  - [ ] `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` uses local `requesterId` for `IRelayDirectory.GetMailboxTokensAsync` and remote `routingCapability.RoutingToken` as target.
+  - [ ] Full solution test suite passes.
 
 ---
 
-### 16.3 Part B — Large File Transfer Data-Plane Architecture (Option B: Direct P2P + Immediate Swarming)
+### 16.3 Part B — Large File Transfer Data Plane (Option 2: `DataChannelDotnet` ICE/STUN/DTLS/SCTP + Group V2 Swarming + Optional Zero-Disk `TransferPipe`, Zero Custom Crypto)
 
-#### Why Current `Percolator.Apps.FileTransfer` Cannot Execute End-to-End
-Audit of production code revealed four concrete gaps in the data plane (while `Percolator.Apps.FileTransfer.Domain` Merkle trees, bitfields, selective masks, and `ChunkCryptoService` are already solid):
-1. **No production listener or pump host:** `TcpMultiStreamPool` only dials outbound; zero `TcpListener` or `TransferSessionCoordinator.PumpPeerStreamsAsync` runtime exists in production.
-2. **No-op DI wiring:** `Percolator.Apps.FileTransfer/DependencyInjection/ServiceCollectionExtensions.cs` registers `ITransferStreamPool` as `NullTransferStreamPool.Instance`, which `FileTransferActionHandler` and `FileTransferPayloadHandler` inject directly instead of `ITransferStreamPoolFactory`.
-3. **Broken, unused Relay Pipe:** `RelayTransferPipeClient` opens raw **plaintext TCP** and writes an **HTTP/1.1** `Upgrade: percolator-relay-pipe` request to hardcoded `"https://relay.percolator.net/pipes"`, while `KestrelPeerTransportServer` speaks strictly **TLS 1.3 + HTTP/2** and has no pipe endpoint.
-4. **Local-only Swarm Tracker:** `RelaySwarmTrackerClient` performs zero RPCs—it reads/writes `SwarmEndpoints` in the calling persona's own local SQLite DB (and serializes candidates with `System.Text.Json`).
+#### Why Current `Percolator.Apps.FileTransfer` Cannot Execute End-to-End (and Critical Review Findings)
+1. **Custom Crypto Landmine (`ChunkCryptoService`):** [`ChunkCryptoService`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Apps.FileTransfer/Features/MultiStreamEngine/ChunkCryptoService.cs#L30-L73) rolls deterministic AES-256-GCM encryption (`BaseNonce XOR ChunkIndex`, zero AAD) across a shared swarm `TransferKey`. On-the-fly re-encryption risks catastrophic `(Key, Nonce)` reuse if a chunk varies by 1 byte, and is completely redundant over DTLS/TLS. **Action: Delete `ChunkCryptoService`, `TransferKey`, `BaseNonce`, and custom `SwarmRendezvousId` HMAC-KDF.** Use standard **DTLS** (on direct ICE DataChannels) / **TLS 1.3 mTLS** (on optional `TransferPipe`) + existing standard **SHA-256 Merkle tree** (`TransferManifest`) + random 32-byte `SwarmRendezvousId`.
+2. **Broken Group Swarming & Offline-Author Handoff:** [`FileTransferActionHandler`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferActionHandler.cs#L248) sends `FileTransferOffer` pairwise 1:1 instead of over Group V2 SenderKey, [`FileTransferPayloadHandler`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Apps.FileTransfer/Features/IngressControl/FileTransferPayloadHandler.cs#L168-L195) routes `FileTransferAccept` only to the original initiator (so Bob & Charlie never learn each other's pinned cert fingerprints if Alice goes offline), and [`SwarmCoordinator.CheckSeedRatioCompletionAsync`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Apps.FileTransfer/Features/SwarmCoordination/SwarmCoordinator.cs#L126-L139) stops seeding immediately when `targetSeedRatio == 0`.
+3. **No WAN NAT Traversal, No Production Runtime, No-Op DI Wiring:** `TcpMultiStreamPool` only dials outbound raw TCP (no WAN hole-punching, no inbound listener, hardcoded port `50001`), `ServiceCollectionExtensions` injects `NullTransferStreamPool.Instance`, `RelayTransferPipeClient` sends plaintext HTTP/1.1 to hardcoded `"https://relay.percolator.net/pipes"`, and `RelaySwarmTrackerClient` is local-SQLite/JSON only.
 
 #### Ticket `FT-000` — Architecture Decision Record (`DEC-FILETRANSFER-DATAPLANE-TRANSPORT`) — **[DECIDED]**
-- **Status:** **Approved by Project Owner** (2026-11-24)
+- **Status:** **Approved by Project Owner** (2026-11-25)
 - **Decisions Locked:**
-  1. **Transport Selection — Option B (Pure .NET Ephemeral Direct TCP + TLS 1.3 + STUN / UPnP / TCP Simultaneous Open):**
-     - 100% pure managed .NET (zero Rust FFI toolchain/CI/native SOUP burden, zero separate `iroh-relay` daemon).
-     - Reuses existing `Percolator.Apps.FileTransfer` engine (`TcpMultiStreamPool`, `SwarmFrameCodec`, `ChunkCryptoService`, `TransferSessionCoordinator`, `SwarmCoordinator`, Merkle verification).
-     - Highest LAN/gigabit throughput (kernel TCP TSO/GRO); WAN NAT traversal via UPnP/NAT-PMP + STUN + Exchange-coordinated TCP Simultaneous Open.
-  2. **Default Privacy Posture — Direct P2P Only (Zero Mandatory Bulk Relay):**
-     - Relays **help** coordinate (in-band Double Ratchet `FileTransferOffer`/`Accept` + Exchange `SwarmTrackerService` — kilobytes only) and are **never required** for bulk file bytes, eliminating 2× Exchange bandwidth costs.
-     - **Acknowledged Privacy Trade-Off (`HAZ-DIRECT-TRANSFER-IP-DISCLOSURE`):** Direct P2P discloses peer IP addresses to the remote peer (and swarm participants). This is explicitly surfaced to the user via an unavoidable IP-disclosure notice before initiating or accepting a transfer, and restricted strictly to approved contacts / `TransferKey` holders.
-     - Broken `RelayTransferPipeClient` and hardcoded `"https://relay.percolator.net/pipes"` are **deleted** (no dead code).
-  3. **Swarm Scope — Immediate `SwarmTrackerService` + Multi-Peer Swarming:**
-     - Build the blinded Exchange `SwarmTrackerService` and multi-peer BitTorrent-style swarming (PEX + late joiners) immediately in v1.
-     - Architectural synergy: multi-peer swarming partially mitigates dual-symmetric-NAT failure without a bulk relay—if Alice and Charlie are behind incompatible symmetric NATs, a third swarm peer (Bob) on an open/cone NAT can pull verified Merkle chunks from Alice and seed them directly to Charlie.
-  4. **Pure-Client Desktop Preservation (`INV-EPHEMERAL-SESSION-LISTENER`):**
-     - Personas maintain **0 listening ports** at startup, while idle, and during all chat/group/profile traffic (`SYS-PRE-ACTIVATION-STEALTH`).
-     - An OS-allocated ephemeral TCP listening socket is bound **exclusively** for the duration of an active file transfer session and atomically closed on completion, pause, cancel, or vault lock (`SYS-LOCK-TEARDOWN-AND-ZEROIZATION`).
+  1. **Transport Selection — Option 2 (`DataChannelDotnet`: `libdatachannel` + `libjuice`, MIT/MPL-2.0):**
+     - Prebuilt `.NET 10` NuGet binaries (zero Rust FFI toolchain/CI burden), quarantined strictly as **Class C SOUP** (`soup/datachannel-dotnet.md`) inside `Percolator.Infrastructure` behind abstract transport ports (zero vendor types or native handles in `Domain`/`Application`/`Apps.FileTransfer`).
+     - Handles **Direct LAN** + **WAN UDP ICE hole-punching (~85–90% direct success, ~55–60 MB/s, \$0 relay bandwidth)** in one standard **ICE + STUN + DTLS + SCTP** stack.
+     - Exchange embeds a lightweight stateless **RFC 5389 UDP STUN Binding responder** (~150 LOC, zero disk, zero auth) so peers discover public reflexive `IP:Port` candidates without calling third-party Google/Cloudflare STUN servers.
+  2. **Zero Custom Crypto (`INV-STANDARD-CRYPTO-ONLY`):**
+     - **Direct path:** Standard **DTLS** encryption inside `libdatachannel`, with each peer's 32-byte SHA-256 cert fingerprint pinned **exclusively via Double Ratchet / Group V2** (`FileTransferOffer`, `FileTransferAccept`, `FileTransferPeerJoin`). **Never trust `SwarmTrackerService` with cert fingerprints.**
+     - **ICE signaling privacy:** SDP Offer/Answer and trickle ICE candidates travel **E2E encrypted** over Double Ratchet (1:1) or Group V2 SenderKey (group)—zero custom signaling crypto, and the Exchange never sees peers' LAN IPs or SDP `ice-ufrag`/`ice-pwd`.
+     - **Chunk integrity:** Standard **SHA-256 Merkle tree** over chunk hashes inside `TransferManifest` delivered over Double Ratchet / Group V2 (`INV-VERIFY-BEFORE-WRITE`). Delete `ChunkCryptoService`, `TransferKey`, `BaseNonce`, and HMAC-KDF `SwarmRendezvousId`.
+  3. **Two Independent Zero-Disk Exchange Roles (`RelayFeatureFlags`):**
+     - **`RelayFeatureFlags.SwarmTracker`:** RAM-only presence directory keyed by opaque random 32-byte `SwarmRendezvousId` → active `EphemeralSwarmPeerId`s with TTL & quota caps (**0 file bytes, 0 disk persistence, 0 Persona IDs, 0 cert hashes**), paired with the stateless RFC 5389 UDP STUN responder.
+     - **`RelayFeatureFlags.TransferPipe` (OFF by default — operator opt-in):** Zero-disk RAM-ring-buffered pass-through pipe (~256 KB bounded buffer per pipe with backpressure; configurable `MaxConcurrentPipes`, `MaxBytesPerSecondPerPipe`, `MaxBytesPerSession`, `PipeIdleTimeout`) used *only* as a fallback when direct ICE fails (e.g., dual symmetric NATs). Carries standard `.NET` **`SslStream` TLS 1.3 mTLS** ciphertext end-to-end using the Double-Ratchet/Group-V2-pinned cert fingerprints (**0 bytes written to Exchange disk**, Exchange sees ciphertext only). Delete broken `RelayTransferPipeClient` & `"https://relay.percolator.net/pipes"`.
+  4. **Group V2 Swarming & Eviction Safety:**
+     - Broadcast `FileTransferOffer` and `FileTransferPeerJoin(sessionId, ephemeralSwarmPeerId, certSha256)` over the **Group V2 SenderKey channel** so every participating member learns every other member's pinned cert fingerprint directly and swarms survive when the original author goes offline.
+     - Subscribe to Group V2 `MemberLeft` (`Epoch E -> E+1`): immediately revoke the evicted member's pinned cert fingerprint and tear down any active DataChannel/pipe to that peer.
+  5. **Offline-Author Seeding While Unlocked:**
+     - Completed downloads transition to `Seeding` and **keep seeding while the app stays unlocked** (until manually stopped or configurable seeding TTL expires), replacing `SwarmCoordinator`'s instant shutdown on `targetSeedRatio == 0`.
+     - Persist each active transfer's ephemeral DTLS/TLS keypair in the encrypted SQLCipher vault for the transfer's lifetime (zeroizing/deleting upon transfer removal) so restarts/resumes retain the pinned cert fingerprint.
+     - **Immediate Lock Teardown:** Vault lock or app exit atomically closes all ICE agents, UDP sockets, optional `TransferPipe` streams, and unregisters from `SwarmTrackerService` (`SYS-LOCK-TEARDOWN-AND-ZEROIZATION`).
+  6. **Pure-Client Stealth & Explicit IP Disclosure (`INV-EPHEMERAL-SESSION-LISTENER`, `HAZ-DIRECT-TRANSFER-IP-DISCLOSURE`):**
+     - **0 listening sockets** at startup, while idle, and during all chat/group/profile traffic (`SYS-PRE-ACTIVATION-STEALTH`).
+     - Explicit, unavoidable IP-disclosure notice displayed before Send and Accept, restricted strictly to approved contacts / authorized Group V2 swarm peers.
 
 ---
 
-#### Ticket `FT-001` — Upfront QMS Updates for Direct P2P File Transfer & IP Privacy
-- **Layer / Scope:** QMS Design Inputs (`RiskRegister.md`, `SystemRequirements.md`, `Percolator.Infrastructure/Requirements.md`, `Percolator.Desktop/spec/deployable-requirements.md`, `Percolator.Apps.FileTransfer/Design.md`)
+#### Ticket `FT-001` — Upfront QMS Updates & Class C SOUP Spec for Direct P2P File Transfer
+- **Layer / Scope:** QMS Design Inputs (`RiskRegister.md`, `SystemRequirements.md`, `Percolator.Infrastructure/Requirements.md`, `Percolator.Desktop/spec/deployable-requirements.md`, `Percolator.Apps.FileTransfer/Design.md`, new `soup/datachannel-dotnet.md`)
 - **Dependencies:** `FT-000` (Approved)
 - **Implementation Details:**
-  - Add `HAZ-DIRECT-TRANSFER-IP-DISCLOSURE` (mitigated via Informed User Consent notice, Approved-Contacts-Only restriction, and keeping chat/control plane strictly Exchange-relayed) and `HAZ-DIRECT-TRANSFER-LISTENER-EXPOSURE` (mitigated via `INV-EPHEMERAL-SESSION-LISTENER`, TLS 1.3 cert pinning, 5s `StreamAuthToken` deadline, connection caps, and atomic lock teardown) to `RiskRegister.md`.
+  - Create **`soup/datachannel-dotnet.md`** conforming to [`spec/soup-spec.md`](file:///C:/Users/squir/source/repos/percolator/source/spec/soup-spec.md) (Class C SOUP identification, exact NuGet version & hash, native prerequisites, functional envelope restricting usage strictly to ICE/STUN/DTLS/SCTP DataChannels and excluding media/RTP/SRTP, architectural quarantine rules, and reachable anomaly assessment).
+  - Add `HAZ-DIRECT-TRANSFER-IP-DISCLOSURE` and `HAZ-DIRECT-TRANSFER-LISTENER-EXPOSURE` to `RiskRegister.md`.
   - Add `SYS-FILETRANSFER-DIRECT-DATAPLANE-AND-DISCLOSURE` to `SystemRequirements.md` and `DEP-INFRA-FILETRANSFER-DATAPLANE` to `Percolator.Infrastructure/Requirements.md`.
-  - Update `Percolator.Desktop/spec/deployable-requirements.md` (`DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `DEP-DESKTOP-PERSONA-ISOLATION`) to permit ephemeral session-scoped transfer listeners exclusively during active user-consented transfers.
-  - Update `Percolator.Apps.FileTransfer/Design.md` with `DEC-FILETRANSFER-DATAPLANE-TRANSPORT` (Option B + immediate swarming + zero bulk relay) and `INV-EPHEMERAL-SESSION-LISTENER`.
-  - Verify `pwsh -File scripts/validate-qms-compliance.ps1` passes.
+  - Update `Percolator.Desktop/spec/deployable-requirements.md` (`DEP-DESKTOP-PRE-ACTIVATION-STEALTH`, `DEP-DESKTOP-PERSONA-ISOLATION`) for ephemeral transfer/seeding-scoped ICE sockets with immediate vault-lock teardown.
+  - Update `Percolator.Apps.FileTransfer/Design.md` with `DEC-FILETRANSFER-DATAPLANE-TRANSPORT` (Option 2 `DataChannelDotnet`, Group V2 `FileTransferOffer`/`PeerJoin` + eviction pruning, offline-author seeding while unlocked, optional zero-disk `TransferPipe`, removing `ChunkCryptoService`) and `INV-EPHEMERAL-SESSION-LISTENER`.
+  - Verify `pwsh -File scripts/validate-qms-compliance.ps1` passes and obtain human sign-off prior to `FT-002`.
 - **Acceptance Criteria:**
-  - [ ] QMS documents updated and approved by human reviewer prior to `FT-002`.
+  - [ ] `soup/datachannel-dotnet.md` and all QMS documents updated and approved prior to `FT-002`.
   - [ ] `scripts/validate-qms-compliance.ps1` passes with 0 errors.
 
-#### Ticket `FT-002` — Exchange Blinded `SwarmTrackerService` & Dead Relay-Pipe Removal
-- **Layer / Scope:** `Percolator.Domain` (`RelayFeatureFlags`, `RelayHostingPolicy`), `Percolator.Infrastructure` (`Protos/file_transfer_tracker.proto`, `ExchangeSwarmTrackerEndpoint`, `GrpcSwarmTrackerClient`, `KestrelPeerTransportServer`, delete `RelayTransferPipeClient`)
+#### Ticket `FT-002` — Exchange Blinded `SwarmTrackerService`, Embedded RFC 5389 UDP STUN, Optional Zero-Disk `TransferPipe` & Cleanup
+- **Layer / Scope:** `Percolator.Domain` (`RelayFeatureFlags`, `RelayHostingPolicy`), `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure` (`Protos/file_transfer_tracker.proto`, `ExchangeSwarmTrackerEndpoint`, `ExchangeTransferPipeEndpoint`, `UdpStunResponderService`, `GrpcSwarmTrackerClient`, `KestrelPeerTransportServer`)
 - **Dependencies:** `FT-001`
 - **QMS Links:** `SYS-STREAM-AEAD-CHUNKED-TRANSFER`, `SYS-BOUNDED-RELAY-QUOTAS`, `DEP-INFRA-FILETRANSFER-DATAPLANE`.
 - **Implementation Details:**
-  - **Delete Broken Code:** Delete `Percolator.Infrastructure/Plugins/FileTransfer/RelayTransferPipeClient.cs`, remove hardcoded `"https://relay.percolator.net/pipes"` from `NetworkInterfaceEndpointDiscoveryPort.cs`, and delete `RelayPipeCandidate` / dead relay-pipe plumbing that has no server implementation.
+  - **Delete Dead Pipe & Custom Chunk Crypto:**
+    - Delete `Percolator.Infrastructure/Plugins/FileTransfer/RelayTransferPipeClient.cs`, remove `"https://relay.percolator.net/pipes"` from `NetworkInterfaceEndpointDiscoveryPort.cs`, and delete legacy hardcoded-port/dead TCP pipe code.
+    - Delete `ChunkCryptoService.cs`, `TransferKey`, `BaseNonce`, and HMAC-KDF `SwarmRendezvousId.Derive(TransferKey)`. Replace `SwarmRendezvousId` with `RandomNumberGenerator.GetBytes(32)` negotiated in `FileTransferOfferPayload`. Update `ChunkDataFrame` to carry plaintext chunk bytes over the DTLS / TLS 1.3 mTLS channel (verified directly against `TransferManifest` SHA-256 Merkle leaf).
   - **Domain Policy (`RelayHostingPolicy`):**
-    - Add `RelayFeatureFlags.SwarmTracker = 1 << 5` (enabled on `HostManaged` or operator-configurable; consumes negligible kilobytes of RAM/bandwidth).
-    - Add bounded tracker quotas (`MaxActiveSwarms`, `MaxPeersPerSwarm`, `SwarmPeerEntryTtl` default 5 min) so an Exchange cannot be memory-exhausted (`SYS-BOUNDED-RELAY-QUOTAS`).
-  - **Pure Binary Protobuf (`file_transfer_tracker.proto` — zero JSON):**
-    - `SwarmTrackerService` over `ChannelPoolKind.Unauthenticated` (so the Exchange cannot link swarm announcements to Persona mailboxes):
-      - `Announce(SwarmAnnounceRequestProto) returns (SwarmAnnounceResponseProto)`: keyed strictly by opaque 32-byte `SwarmRendezvousId = HKDF(TransferKey, "swarm-rendezvous")`, carries peer's `EphemeralSwarmPeerId` (random per-session ID, NOT `PublicIdentityId`), protobuf `DirectEndpointCandidateProto` list (LAN + STUN/UPnP reflexive endpoints + ephemeral TLS cert SHA-256 fingerprint), and returns up to *N* active peer candidates in the same swarm + caller's Exchange-observed reflexive `IP:Port` (acting as a free built-in STUN observation!).
-      - `Unregister(SwarmUnregisterRequestProto) returns (SwarmUnregisterResponseProto)`: removes peer's endpoints cleanly on completion, pause, cancel, or lock.
-      - `CoordinatePunch(SwarmPunchSignalProto) returns (SwarmPunchAckProto)` *(lightweight RTT-synced simultaneous-open signaling for WAN NAT traversal, zero bulk data)*.
-  - **`ExchangeSwarmTrackerEndpoint`:** In-memory bounded TTL store (zero disk persistence of peer IPs!), maps in `KestrelPeerTransportServer`, enforces `RelayFeatureFlags.SwarmTracker` and quota caps.
-  - **`GrpcSwarmTrackerClient`:** Replaces local-SQLite/JSON `RelaySwarmTrackerClient` (eliminating `System.Text.Json` on wire/storage) and resolves the conversation's Exchange URI from `IRelayDirectory`.
+    - Add `RelayFeatureFlags.SwarmTracker` and `RelayFeatureFlags.TransferPipe` (**OFF by default** in `RelayHostingPolicy.Default` and `HostManaged`; operator opt-in).
+    - Add bounded quotas (`MaxActiveSwarms`, `MaxPeersPerSwarm`, `SwarmPeerEntryTtl` default 5 min; `MaxConcurrentPipes`, `MaxBytesPerSecondPerPipe`, `MaxBytesPerSession`, `PipeIdleTimeout`) (`SYS-BOUNDED-RELAY-QUOTAS`).
+  - **Pure Binary Protobuf (`file_transfer_tracker.proto` — zero JSON, zero disk, zero crypto trust):**
+    - `SwarmTrackerService` over `ChannelPoolKind.Unauthenticated`:
+      - `Announce(SwarmAnnounceRequestProto) returns (SwarmAnnounceResponseProto)`: keyed strictly by opaque random 32-byte `SwarmRendezvousId`, carries random session-scoped `EphemeralSwarmPeerId` (NOT `PublicIdentityId`), returns active online `EphemeralSwarmPeerId`s + Exchange STUN UDP endpoint metadata (**ZERO Persona IDs, ZERO cert hashes, ZERO disk persistence**).
+      - `Unregister(SwarmUnregisterRequestProto) returns (SwarmUnregisterResponseProto)`: cleans up on stop, cancel, pause, or vault lock.
+    - `TransferPipeService` (gated on `RelayFeatureFlags.TransferPipe`):
+      - `OpenPipe(stream PipeChunkProto) returns (stream PipeChunkProto)`: pairs two callers presenting matching random one-time 32-byte `PipeRendezvousToken` (exchanged E2E over Double Ratchet / Group V2), forwards opaque ciphertext through a bounded ~256 KB RAM ring buffer with backpressure, enforces concurrency / bytes-per-second / max-bytes-per-session / idle-timeout quotas, and writes **0 bytes to disk**.
+  - **Embedded RFC 5389 UDP STUN Responder (`UdpStunResponderService`):**
+    - Lightweight stateless UDP listener (~150 LOC) answering RFC 5389 STUN Binding Requests with `XOR-MAPPED-ADDRESS` when `RelayFeatureFlags.SwarmTracker` is enabled on the Exchange (zero disk, zero state, strict packet size & rate bounds).
+  - **`GrpcSwarmTrackerClient`:** Replaces local-SQLite/JSON `RelaySwarmTrackerClient` (zero `System.Text.Json`) and resolves Exchange URI from `IRelayDirectory`.
 - **Acceptance Criteria:**
-  - [ ] Zero references to `"https://relay.percolator.net/pipes"` or `RelayTransferPipeClient` remain.
-  - [ ] `SwarmTrackerService` stores zero Persona IDs and zero IPs on disk (bounded in-memory TTL store only) and uses pure Protobuf (zero JSON).
-  - [ ] `ExchangeSwarmTrackerEndpoint` is mapped in `KestrelPeerTransportServer` and respects `RelayFeatureFlags.SwarmTracker`.
+  - [ ] Zero references to `ChunkCryptoService`, `RelayTransferPipeClient`, or `"https://relay.percolator.net/pipes"` remain.
+  - [ ] `SwarmTrackerService` and `TransferPipeService` store zero Persona IDs, zero cert hashes, and write **0 bytes to disk**; `TransferPipe` is disabled by default unless opted in by the Exchange operator.
+  - [ ] Embedded RFC 5389 UDP STUN responder returns valid `XOR-MAPPED-ADDRESS` responses on Binding Requests.
 
-#### Ticket `FT-003` — Ephemeral Session-Scoped Direct TCP + TLS 1.3 Transport & NAT Traversal (Option B)
-- **Layer / Scope:** `Percolator.Apps.FileTransfer/Transport`, `Percolator.Infrastructure/Plugins/FileTransfer` (`IEphemeralTransferListener`, `TcpTlsTransferListener`, `TcpMultiStreamPool`, `NetworkInterfaceEndpointDiscoveryPort`, `UpnpPortMapper`, `TcpSimultaneousOpenDialer`)
+#### Ticket `FT-003` — Quarantined `DataChannelDotnet` ICE/STUN/DTLS/SCTP Transport Adapter & Optional `TransferPipe` TLS 1.3 mTLS Fallback
+- **Layer / Scope:** `Percolator.Apps.FileTransfer` (transport ports & wire frames), `Percolator.Infrastructure/Plugins/FileTransfer` (`WebRtc/*` quarantined `DataChannelDotnet` adapter, `TransferPipeTlsStreamTransport`, SQLCipher ephemeral cert persistence)
 - **Dependencies:** `FT-002`
-- **QMS Links:** `SYS-PRE-ACTIVATION-STEALTH`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`, `SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`, `HAZ-DIRECT-TRANSFER-IP-DISCLOSURE`, `HAZ-DIRECT-TRANSFER-LISTENER-EXPOSURE`.
+- **QMS Links:** `SYS-PRE-ACTIVATION-STEALTH`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`, `SYS-MUTUAL-AUTHENTICATED-WIRE-TRANSPORT`, `HAZ-DIRECT-TRANSFER-IP-DISCLOSURE`, `HAZ-DIRECT-TRANSFER-LISTENER-EXPOSURE`, `SOUP-DATACHANNEL-DOTNET`.
 - **Implementation Details:**
-  - **Ephemeral Session-Scoped Listener (`TcpTlsTransferListener`):**
-    - Binds an OS-allocated ephemeral port (`IPAddress.Any, 0` / dual-mode IPv4+IPv6) **only** when a transfer session starts; advertises the actual bound port in `DirectEndpointCandidate` (eliminating the hardcoded fake port `50001`).
-    - Generates an ephemeral per-session self-signed TLS 1.3 certificate in memory; carries its 32-byte SHA-256 fingerprint inside the Double Ratchet-encrypted `FileTransferOfferPayload` / `FileTransferAcceptPayload` and `SwarmTrackerService` candidate metadata so peers pin the exact cert fingerprint on `SslStream` handshake (zero MitM on the direct TCP socket).
-    - Enforces a strict **5-second handshake deadline**: the first frame on every accepted TLS stream MUST be a valid `HandshakeFrame` matching `(TransferSessionId, StreamAuthToken)` via `CryptographicOperations.FixedTimeEquals`; otherwise abort immediately (`HAZ-INGRESS-RESOURCE-EXHAUSTION`).
-    - Enforces strict per-session concurrent connection & stream caps, and closes the listener socket atomically on completion, pause, cancel, or disposal.
-  - **Outbound Pool & NAT Traversal (`TcpMultiStreamPool` + `TcpSimultaneousOpenDialer`):**
-    - Upgrade `TcpMultiStreamPool` to wrap dialed sockets in TLS 1.3 `SslStream` with exact SHA-256 cert fingerprint pinning.
-    - Candidate connection strategy (ordered fastest/most reliable first):
-      1. **Direct LAN** candidates (RFC 1918 / link-local peers on same subnet — gigabit kernel TCP).
-      2. **UPnP / NAT-PMP mapped WAN** endpoint (optional automatic transient port mapping opened for session lifetime and deleted on teardown).
-      3. **WAN TCP Simultaneous Open** using reflexive `IP:Port` observed via `SwarmTrackerService` / STUN (`SO_REUSEADDR` bound socket synchronized via `CoordinatePunch`).
-      4. If all direct paths fail (e.g., dual symmetric NAT with no open/cone-NAT bridge peer in the swarm), surface a clear, structured domain error (`DIRECT_NAT_TRAVERSAL_FAILED`) so the UI explains why direct connection could not be established.
-  - **Fix `CallbackEndpointValidator` / `NetworkInterfaceEndpointDiscoveryPort`:** Validate real ephemeral ports and LAN/WAN endpoints without SSRF risk to loopback unless explicitly enabled for local integration/simulator loopback testing via explicit non-production configuration.
+  - **SOUP Quarantine (`Percolator.Infrastructure/Plugins/FileTransfer/WebRtc/`):**
+    - Add pinned `DataChannelDotnet` NuGet package strictly inside `Percolator.Infrastructure` (never referenced by `Domain`, `Application`, or `Apps.FileTransfer`).
+    - Expose abstract `ITransferPeerTransport` / `ITransferDataChannel` ports; zero `DataChannelDotnet` types, callbacks, or native handles cross the adapter boundary.
+    - Configure `libjuice` ICE agents with the Exchange's embedded UDP STUN server (no hardcoded external third-party STUN servers).
+  - **E2E Cert Pinning & Vault-Persisted Ephemeral Session Cert:**
+    - Generate a transfer-scoped ephemeral ECDSA P-256 certificate/keypair and persist it in the encrypted SQLCipher vault for the transfer's lifetime (zeroizing/deleting on final transfer removal) so offline-author seeding and pause/resume preserve the pinned SHA-256 fingerprint.
+    - Carry each participant's 32-byte `CertSha256Fingerprint` strictly inside E2E Double Ratchet / Group V2 payloads (`FileTransferOfferPayload`, `FileTransferAcceptPayload`, `FileTransferPeerJoinPayload`).
+    - Exchange SDP Offer/Answer and trickle ICE candidates **E2E** via `FileTransferIceSignalPayload` over Double Ratchet (1:1) or Group V2 SenderKey (group).
+    - Enforce strict **DTLS certificate fingerprint verification** against the E2E-pinned fingerprint map; reject mismatches and enforce a connection handshake deadline + per-session peer cap.
+  - **SCTP Backpressure & Pooled Framing (`INV-POOLED-STREAM-BUFFERS`):**
+    - Use `ArrayPool<byte>` framing over reliable ordered/unordered SCTP DataChannels respecting `bufferedAmount` / `bufferedAmountLowThreshold` so multi-GB transfers maintain bounded RAM without exhausting memory.
+    - Require a valid `HandshakeFrame` matching `(TransferSessionId, StreamAuthToken)` via `CryptographicOperations.FixedTimeEquals` upon DataChannel open.
+  - **Optional Zero-Disk `TransferPipe` Fallback (Standard TLS 1.3 mTLS):**
+    - If direct ICE negotiation times out/fails (e.g., dual symmetric NATs):
+      - If the Exchange advertises `RelayFeatureFlags.TransferPipe`, exchange a random one-time `PipeRendezvousToken` over the E2E channel, open `TransferPipeService.OpenPipe`, and wrap the stream in standard `.NET` **`SslStream` TLS 1.3 mTLS** pinning the exact same E2E-verified SHA-256 cert fingerprints on both client and server.
+      - Otherwise fail cleanly with `DIRECT_NAT_TRAVERSAL_FAILED`.
 - **Acceptance Criteria:**
-  - [ ] Zero listening sockets exist before a transfer starts or after completion/pause/cancel/lock.
-  - [ ] Every direct TCP stream uses TLS 1.3 with pinned SHA-256 certificate fingerprint + constant-time `StreamAuthToken` verification within 5s.
+  - [ ] Zero listening UDP/TCP sockets exist before transfer start or after stop/pause/cancel/lock.
+  - [ ] Every DataChannel (DTLS) and optional `TransferPipe` stream (TLS 1.3 mTLS) enforces E2E-pinned SHA-256 cert fingerprints on both peers.
+  - [ ] Zero `DataChannelDotnet` types leak outside `Percolator.Infrastructure`.
   - [ ] Hardcoded port `50001` is completely eliminated.
 
-#### Ticket `FT-004` — Session-Scoped `ITransferSessionRuntime`, Multi-Peer Swarming & DI Fix
+#### Ticket `FT-004` — Session-Scoped `ITransferSessionRuntime`, Group V2 Swarming, Offline-Author Seeding & DI Fix
 - **Layer / Scope:** `Percolator.Apps.FileTransfer` (`ServiceCollectionExtensions`, `FileTransferActionHandler`, `FileTransferPayloadHandler`, `SwarmCoordinator`, new `ITransferSessionRuntime` / `TransferSessionRuntime`)
 - **Dependencies:** `FT-003`
 - **QMS Links:** `SYS-STREAM-AEAD-CHUNKED-TRANSFER`, `SYS-LOCK-TEARDOWN-AND-ZEROIZATION`, `INV-VERIFY-BEFORE-WRITE`, `INV-POOLED-STREAM-BUFFERS`.
 - **Implementation Details:**
-  - Remove `collection.AddSingleton<ITransferStreamPool>(NullTransferStreamPool.Instance)` from `Percolator.Apps.FileTransfer/DependencyInjection/ServiceCollectionExtensions.cs`.
-  - Introduce a Persona-scoped `ITransferSessionRuntime` (`IAsyncDisposable` — automatically disposed on Persona vault lock):
-    - Manages active `TransferSessionId -> ActiveTransferHandle` (`IEphemeralTransferListener`, `ITransferStreamPool`, `TransferSessionCoordinator`, `SwarmCoordinator`, `CancellationTokenSource`, background pump `Task`, periodic tracker heartbeat `Task`).
-    - **Sender (`InitiateTransferAsync` / `HandleAcceptAsync`):** Computes Merkle roots & manifest, starts `IEphemeralTransferListener`, announces to Exchange `SwarmTrackerService`, sends `FileTransferOfferPayload` (with real ephemeral port + TLS cert fingerprint) over Double Ratchet; upon `FileTransferAcceptPayload` or inbound authenticated swarm peer, pumps encrypted chunks via `TransferSessionCoordinator.PumpPeerStreamsAsync` reading from `transportContext.LocalRootPath`.
-    - **Recipient / Swarm Leecher-Seeder (`AcceptTransferAsync`):** Starts `IEphemeralTransferListener` (so it can immediately seed verified chunks to other swarm peers), announces to `SwarmTrackerService`, dials seeder + tracker/PEX peers via `ITransferStreamPoolFactory`, runs `TransferSessionCoordinator.PumpPeerStreamsAsync` + `SwarmCoordinator` rarest-first piece selection + PEX exchange (`PexRateLimiter`), verifies AEAD + Merkle leaf before every write (`INV-VERIFY-BEFORE-WRITE`), and atomically finalizes `.percolator-part` files via `IDesktopFileStorage`.
-    - **Lifecycle & Teardown:** `PauseTransferAsync`, `CancelTransferAsync`, completion, and Persona Vault Lock cancel the session CTS, dispose listener & stream pool, delete any UPnP mapping, and call `SwarmTrackerService.Unregister`.
+  - Remove `NullTransferStreamPool.Instance` from `Percolator.Apps.FileTransfer/DependencyInjection/ServiceCollectionExtensions.cs`.
+  - **Group V2 Swarming & Eviction Pruning:**
+    - Update [`FileTransferActionHandler`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferActionHandler.cs#L248) to broadcast `FileTransferOffer` over the **Group V2 SenderKey channel** for group conversations (1:1 continues over Double Ratchet).
+    - Update [`FileTransferPayloadHandler`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Apps.FileTransfer/Features/IngressControl/FileTransferPayloadHandler.cs#L168-L195) so accepting a group transfer broadcasts `FileTransferPeerJoin(sessionId, ephemeralSwarmPeerId, certSha256)` over Group V2 SenderKey—allowing every group peer (e.g., Bob & Charlie) to pin each other's cert fingerprints directly and swarm even when Alice goes offline.
+    - Subscribe to Group V2 `MemberLeft` (`Epoch E -> E+1`): atomically remove the evicted peer's pinned cert fingerprint from all active group transfers and drop their DataChannels/pipes.
+  - **Offline-Author Seeding While Unlocked:**
+    - Update [`SwarmCoordinator`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Apps.FileTransfer/Features/SwarmCoordination/SwarmCoordinator.cs#L126-L139) so completed downloads transition to `Seeding` and **remain seeding while the app stays unlocked** (until manually stopped by the user or configurable seeding TTL expires), instead of shutting down immediately when `targetSeedRatio == 0`.
+  - **Persona-Scoped `ITransferSessionRuntime` (`IAsyncDisposable` — disposed atomically on vault lock):**
+    - Owns `TransferSessionId -> ActiveTransferHandle` (transport/ICE agents, `TransferSessionCoordinator`, `SwarmCoordinator`, `CancellationTokenSource`, background pump `Task`, tracker heartbeat `Task`).
+    - Coordinates rarest-first piece selection across connected peers, verifies every received chunk against `TransferManifest` SHA-256 Merkle leaf **before writing** (`INV-VERIFY-BEFORE-WRITE`), and atomically finalizes `.percolator-part` files via `IDesktopFileStorage`.
+    - **Lifecycle & Teardown:** Pause, Cancel, Manual Stop Seeding, and Vault Lock cancel session CTS, tear down all ICE agents / DataChannels / `TransferPipe` streams within 1s, and call `SwarmTrackerService.Unregister`.
 - **Acceptance Criteria:**
   - [ ] `NullTransferStreamPool` is removed from production DI wiring.
-  - [ ] Multi-peer swarming (tracker peer discovery + PEX + seeder/leecher concurrent chunk serving) runs live end-to-end.
-  - [ ] Disposing the Persona scope on vault lock closes all transfer sockets/listeners within 1 second and unregisters from tracker.
+  - [ ] Group V2 `FileTransferOffer` + `FileTransferPeerJoin` + `MemberLeft` cert revocation run end-to-end.
+  - [ ] Completed downloads keep seeding while unlocked and survive the original author going offline; vault lock tears down all sockets/ICE agents within 1s and unregisters from tracker.
 
-#### Ticket `FT-005` — End-to-End Multi-Node File Transfer & Swarm Integration Tests
+#### Ticket `FT-005` — End-to-End Multi-Node File Transfer, Offline-Author Swarm & Fallback Integration Tests
 - **Layer / Scope:** `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.ApplicationIntegrationTests`
 - **Dependencies:** `FT-004`
 - **QMS Links:** `[Verify: Simulation]` & `[Verify: Integration]` for `SYS-STREAM-AEAD-CHUNKED-TRANSFER`, `SYS-PATH-TRAVERSAL-DEFENSE`, `SYS-FILETRANSFER-DIRECT-DATAPLANE-AND-DISCLOSURE`.
-- **Test Plan (Real Loopback TCP+TLS 1.3 Sockets + Real Exchange `SwarmTrackerService`, Zero Disk Peeking):**
-  - **1:1 Direct Multi-Stream Round-Trip:** Alice & Bob transfer a 2 MB multi-file bundle over ephemeral TLS 1.3 TCP streams; verify byte-for-byte SHA-256 match and assert 0 listening sockets before start and immediately after completion.
-  - **3-Node Multi-Peer Swarm & Late-Joiner Test:** Alice seeds to Bob → Charlie joins at 50% progress via Exchange `SwarmTrackerService` + PEX → Charlie pulls verified pieces concurrently from **both** Alice and Bob → all three match SHA-256.
-  - **Vault Lock Teardown Test:** Trigger Persona lock mid-transfer → verify listener socket and active TCP connections close immediately and tracker unregisters; resume after unlock skips already-verified chunks via `ResumptionBitfield`.
-  - **Integrity & Security Tests:** Tampered ciphertext chunk fails AEAD/Merkle verification, chokes offending peer, writes 0 bytes to disk (`INV-VERIFY-BEFORE-WRITE`); wrong TLS cert fingerprint or invalid `StreamAuthToken` drops socket immediately; path traversal manifest (`../escape`) rejected (`SYS-PATH-TRAVERSAL-DEFENSE`).
+- **Test Plan (Real `DataChannelDotnet` ICE/DTLS/SCTP + Real Exchange `SwarmTrackerService` / UDP STUN / `TransferPipe`, Zero Disk Peeking):**
+  - **1:1 Direct DataChannel Round-Trip:** Alice & Bob transfer a 2 MB multi-file bundle over real `DataChannelDotnet` ICE + DTLS + SCTP using Exchange UDP STUN; verify byte-for-byte SHA-256 match and assert 0 open transfer sockets before start and immediately after stop/teardown.
+  - **3-Node Group V2 Swarm & Offline-Author Seeding Test:** Alice offers to Group V2 → Bob downloads 100% and stays seeding while unlocked → **Alice goes offline** → Charlie joins via Group V2 `FileTransferPeerJoin` + `SwarmTrackerService` → Charlie pins Bob's DTLS fingerprint and downloads 100% directly from Bob → all three match SHA-256.
+  - **Group Eviction Test:** Evict Charlie (`Epoch E -> E+1`) → assert Bob immediately revokes Charlie's pinned cert fingerprint and rejects further chunk requests.
+  - **Optional Zero-Disk `TransferPipe` Fallback & Quota Test:** Force direct ICE failure with `RelayFeatureFlags.TransferPipe` enabled → verify transfer succeeds end-to-end over TLS 1.3 mTLS pipe with **0 bytes written to Exchange disk** and respects concurrency/rate/total-byte caps; verify clean `DIRECT_NAT_TRAVERSAL_FAILED` when `TransferPipe` is disabled (default).
+  - **Vault Lock Teardown & Resume Test:** Trigger Persona lock mid-transfer and while seeding → verify ICE agents/sockets close within 1s and tracker unregisters; unlock and resume skips already-verified chunks via `ResumptionBitfield` using the vault-persisted session cert.
+  - **Integrity & Security Tests:** Tampered chunk fails SHA-256 Merkle verification, chokes offending peer, writes 0 bytes to disk (`INV-VERIFY-BEFORE-WRITE`); spoofed/mismatched DTLS or TLS cert fingerprint fails handshake immediately; path traversal manifest (`../escape`) rejected (`SYS-PATH-TRAVERSAL-DEFENSE`).
 - **Acceptance Criteria:**
-  - [ ] All unit and real-socket integration tests pass 100% with zero cross-host peeking or fake listeners.
+  - [ ] All unit and real-transport integration tests pass 100% with zero cross-host peeking or fake listeners.
+
+---
+
+### 16.4 Part C — E2E Friend-to-Friend Chat Introductions (`INTRO-*`) & Downstream Enablement (`FT-006`)
+
+#### Architectural Design: Ask-Before-Introducing (Option A — Zero Profile Bloat, Zero New Crypto)
+Peer introductions live inside **`Percolator.Apps.Chat`** as a standard E2E Double Ratchet workflow—leaving [`ProfileMetadata`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.PluginSdk/Profiles/IProfilePorts.cs#L90-L95) strictly as identity presentation (`DisplayName`, `Avatar`, `StatusBio`, `Revision`):
+1. **Consent Ask (`Alice → Bob` over existing 1:1 Double Ratchet):** Alice selects *"Introduce Bob & Charlie"* → Alice sends `PeerIntroductionConsentRequest` to Bob naming Charlie (`CharliePeerId`, `CharlieDisplayName` if known, optional note) **without** sending Charlie's `PeerInvitation` yet (or vice versa).
+2. **Per-Introduction Consent (`Bob`):** Bob chooses **Allow** (generates/returns Bob's `PeerInvitation` payload over Double Ratchet to Alice) or **Decline** (Alice receives refusal; Charlie never sees Bob's contact card).
+3. **E2E Forward & TOFU Gate (`Alice → Charlie` → `Bob`):** Upon consent, Alice forwards the approved `PeerIntroductionCard` over her existing Double Ratchet channel with Charlie → Charlie clicks **Connect** → normal `OutboundConnectionWorkflow.ConnectAsync` → Bob receives inbound handshake in `PendingApproval` (`SYS-CONTACT-CONSENT-GATE`). **Zero Exchange visibility, zero scraping, zero changes to `ProfileMetadata`.**
+
+#### Ticket `INTRO-001` — QMS Updates for Chat Peer Introductions
+- **Layer / Scope:** `RiskRegister.md`, `Percolator.Apps.Chat/Design.md`
+- **Dependencies:** `FT-005` (or runnable immediately after `DISC-003` if prioritized ahead of UI)
+- **Implementation Details:** Document `HAZ-INTRO-UNSOLICITED-FORWARD` mitigation (Option A Ask-Before-Introducing + `SYS-CONTACT-CONSENT-GATE`) and run `scripts/validate-qms-compliance.ps1`.
+
+#### Ticket `INTRO-002` — Chat E2E Introduction Payloads, Workflow & SQLite Persistence
+- **Layer / Scope:** `Percolator.Apps.Chat` (`Features/Introductions/*`, `ChatPayloadType`, `ChatPayloadHandler`, `IChatService`), `Percolator.Infrastructure` (`PeerIntroductionConsentEntity` + EF migration)
+- **Dependencies:** `INTRO-001`
+- **Implementation Details:**
+  - Add pure Protobuf-serialized `ChatPayloadType` opcodes (`IntroductionConsentRequest`, `IntroductionConsentResponse`, `PeerIntroductionCard`) inside `Percolator.Apps.Chat` (zero JSON on wire, padded via `SteppedPadding`).
+  - Enforce same-Exchange scoping (`ChannelId.DeterministicForDirect`) or explicit Exchange endpoint matching on forwarded invitations, plus blocked/duplicate contact checks (`SYS-KEY-CHANGE-TRUST-HALT`).
+  - Persist pending outbound/inbound introduction consent state in SQLite so consent requests survive app restart.
+
+#### Ticket `INTRO-003` — Multi-Node Chat Introduction Integration Tests
+- **Layer / Scope:** `Percolator.Apps.Chat.Tests`, `Percolator.ApplicationIntegrationTests`
+- **Dependencies:** `INTRO-002`
+- **Test Plan:** Real loopback Exchange tests covering (a) Alice asks Bob to introduce Charlie → Bob Allows → Alice forwards → Charlie connects → bidirectional Double Ratchet chat succeeds with zero Exchange discovery endpoints; and (b) Bob Declines → zero contact card transmitted and zero connection attempt occurs.
 
 #### Ticket `FT-006` — Downstream Simulator (`08-swarm-file-transfer.json`) & Desktop UX Enablement
-- **Layer / Scope:** `Percolator.Simulator`, `Percolator.Desktop`
-- **Dependencies:** `FT-005`
+- **Layer / Scope:** `Percolator.Simulator` (after `FT-005`), `Percolator.Desktop`
+- **Dependencies:** `FT-005` (and `INTRO-003` for Desktop/Simulator Introduction UX)
 - **Implementation Details:**
-  - Migrate `08-swarm-file-transfer.json` onto `IPersonaNodeFacade` (zero `_worldState` disk peeking, zero fake coordinator `TcpListener`) exercising real `IFileTransferActionHandler` + `ITransferSessionRuntime` + Exchange `SwarmTrackerService`.
+  - Rebuild `08-swarm-file-transfer.json` cleanly in `Percolator.Simulator` on top of `IPersonaNodeFacade` (zero `_worldState` disk peeking, zero fake coordinator `TcpListener`) exercising real `IFileTransferActionHandler` + `ITransferSessionRuntime` + `DataChannelDotnet` ICE/DTLS/SCTP + Exchange `SwarmTrackerService` / UDP STUN / optional `TransferPipe`.
+  - Add QA triggers in `Percolator.Simulator` for E2E Peer Introductions inside Persona Tab 1.
   - Desktop UI (`Percolator.Desktop`):
-    - Add File Transfer Send/Accept flow inside approved 1:1 and Group conversations.
-    - Display an explicit, unavoidable **IP-disclosure notice** before Send and Accept: *"Direct P2P file transfer connects directly to `<Contact>` (and swarm peers) without relaying through the Exchange. This reveals your IP address to participating peers."*
-    - Surface selective file picker, multi-peer swarm peer count & chunk progress, pause/resume/cancel, clear NAT-failure explanation if direct connection cannot traverse both peers' NATs, and automatic teardown on session lock.
+    - Add File Transfer Send/Accept flow inside approved 1:1 and Group conversations with the unavoidable **IP-disclosure notice** (*"Direct P2P file transfer connects directly to `<Contact>` (and group swarm peers) without relaying through the Exchange. This reveals your IP address to participating peers."*), selective file picker, swarm progress, active seeding indicator with `[Stop Seeding]`, pause/resume/cancel, clear NAT-traversal failure feedback, and automatic vault-lock teardown.
+    - Add *"Introduce Contact..."* menu action inside active 1:1 chat with Ask-Before-Introducing consent dialog.
+
 
 
