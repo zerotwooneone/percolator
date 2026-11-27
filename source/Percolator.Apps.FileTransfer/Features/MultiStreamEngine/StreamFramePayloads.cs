@@ -35,7 +35,7 @@ public sealed record RequestChunkFrame(ChunkIndex ChunkIndex) : IStreamFramePayl
     public StreamFrameType FrameType => StreamFrameType.RequestChunk;
 }
 
-public sealed record ChunkDataFrame(ChunkIndex ChunkIndex, EncryptedChunkData Data) : IStreamFramePayload
+public sealed record ChunkDataFrame(ChunkIndex ChunkIndex, PlaintextChunkData Data) : IStreamFramePayload
 {
     public StreamFrameType FrameType => StreamFrameType.ChunkData;
 }

@@ -1,21 +1,21 @@
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
-using Percolator.Domain.Identities.ValueObjects;
-using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+using Percolator.Domain.Delivery.ValueObjects;
 
 namespace Percolator.Apps.FileTransfer.Ports;
 
 public interface IDistributedTrackerPort
 {
-    ValueTask<IReadOnlyList<DirectEndpointCandidate>> AnnounceAsync(
+    ValueTask<SwarmAnnounceResult> AnnounceAsync(
         SwarmRendezvousId rendezvousId,
-        PublicIdentityId memberId,
-        IReadOnlyList<DirectEndpointCandidate> candidates,
+        EphemeralSwarmPeerId ephemeralPeerId,
         SwarmPeerRole role,
+        RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default);
 
     ValueTask UnregisterAsync(
         SwarmRendezvousId rendezvousId,
-        PublicIdentityId memberId,
+        EphemeralSwarmPeerId ephemeralPeerId,
+        RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default);
 }

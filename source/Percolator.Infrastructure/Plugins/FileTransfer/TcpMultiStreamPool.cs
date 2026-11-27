@@ -164,7 +164,6 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
     private readonly Domain.Identities.PublicIdentityId _peerId;
     private readonly StreamCount _targetStreamCount;
     private readonly CallbackEndpointValidator _validator;
-    private readonly RelayTransferPipeClient _pipeClient;
     private readonly List<ITransferStream> _streams = new();
     private readonly SemaphoreSlim _poolLock = new(1, 1);
     private int _disposed;
@@ -184,14 +183,12 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
         TransferSessionId sessionId,
         Domain.Identities.PublicIdentityId peerId,
         StreamCount targetStreamCount,
-        CallbackEndpointValidator validator,
-        RelayTransferPipeClient pipeClient)
+        CallbackEndpointValidator validator)
     {
         _sessionId = sessionId;
         _peerId = peerId;
         _targetStreamCount = targetStreamCount;
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
-        _pipeClient = pipeClient ?? throw new ArgumentNullException(nameof(pipeClient));
     }
 
     public async ValueTask ConnectDirectAsync(
@@ -262,31 +259,15 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
         }
     }
 
-    public async ValueTask ConnectRelayPipeAsync(
+    public ValueTask ConnectRelayPipeAsync(
         RelayRendezvousDescriptor rendezvous,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(rendezvous);
         ThrowIfDisposed();
 
-        await _poolLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            int needed = _targetStreamCount.Count - _streams.Count;
-            for (int i = 0; i < needed; i++)
-            {
-                StreamIndex streamIndex = StreamIndex.FromInt(_streams.Count);
-                ITransferStream stream = await _pipeClient.OpenPipeStreamAsync(rendezvous, streamIndex, ct).ConfigureAwait(false);
-                lock (_streams)
-                {
-                    _streams.Add(stream);
-                }
-            }
-        }
-        finally
-        {
-            _poolLock.Release();
-        }
+        throw new NotSupportedException(
+            "Legacy HTTP relay pipe has been removed. Use the zero-disk TransferPipeService gRPC TLS 1.3 mTLS fallback.");
     }
 
     public ITransferStream GetStream(StreamIndex index)
@@ -369,19 +350,15 @@ public sealed class TcpMultiStreamPool : ITransferStreamPool
 public sealed class TcpMultiStreamPoolFactory : ITransferStreamPoolFactory
 {
     private readonly CallbackEndpointValidator _validator;
-    private readonly RelayTransferPipeClient _pipeClient;
 
-    public TcpMultiStreamPoolFactory(
-        RelayTransferPipeClient pipeClient,
-        CallbackEndpointValidator validator)
+    public TcpMultiStreamPoolFactory(CallbackEndpointValidator validator)
     {
-        _pipeClient = pipeClient ?? throw new ArgumentNullException(nameof(pipeClient));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
     }
 
     public ITransferStreamPool CreatePool(TransferSessionId sessionId, Domain.Identities.PublicIdentityId peerId, StreamCount streamCount)
     {
-        return new TcpMultiStreamPool(sessionId, peerId, streamCount, _validator, _pipeClient);
+        return new TcpMultiStreamPool(sessionId, peerId, streamCount, _validator);
     }
 
     public ITransferStreamPool CreatePool(TransferSessionId sessionId, Domain.Identities.PublicIdentityId peerId)

@@ -35,31 +35,6 @@ public sealed class MultiStreamEngineTests
     }
 
     [Test]
-    public void UT_MSE_01_DeterministicAesGcmNonceDerivation()
-    {
-        BaseNonce baseNonce = BaseNonce.Generate();
-
-        ChunkNonce nonce0 = ChunkNonce.Derive(baseNonce, ChunkIndex.FromInt(0));
-        ChunkNonce nonce1 = ChunkNonce.Derive(baseNonce, ChunkIndex.FromInt(1));
-        ChunkNonce nonceMax = ChunkNonce.Derive(baseNonce, ChunkIndex.FromInt(999_999));
-
-        // Nonces must be pairwise distinct
-        nonce0.Span.SequenceEqual(nonce1.Span).Should().BeFalse();
-        nonce0.Span.SequenceEqual(nonceMax.Span).Should().BeFalse();
-        nonce1.Span.SequenceEqual(nonceMax.Span).Should().BeFalse();
-
-        // Verify mathematical match: BaseNonce XOR BigEndianUInt96(i) on last 4 bytes
-        int baseLast4 = BinaryPrimitives.ReadInt32BigEndian(baseNonce.Span.Slice(8, 4));
-        int nonce0Last4 = BinaryPrimitives.ReadInt32BigEndian(nonce0.Span.Slice(8, 4));
-        int nonce1Last4 = BinaryPrimitives.ReadInt32BigEndian(nonce1.Span.Slice(8, 4));
-        int nonceMaxLast4 = BinaryPrimitives.ReadInt32BigEndian(nonceMax.Span.Slice(8, 4));
-
-        nonce0Last4.Should().Be(baseLast4 ^ 0);
-        nonce1Last4.Should().Be(baseLast4 ^ 1);
-        nonceMaxLast4.Should().Be(baseLast4 ^ 999_999);
-    }
-
-    [Test]
     public async Task UT_MSE_02_InFlightRequestQueueBoundingPerPeer()
     {
         TransferSessionId sessionId = TransferSessionId.New();
@@ -67,8 +42,6 @@ public sealed class MultiStreamEngineTests
 
         TransferSession session = CreateActiveSession(sessionId, peerId, chunkCount: 50);
         FakeTransferStream stream = new();
-        TransferKey key = TransferKey.Generate();
-        BaseNonce baseNonce = BaseNonce.Generate();
         RootDirectoryPath root = RootDirectoryPath.Parse(@"C:\Source");
 
         // Remote peer sends 32 consecutive requests
@@ -86,9 +59,7 @@ public sealed class MultiStreamEngineTests
             new RequestChunkFrame(ChunkIndex.FromInt(33)),
             stream,
             _fileStorage,
-            root,
-            key,
-            baseNonce);
+            root);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("MultiStream.QueueFull");
@@ -107,12 +78,10 @@ public sealed class MultiStreamEngineTests
 
         TransferSession session = CreateActiveSession(sessionId, peerId, chunkCount: 50);
         FakeTransferStream stream = new();
-        TransferKey key = TransferKey.Generate();
-        BaseNonce baseNonce = BaseNonce.Generate();
         RootDirectoryPath dest = RootDirectoryPath.Parse(@"C:\Dest");
 
         // Chunk 42 was never scheduled by local node
-        EncryptedChunkData fakeData = EncryptedChunkData.FromBytes(new byte[64]);
+        PlaintextChunkData fakeData = PlaintextChunkData.FromBytes(new byte[64]);
         ChunkDataFrame frame = new(ChunkIndex.FromInt(42), fakeData);
 
         DomainResult result = await _coordinator.HandleIncomingChunkDataAsync(
@@ -120,8 +89,6 @@ public sealed class MultiStreamEngineTests
             peerId,
             frame,
             stream,
-            key,
-            baseNonce,
             dest);
 
         result.IsFailure.Should().BeTrue();
@@ -139,31 +106,22 @@ public sealed class MultiStreamEngineTests
 
         TransferSession session = CreateActiveSession(sessionId, peerId, chunkCount: 10);
         FakeTransferStream stream = new();
-        TransferKey key = TransferKey.Generate();
-        BaseNonce baseNonce = BaseNonce.Generate();
         RootDirectoryPath dest = RootDirectoryPath.Parse(@"C:\Dest");
 
         ChunkIndex chunkIdx = ChunkIndex.FromInt(0);
         _scheduler.TrySchedule(peerId, chunkIdx).Should().BeTrue();
 
-        // Encrypt with corrupted plaintext bytes so leaf hash won't match Merkle tree
+        // Corrupted chunk bytes fail Merkle leaf verification
         byte[] corruptedBytes = new byte[session.Manifest.ChunkSize.Bytes];
         corruptedBytes[0] = 0xFF;
-        EncryptedChunkData encrypted = ChunkCryptoService.EncryptChunk(
-            PlaintextChunkData.FromBytes(corruptedBytes),
-            key,
-            baseNonce,
-            chunkIdx);
 
-        ChunkDataFrame frame = new(chunkIdx, encrypted);
+        ChunkDataFrame frame = new(chunkIdx, PlaintextChunkData.FromBytes(corruptedBytes));
 
         DomainResult result = await _coordinator.HandleIncomingChunkDataAsync(
             session,
             peerId,
             frame,
             stream,
-            key,
-            baseNonce,
             dest);
 
         result.IsFailure.Should().BeTrue();
@@ -261,8 +219,6 @@ public sealed class MultiStreamEngineTests
     {
         TransferSessionId sessionId = TransferSessionId.New();
         PublicIdentityId peerId = PublicIdentityId.New();
-        TransferKey key = TransferKey.Generate();
-        BaseNonce baseNonce = BaseNonce.Generate();
         RootDirectoryPath dest = RootDirectoryPath.Parse(@"C:\DestPump");
 
         int chunkCount = 8;
@@ -282,12 +238,7 @@ public sealed class MultiStreamEngineTests
                     if (frame is RequestChunkFrame req)
                     {
                         byte[] zeroPlaintext = new byte[session.Manifest.ChunkSize.Bytes];
-                        EncryptedChunkData enc = ChunkCryptoService.EncryptChunk(
-                            PlaintextChunkData.FromBytes(zeroPlaintext),
-                            key,
-                            baseNonce,
-                            req.ChunkIndex);
-                        return new ChunkDataFrame(req.ChunkIndex, enc);
+                        return new ChunkDataFrame(req.ChunkIndex, PlaintextChunkData.FromBytes(zeroPlaintext));
                     }
                     return null;
                 }
@@ -299,8 +250,6 @@ public sealed class MultiStreamEngineTests
             session,
             peerId,
             pool,
-            key,
-            baseNonce,
             dest);
 
         pumpResult.IsSuccess.Should().BeTrue();
@@ -318,8 +267,6 @@ public sealed class MultiStreamEngineTests
         PublicIdentityId peerA = PublicIdentityId.New();
         PublicIdentityId peerB = PublicIdentityId.New();
         PublicIdentityId localRecipient = PublicIdentityId.New();
-        TransferKey key = TransferKey.Generate();
-        BaseNonce baseNonce = BaseNonce.Generate();
         RootDirectoryPath dest = RootDirectoryPath.Parse(@"C:\DestSwarm");
 
         // 2 chunks total: Peer A initially only has Chunk 0, Peer B has Chunk 1
@@ -377,25 +324,20 @@ public sealed class MultiStreamEngineTests
                 if (frame is RequestChunkFrame req)
                 {
                     byte[] zeroPlaintext = new byte[session.Manifest.ChunkSize.Bytes];
-                    EncryptedChunkData enc = ChunkCryptoService.EncryptChunk(
-                        PlaintextChunkData.FromBytes(zeroPlaintext),
-                        key,
-                        baseNonce,
-                        req.ChunkIndex);
 
                     if (req.ChunkIndex.Value == 0)
                     {
                         // Peer A announces it just acquired Chunk 1 right before sending Chunk 0 data
                         streamA.InboundFrames.Enqueue(new HaveFrame(ChunkIndex.FromInt(1)));
                     }
-                    return new ChunkDataFrame(req.ChunkIndex, enc);
+                    return new ChunkDataFrame(req.ChunkIndex, PlaintextChunkData.FromBytes(zeroPlaintext));
                 }
                 return null;
             }
         };
         poolA.Streams.Add(streamA);
 
-        DomainResult result = await _coordinator.PumpPeerStreamsAsync(session, peerA, poolA, key, baseNonce, dest);
+        DomainResult result = await _coordinator.PumpPeerStreamsAsync(session, peerA, poolA, dest);
         result.IsSuccess.Should().BeTrue();
         session.IsDownloadComplete.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Completed);
@@ -504,8 +446,6 @@ public sealed class MultiStreamEngineTests
 
         // Charlie requests Chunk 0 from Bob
         FakeTransferStream stream = new();
-        TransferKey key = TransferKey.Generate();
-        BaseNonce baseNonce = BaseNonce.Generate();
 
         DomainResult serveResult = await _coordinator.HandleRequestChunkAsync(
             bobSession,
@@ -513,9 +453,7 @@ public sealed class MultiStreamEngineTests
             new RequestChunkFrame(ChunkIndex.FromInt(0)),
             stream,
             _fileStorage,
-            bobRoot,
-            key,
-            baseNonce);
+            bobRoot);
 
         serveResult.IsSuccess.Should().BeTrue();
         stream.SentFrames.Should().ContainSingle(f => f is ChunkDataFrame);
@@ -523,12 +461,8 @@ public sealed class MultiStreamEngineTests
         ChunkDataFrame sentFrame = (ChunkDataFrame)stream.SentFrames.Single(f => f is ChunkDataFrame);
         sentFrame.ChunkIndex.Value.Should().Be(0);
 
-        // Verify Charlie can decrypt and verify Merkle leaf hash of Bob's seeded chunk
-        int ptLen = sentFrame.Data.Length - ChunkCryptoService.TagSizeBytes;
-        byte[] decrypted = new byte[ptLen];
-        ChunkCryptoService.DecryptChunkInto(sentFrame.Data.Span, key, baseNonce, sentFrame.ChunkIndex, decrypted);
-
-        decrypted.Should().Equal(chunk0Bytes);
-        manifest.MerkleTree.VerifyLeaf(sentFrame.ChunkIndex, decrypted).Should().BeTrue();
+        // Verify Charlie receives exact bytes and verifies Merkle leaf hash of Bob's seeded chunk
+        sentFrame.Data.Span.ToArray().Should().Equal(chunk0Bytes);
+        manifest.MerkleTree.VerifyLeaf(sentFrame.ChunkIndex, sentFrame.Data.Span).Should().BeTrue();
     }
 }

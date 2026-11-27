@@ -301,6 +301,14 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
         services.AddScoped<AuthenticatedRelayEndpoint>();
+        services.AddSingleton<InMemorySwarmTrackerRegistry>();
+        services.AddSingleton<InMemoryTransferPipeBroker>();
+        services.AddSingleton<UdpStunResponderOptions>();
+        services.AddSingleton<UdpStunResponderService>();
+        services.AddSingleton<IUdpStunEndpointProvider>(sp => sp.GetRequiredService<UdpStunResponderService>());
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<UdpStunResponderService>());
+        services.AddScoped<ExchangeSwarmTrackerEndpoint>();
+        services.AddScoped<ExchangeTransferPipeEndpoint>();
 
         // Mailbox/group stream workers
         services.AddSingleton<DrainSchedulerOptions>();
@@ -382,20 +390,18 @@ public static class InfrastructureServiceCollectionExtensions
     {
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
-        services.AddSingleton<RelayTransferPipeClient>();
         services.AddSingleton(new CallbackEndpointValidatorOptions { AllowLan = true, AllowLoopback = true });
         services.AddSingleton<CallbackEndpointValidator>();
         services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
         services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
         services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
-        services.AddScoped<IDistributedTrackerPort, RelaySwarmTrackerClient>();
+        services.AddScoped<IDistributedTrackerPort, GrpcSwarmTrackerClient>();
         services.AddScoped<ITransferSessionRepository, SqliteTransferSessionRepository>();
         services.AddScoped<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
         services.AddScoped<IFileTransferQueryService, SqlFileTransferQueryService>();
         services.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
 
         services.AddHostedService<TransferOfferReaperWorker>();
-        services.AddHostedService<SwarmEndpointRetentionPruner>();
 
         return services;
     }

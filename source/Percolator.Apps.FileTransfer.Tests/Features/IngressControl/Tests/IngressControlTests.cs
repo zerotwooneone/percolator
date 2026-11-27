@@ -147,8 +147,7 @@ public sealed class IngressControlTests
             sessionId,
             summary,
             ManifestDistribution.FromInline(InlineManifestData.FromBytes(new byte[10])),
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
             RelayRendezvous: null,
             DirectCandidates: []);
@@ -173,8 +172,7 @@ public sealed class IngressControlTests
             sessionId,
             summary,
             ManifestDistribution.FromInline(InlineManifestData.FromBytes(new byte[10])),
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
             RelayRendezvous: null,
             DirectCandidates: []);
@@ -199,8 +197,7 @@ public sealed class IngressControlTests
             sessionId,
             summary,
             ManifestDistribution.FromInline(InlineManifestData.FromBytes(new byte[10])),
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
             RelayRendezvous: null,
             DirectCandidates: []);
@@ -239,8 +236,7 @@ public sealed class IngressControlTests
             sessionId,
             summary,
             ManifestDistribution.FromBlob(blob),
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
             RelayRendezvous: null,
             DirectCandidates: []);
@@ -356,8 +352,7 @@ public sealed class IngressControlTests
             sessionId,
             summary,
             ManifestDistribution.FromInline(InlineManifestData.FromSpan(manifestBytes.Span)),
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
             relay,
             DirectCandidates: []);

@@ -194,12 +194,15 @@ public sealed class SwarmCoordinationTests
         // Upload 1500 bytes (1.5x of 1000 bytes)
         session.RecordUploadedBytes(TransferByteLength.FromBytes(1500), _clock);
 
-        bool completed = await _swarmCoordinator.CheckSeedRatioCompletionAsync(session, tracker, pool);
+        SwarmRendezvousId rendezvousId = SwarmRendezvousId.Generate();
+        EphemeralSwarmPeerId ephemeralPeerId = EphemeralSwarmPeerId.Generate();
+
+        bool completed = await _swarmCoordinator.CheckSeedRatioCompletionAsync(session, tracker, pool, rendezvousId, ephemeralPeerId);
 
         completed.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Completed);
         pool.IsDisposed.Should().BeTrue();
-        tracker.Unregistered.Should().ContainSingle();
+        tracker.Unregistered.Should().ContainSingle(u => u.Rendezvous == rendezvousId && u.EphemeralPeerId == ephemeralPeerId);
     }
 
     [Test]

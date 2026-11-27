@@ -51,12 +51,12 @@ public sealed class TcpMultiStreamPoolTests
         decodedRequest.ChunkIndex.Should().Be(request.ChunkIndex);
 
         // 5. ChunkData
-        byte[] ciphertext = new byte[100];
-        RandomNumberGenerator.Fill(ciphertext);
-        var chunkData = new ChunkDataFrame(ChunkIndex.FromInt(12), EncryptedChunkData.FromBytes(ciphertext));
+        byte[] payload = new byte[100];
+        RandomNumberGenerator.Fill(payload);
+        var chunkData = new ChunkDataFrame(ChunkIndex.FromInt(12), PlaintextChunkData.FromBytes(payload));
         var decodedChunk = (ChunkDataFrame)RoundtripFrame(chunkData);
         decodedChunk.ChunkIndex.Should().Be(chunkData.ChunkIndex);
-        decodedChunk.Data.Span.SequenceEqual(ciphertext).Should().BeTrue();
+        decodedChunk.Data.Span.SequenceEqual(payload).Should().BeTrue();
 
         // 6. CancelChunk
         var cancel = new CancelChunkFrame(ChunkIndex.FromInt(99));
@@ -173,29 +173,17 @@ public sealed class TcpMultiStreamPoolTests
     }
 
     [Test]
-    public async Task ConnectRelayPipeAsync_OpensRealParallelStreams()
+    public async Task ConnectRelayPipeAsync_ThrowsNotSupportedExceptionForLegacyTcpPool()
     {
-        var pipeClient = new RelayTransferPipeClient((descriptor, index, ct) =>
-        {
-            var ms = new MemoryStream();
-            return ValueTask.FromResult<Stream>(ms);
-        });
-
-        var factory = new TcpMultiStreamPoolFactory(pipeClient: pipeClient, validator: new CallbackEndpointValidator(new CallbackEndpointValidatorOptions()));
-        var pool = factory.CreatePool(TransferSessionId.New(), Domain.Identities.PublicIdentityId.New(), StreamCount.FromInt(4));
+        var factory = new TcpMultiStreamPoolFactory(validator: new CallbackEndpointValidator(new CallbackEndpointValidatorOptions()));
+        await using var pool = factory.CreatePool(TransferSessionId.New(), Domain.Identities.PublicIdentityId.New(), StreamCount.FromInt(4));
 
         var rendezvous = new RelayRendezvousDescriptor(
-            RelayPipeEndpointUri.Parse("https://relay.test.net/pipes"),
+            RelayPipeEndpointUri.Parse("https://exchange.test.local/pipe"),
             RelayPipeToken.Generate());
 
-        await pool.ConnectRelayPipeAsync(rendezvous);
-        pool.ActiveStreams.Count.Should().Be(4);
-
-        var stream = pool.GetStream(StreamIndex.FromInt(2));
-        stream.Should().NotBeNull();
-        stream.Index.Value.Should().Be(2);
-
-        await pool.DisposeAsync();
+        var act = async () => await pool.ConnectRelayPipeAsync(rendezvous);
+        await act.Should().ThrowAsync<NotSupportedException>();
     }
 
     private static IStreamFramePayload RoundtripFrame(IStreamFramePayload frame)

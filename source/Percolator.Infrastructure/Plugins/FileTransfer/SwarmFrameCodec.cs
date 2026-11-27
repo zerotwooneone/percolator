@@ -154,14 +154,14 @@ public static class SwarmFrameCodec
 
     private static ChunkDataFrame DecodeChunkData(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length < 4)
+        if (payload.Length <= 4)
         {
-            throw new InvalidDataException($"ChunkData payload must be at least 4 bytes, received {payload.Length}.");
+            throw new InvalidDataException($"ChunkData payload must contain a 4-byte index and at least 1 data byte, received {payload.Length}.");
         }
 
         int chunkIndex = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(0, 4));
-        var encryptedData = EncryptedChunkData.FromBytes(payload.Slice(4).ToArray());
-        return new ChunkDataFrame(ChunkIndex.FromInt(chunkIndex), encryptedData);
+        var plaintextData = PlaintextChunkData.FromBytes(payload.Slice(4).ToArray());
+        return new ChunkDataFrame(ChunkIndex.FromInt(chunkIndex), plaintextData);
     }
 
     private static byte[] EncodePexPeers(PexPeersFrame frame)

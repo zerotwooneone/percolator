@@ -11,6 +11,8 @@ public sealed class RelayHostingPolicyHolder : IRelayHostingPolicyProvider
 {
     private volatile RelayHostingPolicy _policy;
 
+    public event Action<RelayHostingPolicy>? PolicyChanged;
+
     public RelayHostingPolicyHolder(RelayHostingPolicy? initialPolicy = null)
     {
         _policy = initialPolicy ?? RelayHostingPolicy.Default;
@@ -21,5 +23,6 @@ public sealed class RelayHostingPolicyHolder : IRelayHostingPolicyProvider
     public void UpdatePolicy(RelayHostingPolicy policy)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+        PolicyChanged?.Invoke(_policy);
     }
 }

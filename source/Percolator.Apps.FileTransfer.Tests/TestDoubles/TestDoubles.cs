@@ -213,26 +213,33 @@ public sealed class RecordingPayloadSender : IPayloadSender
 
 public sealed class RecordingTrackerPort : IDistributedTrackerPort
 {
-    public List<(SwarmRendezvousId Rendezvous, PublicIdentityId MemberId)> Unregistered { get; } = [];
-    public List<(SwarmRendezvousId Rendezvous, PublicIdentityId MemberId, SwarmPeerRole Role)> Announced { get; } = [];
+    public List<(SwarmRendezvousId Rendezvous, EphemeralSwarmPeerId EphemeralPeerId)> Unregistered { get; } = [];
+    public List<(SwarmRendezvousId Rendezvous, EphemeralSwarmPeerId EphemeralPeerId, SwarmPeerRole Role)> Announced { get; } = [];
+    public List<EphemeralSwarmPeerId> PeersToReturn { get; } = [];
+    public StunEndpointDescriptor? StunEndpoint { get; set; }
+    public bool SupportsTransferPipe { get; set; }
 
-    public ValueTask<IReadOnlyList<DirectEndpointCandidate>> AnnounceAsync(
+    public ValueTask<SwarmAnnounceResult> AnnounceAsync(
         SwarmRendezvousId rendezvousId,
-        PublicIdentityId memberId,
-        IReadOnlyList<DirectEndpointCandidate> candidates,
+        EphemeralSwarmPeerId ephemeralPeerId,
         SwarmPeerRole role,
+        Percolator.Domain.Delivery.ValueObjects.RelayEndpoint? exchangeEndpoint = null,
         CancellationToken ct = default)
     {
-        Announced.Add((rendezvousId, memberId, role));
-        return ValueTask.FromResult(candidates);
+        Announced.Add((rendezvousId, ephemeralPeerId, role));
+        return ValueTask.FromResult(new SwarmAnnounceResult(
+            PeersToReturn.ToList(),
+            StunEndpoint,
+            SupportsTransferPipe));
     }
 
     public ValueTask UnregisterAsync(
         SwarmRendezvousId rendezvousId,
-        PublicIdentityId memberId,
+        EphemeralSwarmPeerId ephemeralPeerId,
+        Percolator.Domain.Delivery.ValueObjects.RelayEndpoint? exchangeEndpoint = null,
         CancellationToken ct = default)
     {
-        Unregistered.Add((rendezvousId, memberId));
+        Unregistered.Add((rendezvousId, ephemeralPeerId));
         return ValueTask.CompletedTask;
     }
 }
@@ -245,7 +252,7 @@ public sealed class FakeNetworkEndpointDiscoveryPort : Percolator.Apps.FileTrans
     ];
 
     public RelayRendezvousDescriptor? AllocatedRelay { get; set; } =
-        new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipe/session"), RelayPipeToken.Generate());
+        new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://exchange.test.local/pipe/session"), RelayPipeToken.Generate());
 
     public ValueTask<IReadOnlyList<DirectEndpointCandidate>> DiscoverLocalCandidatesAsync(DirectWanPolicy wanPolicy, CancellationToken ct = default)
     {
@@ -415,7 +422,7 @@ public sealed class InMemoryBlobStorageService : IBlobStorageService
             MimeType = request.MimeType,
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddDays(1),
             StorageMode = BlobStorageMode.ChannelRelay,
-            RelayEndpointUri = "https://relay.percolator.net/pipes"
+            RelayEndpointUri = "https://exchange.test.local/blobs"
         };
 
         return DomainResult<BlobUploadResult>.Success(new BlobUploadResult(reference, BlobStorageMode.ChannelRelay));

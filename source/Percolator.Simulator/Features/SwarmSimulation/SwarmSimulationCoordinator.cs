@@ -677,9 +677,6 @@ internal sealed class SwarmSimulationCoordinator
             await using var senderStream = new TcpTransferStream(StreamIndex.FromInt(0), new NetworkStream(serverSocket, ownsSocket: true), serverSocket);
             await using var receiverStream = new TcpTransferStream(StreamIndex.FromInt(0), new NetworkStream(clientSocket, ownsSocket: true), clientSocket);
 
-            var key = TransferKey.Generate();
-            var baseNonce = BaseNonce.Generate();
-
             await using var destFs = new FileStream(destinationPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
 
             byte[] plaintextBuffer = new byte[swarm.ChunkSize];
@@ -768,33 +765,17 @@ internal sealed class SwarmSimulationCoordinator
                         $"[Swarm P2P Piece] Transferred chunk {chunkIndex} directly from peer '{sourceDisplayName}' (multi-source swarm)."));
                 }
 
-                // 5. Encrypt chunk with AES-GCM
-                byte[] ciphertextWithTag = new byte[bytesRead + ChunkCryptoService.TagSizeBytes];
-                ChunkCryptoService.EncryptChunkInto(
-                    plaintextBuffer.AsSpan(0, bytesRead),
-                    key,
-                    baseNonce,
-                    ChunkIndex.FromInt(chunkIndex),
-                    ciphertextWithTag.AsSpan());
-
-                // 6. Seeder/Peer sends ChunkDataFrame over TCP socket
+                // 5. Seeder/Peer sends ChunkDataFrame
+                byte[] chunkPayload = plaintextBuffer.AsSpan(0, bytesRead).ToArray();
                 await senderStream.SendFrameAsync(new ChunkDataFrame(
                     ChunkIndex.FromInt(chunkIndex),
-                    EncryptedChunkData.FromBytes(ciphertextWithTag)), ct);
+                    PlaintextChunkData.FromBytes(chunkPayload)), ct);
 
-                // 7. Downloader receives ChunkDataFrame from TCP socket
+                // 6. Downloader receives ChunkDataFrame
                 var dataFrame = (ChunkDataFrame)await receiverStream.ReceiveFrameAsync(ct);
 
-                // 8. Downloader decrypts and verifies SHA-256 Merkle leaf hash
-                byte[] decrypted = new byte[bytesRead];
-                ChunkCryptoService.DecryptChunkInto(
-                    dataFrame.Data.CiphertextWithAuthTag.Span,
-                    key,
-                    baseNonce,
-                    ChunkIndex.FromInt(chunkIndex),
-                    decrypted.AsSpan());
-
-                ChunkHash computedLeaf = MerkleTreeBuilder.HashLeaf(decrypted.AsSpan(0, bytesRead));
+                // 7. Downloader verifies SHA-256 Merkle leaf hash before writing to disk
+                ChunkHash computedLeaf = MerkleTreeBuilder.HashLeaf(dataFrame.Data.Span);
                 ChunkHash expectedLeaf = swarm.LeafHashes[chunkIndex];
 
                 if (!computedLeaf.Span.SequenceEqual(expectedLeaf.Span))
@@ -810,9 +791,9 @@ internal sealed class SwarmSimulationCoordinator
                     break;
                 }
 
-                // 9. Write verified chunk to disk
+                // 8. Write verified chunk to disk
                 destFs.Seek(offset, SeekOrigin.Begin);
-                await destFs.WriteAsync(decrypted.AsMemory(0, bytesRead), ct);
+                await destFs.WriteAsync(dataFrame.Data.Memory, ct);
                 await destFs.FlushAsync(ct);
 
                 // 10. Downloader sends HaveFrame back over TCP socket

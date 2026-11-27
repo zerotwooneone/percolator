@@ -61,7 +61,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<TransferSessionEntity> TransferSessions => Set<TransferSessionEntity>();
     public DbSet<ManifestFileEntity> ManifestFiles => Set<ManifestFileEntity>();
     public DbSet<TransferBitfieldEntity> TransferBitfields => Set<TransferBitfieldEntity>();
-    public DbSet<SwarmEndpointEntity> SwarmEndpoints => Set<SwarmEndpointEntity>();
     public DbSet<FilterPolicyEntity> FilterPolicies => Set<FilterPolicyEntity>();
     public DbSet<IdentitySettingsEntity> IdentitySettings => Set<IdentitySettingsEntity>();
     public DbSet<AppSettingEntity> AppSettings => Set<AppSettingEntity>();
@@ -449,8 +448,8 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.InitiatorId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.MerkleRoot).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.ConcatenatedLeaves).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.BaseNonce).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.TransferKey).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.SwarmRendezvousId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.EphemeralPeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
@@ -474,15 +473,6 @@ public class PercolatorDbContext : DbContext
                 .WithOne()
                 .HasForeignKey<TransferBitfieldEntity>(e => e.TransferId)
                 .OnDelete(DeleteBehavior.Cascade);
-        });
-        // 37. Swarm Endpoints (Chunk 4.4)
-        modelBuilder.Entity<SwarmEndpointEntity>(entity =>
-        {
-            entity.ToTable("ft_swarm_endpoints");
-            entity.HasKey(e => new { e.RendezvousId, e.PeerId });
-            entity.Property(e => e.RendezvousId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.PeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.HasIndex(e => e.LastSeenUtc).HasDatabaseName("ix_swarm_endpoints_expiry");
         });
         // 38. File Transfer Filter Policies (Chunk 4.4)
         modelBuilder.Entity<FilterPolicyEntity>(entity =>

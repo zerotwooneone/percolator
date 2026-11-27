@@ -120,9 +120,13 @@ public sealed class SwarmCoordinator
         TransferSession session,
         IDistributedTrackerPort trackerPort,
         ITransferStreamPool streamPool,
-        TransferKey? sessionKey = null,
+        SwarmRendezvousId rendezvousId,
+        EphemeralSwarmPeerId ephemeralPeerId,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(rendezvousId);
+        ArgumentNullException.ThrowIfNull(ephemeralPeerId);
+
         if (session.State == TransferSessionState.Completed || session.HasReachedTargetSeedRatio)
         {
             if (session.State != TransferSessionState.Completed)
@@ -131,10 +135,7 @@ public sealed class SwarmCoordinator
             }
 
             await streamPool.DisposeAsync();
-            SwarmRendezvousId rendezvous = sessionKey != null
-                ? SwarmRendezvousId.Derive(sessionKey)
-                : SwarmRendezvousId.FromBytes(System.Security.Cryptography.SHA256.HashData(session.Id.Value.ToByteArray()));
-            await trackerPort.UnregisterAsync(rendezvous, session.InitiatorId, ct);
+            await trackerPort.UnregisterAsync(rendezvousId, ephemeralPeerId, ct: ct);
             return true;
         }
 

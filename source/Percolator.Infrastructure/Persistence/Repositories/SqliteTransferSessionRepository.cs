@@ -91,6 +91,12 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
                 break;
         }
 
+        // Copy staged transport context columns onto the entity if present
+        if (_transportContexts.TryGetValue(session.Id, out TransferSessionTransportContext? stagedCtx))
+        {
+            ApplyTransportContext(existing, stagedCtx);
+        }
+
         // Save manifest files if not present
         bool hasFiles = await _dbContext.ManifestFiles
             .AnyAsync(f => f.TransferId == transferGuid, ct)
@@ -199,22 +205,97 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         return sessions;
     }
 
-    public ValueTask SaveTransportContextAsync(TransferSessionTransportContext context, CancellationToken ct = default)
+    public async ValueTask SaveTransportContextAsync(TransferSessionTransportContext context, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         _transportContexts[context.SessionId] = context;
-        return ValueTask.CompletedTask;
+
+        TransferSessionEntity? existing = await _dbContext.TransferSessions
+            .FirstOrDefaultAsync(s => s.TransferId == context.SessionId.Value, ct)
+            .ConfigureAwait(false);
+
+        if (existing != null)
+        {
+            ApplyTransportContext(existing, context);
+            await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
     }
 
-    public ValueTask<TransferSessionTransportContext?> GetTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    public async ValueTask<TransferSessionTransportContext?> GetTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default)
     {
-        if (_transportContexts.TryGetValue(sessionId, out TransferSessionTransportContext? context))
+        if (_transportContexts.TryGetValue(sessionId, out TransferSessionTransportContext? cached))
         {
-            return ValueTask.FromResult<TransferSessionTransportContext?>(context);
+            return cached;
         }
 
-        return ValueTask.FromResult<TransferSessionTransportContext?>(null);
+        TransferSessionEntity? entity = await _dbContext.TransferSessions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TransferId == sessionId.Value, ct)
+            .ConfigureAwait(false);
+
+        if (entity == null ||
+            entity.SwarmRendezvousId.Length != 32 ||
+            entity.EphemeralPeerId.Length != 32 ||
+            entity.StreamAuthToken.Length != 32 ||
+            entity.LocalIdentityId.Length != 16)
+        {
+            return null;
+        }
+
+        RelayRendezvousDescriptor? relay = !string.IsNullOrWhiteSpace(entity.RelayEndpointUri) && entity.RelayPipeToken is { Length: 32 }
+            ? new RelayRendezvousDescriptor(
+                RelayPipeEndpointUri.Parse(entity.RelayEndpointUri),
+                RelayPipeToken.FromBytes(entity.RelayPipeToken))
+            : null;
+
+        List<DirectEndpointCandidate> candidates = [];
+        if (!string.IsNullOrWhiteSpace(entity.DirectCandidatesJson))
+        {
+            var rawCandidates = JsonSerializer.Deserialize<List<PersistedCandidateDto>>(entity.DirectCandidatesJson);
+            if (rawCandidates != null)
+            {
+                foreach (var c in rawCandidates)
+                {
+                    candidates.Add(new DirectEndpointCandidate(
+                        EndpointHost.Parse(c.Host),
+                        PortNumber.FromInt(c.Port),
+                        (DirectCandidateKind)c.Kind));
+                }
+            }
+        }
+
+        var rehydrated = new TransferSessionTransportContext(
+            sessionId,
+            Domain.Channels.ValueObjects.ChannelId.FromGuid(entity.ChannelId),
+            Domain.Identities.PublicIdentityId.FromBytes(entity.LocalIdentityId),
+            SwarmRendezvousId.FromBytes(entity.SwarmRendezvousId),
+            EphemeralSwarmPeerId.FromBytes(entity.EphemeralPeerId),
+            StreamAuthToken.FromBytes(entity.StreamAuthToken),
+            (DirectWanPolicy)entity.WanPolicy,
+            relay,
+            candidates,
+            string.IsNullOrWhiteSpace(entity.LocalRootPath) ? null : RootDirectoryPath.Parse(entity.LocalRootPath));
+
+        _transportContexts[sessionId] = rehydrated;
+        return rehydrated;
     }
+
+    private static void ApplyTransportContext(TransferSessionEntity entity, TransferSessionTransportContext context)
+    {
+        entity.ChannelId = context.ChannelId.Value;
+        entity.LocalIdentityId = context.LocalIdentityId.ToByteArray();
+        entity.SwarmRendezvousId = context.SwarmRendezvousId.Span.ToArray();
+        entity.EphemeralPeerId = context.EphemeralPeerId.Span.ToArray();
+        entity.StreamAuthToken = context.StreamAuthToken.Span.ToArray();
+        entity.WanPolicy = (int)context.WanPolicy;
+        entity.LocalRootPath = context.LocalRootPath?.Value;
+        entity.RelayEndpointUri = context.RelayRendezvous?.EndpointUri.Value;
+        entity.RelayPipeToken = context.RelayRendezvous?.Token.Span.ToArray();
+        entity.DirectCandidatesJson = JsonSerializer.Serialize(
+            context.DirectCandidates.Select(c => new PersistedCandidateDto(c.Host.Value, c.Port.Value, (int)c.Kind)).ToList());
+    }
+
+    private sealed record PersistedCandidateDto(string Host, int Port, int Kind);
 
     private async Task<TransferSession> ReconstituteSessionAsync(TransferSessionEntity entity, CancellationToken ct)
     {

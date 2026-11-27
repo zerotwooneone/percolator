@@ -128,6 +128,7 @@ public sealed class TestPersonaNode : IAsyncDisposable
         services.AddBlobStorageInfrastructure();
         services.AddChatInfrastructure();
         services.AddChatApp();
+        services.AddFileTransferInfrastructure();
 
         services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
         services.AddScoped<IInboundConnectionWorkflow, InboundConnectionWorkflow>();

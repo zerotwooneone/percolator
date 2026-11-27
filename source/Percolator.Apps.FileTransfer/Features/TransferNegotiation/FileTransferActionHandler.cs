@@ -173,8 +173,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         RootBundleName bundleTitle = customBundleName ?? RootBundleName.Parse(fallbackName);
         TransferManifest manifest = TransferManifest.Create(sessionId, bundleTitle, chunkSize, merkleTree, entries);
 
-        TransferKey sessionKey = TransferKey.Generate();
-        BaseNonce baseNonce = BaseNonce.Generate();
+        SwarmRendezvousId rendezvousId = SwarmRendezvousId.Generate();
+        EphemeralSwarmPeerId ephemeralPeerId = EphemeralSwarmPeerId.Generate();
         StreamAuthToken streamAuthToken = StreamAuthToken.Generate();
         SeedRatio enforcedSeedRatio = targetSeedRatio ?? SeedRatio.Zero;
 
@@ -187,16 +187,15 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
         RelayRendezvousDescriptor? relayRendezvous = await _endpointDiscovery.AllocateRelayRendezvousAsync(sessionId, ct);
 
-        // Announce as Seeder to the swarm tracker (BitTorrent swarm bootstrap)
-        SwarmRendezvousId rendezvousId = SwarmRendezvousId.Derive(sessionKey);
-        await _trackerPort.AnnounceAsync(rendezvousId, localInitiator, candidates, SwarmPeerRole.Seeder, ct);
+        // Announce as Seeder to the blinded Exchange swarm tracker (zero Persona IDs, zero IP candidates)
+        await _trackerPort.AnnounceAsync(rendezvousId, ephemeralPeerId, SwarmPeerRole.Seeder, ct: ct);
 
         var transportContext = new TransferSessionTransportContext(
             sessionId,
             channelId,
             localInitiator,
-            sessionKey,
-            baseNonce,
+            rendezvousId,
+            ephemeralPeerId,
             streamAuthToken,
             wanPolicy,
             relayRendezvous,
@@ -226,19 +225,23 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 return DomainResult<TransferSessionId>.Failure(uploadResult.Error);
 
             BlobReference blobRef = uploadResult.Value.Reference;
+            if (string.IsNullOrWhiteSpace(blobRef.RelayEndpointUri))
+                return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.MissingRelayEndpoint", "Manifest blob upload did not return a relay endpoint URI."));
+
             manifestDist = ManifestDistribution.FromBlob(new ManifestBlobDescriptor(
                 blobRef.Id,
                 ChunkHash.FromBytes(blobRef.CiphertextSha256),
                 TotalBundleBytes.FromBytes(serializedManifest.Length),
-                RelayPipeEndpointUri.Parse(blobRef.RelayEndpointUri ?? "https://relay.percolator.net/pipes")));
+                RelayPipeEndpointUri.Parse(blobRef.RelayEndpointUri),
+                blobRef.EncryptionKey,
+                blobRef.BaseNonce));
         }
 
         FileTransferOfferPayload offerPayload = new(
             sessionId,
             TransferBundleSummary.Create(bundleTitle, manifest.TotalSize, manifest.TotalFiles, chunkSize, manifest.TotalChunks, merkleTree.Root),
             manifestDist,
-            sessionKey,
-            baseNonce,
+            rendezvousId,
             streamAuthToken,
             relayRendezvous,
             candidates);
@@ -348,27 +351,18 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 transportContext with { LocalRootPath = destinationFolder },
                 ct);
 
-            // Announce to distributed swarm tracker and merge any discovered swarm peer candidates
-            SwarmRendezvousId rendezvousId = SwarmRendezvousId.Derive(transportContext.SessionEncryptionKey);
+            // Announce to blinded Exchange swarm tracker (zero Persona IDs, zero IP candidates)
             SwarmPeerRole role = session.IsDownloadComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
-            IReadOnlyList<DirectEndpointCandidate> trackerCandidates = await _trackerPort.AnnounceAsync(
-                rendezvousId,
-                localSenderId,
-                receiverCandidates,
+            await _trackerPort.AnnounceAsync(
+                transportContext.SwarmRendezvousId,
+                transportContext.EphemeralPeerId,
                 role,
-                ct);
+                ct: ct);
 
-            // Establish out-of-band multi-stream connection (croc-style direct P2P with blind relay fallback)
+            // Establish out-of-band multi-stream connection
             if (!session.IsDownloadComplete)
             {
-                List<DirectEndpointCandidate> combinedDirect = [.. transportContext.DirectCandidates];
-                foreach (var tc in PexRateLimiter.FilterAndDeduplicate(trackerCandidates, wanPolicy, receiverCandidates))
-                {
-                    if (!combinedDirect.Contains(tc))
-                        combinedDirect.Add(tc);
-                }
-
-                await ConnectDirectWithRelayFallbackAsync(_streamPool, combinedDirect, transportContext.RelayRendezvous, ct);
+                await ConnectDirectWithRelayFallbackAsync(_streamPool, transportContext.DirectCandidates, transportContext.RelayRendezvous, ct);
             }
         }
 
@@ -430,7 +424,15 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
 
         DomainResult result = session.Pause(_clock);
-        if (result.IsSuccess) await _sessionRepository.SaveSessionAsync(session, ct);
+        if (result.IsSuccess)
+        {
+            await _sessionRepository.SaveSessionAsync(session, ct);
+            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+            if (transportContext != null)
+            {
+                await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
+            }
+        }
         return result;
     }
 
@@ -455,13 +457,13 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             await _sessionRepository.SaveSessionAsync(session, ct);
 
             TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
-            TransferKey sessionKey = transportContext?.SessionEncryptionKey ?? TransferKey.FromBytes(new byte[32]);
             PublicIdentityId localIdentity = transportContext?.LocalIdentityId ?? session.InitiatorId;
             ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
 
-            // Proactive tracker unregistration using the actual session TransferKey
-            SwarmRendezvousId rendezvous = SwarmRendezvousId.Derive(sessionKey);
-            await _trackerPort.UnregisterAsync(rendezvous, localIdentity, ct);
+            if (transportContext != null)
+            {
+                await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
+            }
 
             // Send in-band cancel payload
             FileTransferCancelPayload cancelPayload = new(sessionId, reason);

@@ -36,6 +36,8 @@ message ManifestBlobDescriptorProto {
   bytes ciphertext_sha256 = 2;     // 32-byte SHA-256
   int64 plaintext_size_bytes = 3;
   string relay_endpoint_uri = 4;
+  bytes blob_encryption_key = 5;   // 32-byte AEAD key for remote manifest blob
+  bytes blob_base_nonce = 6;       // 12-byte AEAD base nonce for remote manifest blob
 }
 
 message ManifestDistributionProto {
@@ -61,8 +63,7 @@ message FileTransferOfferProto {
   bytes transfer_session_id = 1;   // 16-byte UUID
   TransferBundleSummaryProto summary = 2;
   ManifestDistributionProto manifest = 3;
-  bytes session_encryption_key = 4;// 32-byte TransferKey
-  bytes base_nonce = 5;            // 12-byte BaseNonce
+  bytes swarm_rendezvous_id = 4;   // 32-byte random SwarmRendezvousId
   bytes stream_auth_token = 6;     // 32-byte StreamAuthToken
   RelayRendezvousDescriptorProto relay_rendezvous = 7;
   repeated DirectEndpointCandidateProto direct_candidates = 8;

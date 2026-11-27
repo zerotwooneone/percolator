@@ -109,11 +109,24 @@ private InMemoryBlobStorageService _blobStorage = null!;
         TransferSession session = TransferSession.CreateOutgoing1to1(sessionId, initiator, recipient, manifest, SeedRatio.Zero, _clock);
         await _sessionRepo.SaveSessionAsync(session);
 
+        SwarmRendezvousId rendezvousId = SwarmRendezvousId.Generate();
+        EphemeralSwarmPeerId ephemeralPeerId = EphemeralSwarmPeerId.Generate();
+        await _sessionRepo.SaveTransportContextAsync(new TransferSessionTransportContext(
+            sessionId,
+            ChannelId.New(),
+            initiator,
+            rendezvousId,
+            ephemeralPeerId,
+            StreamAuthToken.Generate(),
+            DirectWanPolicy.DisabledByDefault,
+            RelayRendezvous: null,
+            DirectCandidates: []));
+
         DomainResult cancelResult = await _handler.CancelTransferAsync(sessionId, TransferTerminationReason.UserDeclined);
 
         cancelResult.IsSuccess.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Cancelled);
-        _trackerPort.Unregistered.Should().ContainSingle(u => u.MemberId == initiator);
+        _trackerPort.Unregistered.Should().ContainSingle(u => u.Rendezvous == rendezvousId && u.EphemeralPeerId == ephemeralPeerId);
     }
 
     [Test]
@@ -149,16 +162,20 @@ private InMemoryBlobStorageService _blobStorage = null!;
         sentOffer.RecipientIdentityId.Should().Be(recipient);
         sentOffer.AppId.Should().Be(AppId.FileTransferControl);
 
-        // Verify transport context was persisted with session encryption key and tracker announced Seeder role
+        // Verify transport context was persisted with blinded rendezvous/peer IDs and tracker announced Seeder role
         TransferSessionTransportContext? transportCtx = await _sessionRepo.GetTransportContextAsync(sessionId);
         transportCtx.Should().NotBeNull();
-        SwarmRendezvousId expectedRendezvous = SwarmRendezvousId.Derive(transportCtx!.SessionEncryptionKey);
-        _trackerPort.Announced.Should().ContainSingle(a => a.Rendezvous == expectedRendezvous && a.MemberId == localInitiator && a.Role == SwarmPeerRole.Seeder);
+        _trackerPort.Announced.Should().ContainSingle(a =>
+            a.Rendezvous == transportCtx!.SwarmRendezvousId &&
+            a.EphemeralPeerId == transportCtx.EphemeralPeerId &&
+            a.Role == SwarmPeerRole.Seeder);
 
-        // Cancel and verify tracker unregisters deterministic SwarmRendezvousId derived from session key
+        // Cancel and verify tracker unregisters blinded rendezvous + ephemeral peer ID
         DomainResult cancelResult = await _handler.CancelTransferAsync(sessionId, TransferTerminationReason.SenderCancelled);
         cancelResult.IsSuccess.Should().BeTrue();
-        _trackerPort.Unregistered.Should().ContainSingle(u => u.Rendezvous == expectedRendezvous && u.MemberId == localInitiator);
+        _trackerPort.Unregistered.Should().ContainSingle(u =>
+            u.Rendezvous == transportCtx!.SwarmRendezvousId &&
+            u.EphemeralPeerId == transportCtx.EphemeralPeerId);
     }
 
     [Test]
@@ -302,12 +319,17 @@ private InMemoryBlobStorageService _blobStorage = null!;
         acceptedSession!.LocalBitfield.HasChunk(ChunkIndex.FromInt(0)).Should().BeTrue();
         acceptedSession.LocalBitfield.HasChunk(ChunkIndex.FromInt(1)).Should().BeFalse();
 
-        // 2. Verify Leecher announced to tracker
-        recipientTracker.Announced.Should().ContainSingle(a => a.MemberId == recipientId && a.Role == SwarmPeerRole.Leecher);
+        // 2. Verify Leecher announced to tracker using blinded EphemeralSwarmPeerId
+        TransferSessionTransportContext? recipientCtx = await recipientRepo.GetTransportContextAsync(sessionId);
+        recipientCtx.Should().NotBeNull();
+        recipientTracker.Announced.Should().ContainSingle(a =>
+            a.Rendezvous == recipientCtx!.SwarmRendezvousId &&
+            a.EphemeralPeerId == recipientCtx.EphemeralPeerId &&
+            a.Role == SwarmPeerRole.Leecher);
 
         // 3. Verify croc-style direct-to-relay fallback connected to the relay pipe when direct failed
         recipientPool.ConnectedRelayRendezvous.Should().NotBeNull();
-        recipientPool.ConnectedRelayRendezvous!.EndpointUri.Value.Should().Be("https://relay.percolator.net/pipe/session");
+        recipientPool.ConnectedRelayRendezvous!.EndpointUri.Value.Should().Be("https://exchange.test.local/pipe/session");
     }
 
     [Test]

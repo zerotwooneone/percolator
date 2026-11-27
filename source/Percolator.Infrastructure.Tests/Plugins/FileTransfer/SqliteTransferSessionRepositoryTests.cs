@@ -25,7 +25,6 @@ public sealed class SqliteTransferSessionRepositoryTests
     private SqliteTestDb _db = null!;
     private SqliteTransferSessionRepository _sessionRepo = null!;
     private SqliteFilterPolicyRepository _policyRepo = null!;
-    private RelaySwarmTrackerClient _trackerClient = null!;
 
     [SetUp]
     public void SetUp()
@@ -33,7 +32,6 @@ public sealed class SqliteTransferSessionRepositoryTests
         _db = new SqliteTestDb();
         _sessionRepo = new SqliteTransferSessionRepository(_db.DbContext);
         _policyRepo = new SqliteFilterPolicyRepository(_db.DbContext);
-        _trackerClient = new RelaySwarmTrackerClient(_db.DbContext);
     }
 
     [TearDown]
@@ -88,15 +86,17 @@ public sealed class SqliteTransferSessionRepositoryTests
             SeedRatio.FromMultiplier(1.5),
             clock);
 
+        var rendezvousId = SwarmRendezvousId.Generate();
+        var ephemeralPeerId = EphemeralSwarmPeerId.Generate();
         var context = new TransferSessionTransportContext(
             sessionId,
             ChannelId.New(),
             initiatorId,
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            rendezvousId,
+            ephemeralPeerId,
             StreamAuthToken.Generate(),
             DirectWanPolicy.DisabledByDefault,
-            new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://relay.test.net/pipes"), RelayPipeToken.Generate()),
+            new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://exchange.test.local/pipe"), RelayPipeToken.Generate()),
             new List<DirectEndpointCandidate>
             {
                 new(EndpointHost.Parse("127.0.0.1"), PortNumber.FromInt(50001), DirectCandidateKind.DirectLan)
@@ -110,6 +110,7 @@ public sealed class SqliteTransferSessionRepositoryTests
         var readRepo = new SqliteTransferSessionRepository(readDb);
 
         TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
+        TransferSessionTransportContext? loadedCtx = await readRepo.GetTransportContextAsync(sessionId);
 
         loaded.Should().NotBeNull();
         loaded!.Id.Should().Be(sessionId);
@@ -127,6 +128,10 @@ public sealed class SqliteTransferSessionRepositoryTests
         loaded.Topology.InitiatorId.Should().Be(initiatorId);
         loaded.Topology.Should().BeOfType<TransferTopology.OneToOne>()
             .Which.RecipientId.Should().Be(recipientId);
+
+        loadedCtx.Should().NotBeNull();
+        loadedCtx!.SwarmRendezvousId.Should().Be(rendezvousId);
+        loadedCtx.EphemeralPeerId.Should().Be(ephemeralPeerId);
     }
 
     [Test]
@@ -151,47 +156,6 @@ public sealed class SqliteTransferSessionRepositoryTests
         loaded.EvaluatePeer(Domain.Identities.PublicIdentityId.New()).Should().Be(PeerFilterDecision.Allowed);
         loaded.EvaluateRelay(blockedRelay).Should().Be(RelayFilterDecision.Blocked);
         loaded.EvaluateRelay(RelayPipeEndpointUri.Parse("https://trusted.relay.net/pipes")).Should().Be(RelayFilterDecision.Allowed);
-    }
-
-    [Test]
-    public async Task RelaySwarmTrackerClient_AnnounceAndUnregister_SlidingLeaseMatches()
-    {
-        var key = TransferKey.Generate();
-        var rendezvousId = SwarmRendezvousId.Derive(key);
-        var peer1 = Domain.Identities.PublicIdentityId.New();
-        var peer2 = Domain.Identities.PublicIdentityId.New();
-
-        var candidates1 = new List<DirectEndpointCandidate>
-        {
-            new(EndpointHost.Parse("10.0.0.1"), PortNumber.FromInt(50001), DirectCandidateKind.DirectLan)
-        };
-        var candidates2 = new List<DirectEndpointCandidate>
-        {
-            new(EndpointHost.Parse("10.0.0.2"), PortNumber.FromInt(50002), DirectCandidateKind.DirectLan)
-        };
-
-        // Peer 1 announces - no other peers yet
-        var result1 = await _trackerClient.AnnounceAsync(rendezvousId, peer1, candidates1, SwarmPeerRole.Seeder);
-        result1.Should().BeEmpty();
-
-        // Peer 2 announces - should discover Peer 1
-        var result2 = await _trackerClient.AnnounceAsync(rendezvousId, peer2, candidates2, SwarmPeerRole.Leecher);
-        result2.Should().HaveCount(1);
-        result2[0].Host.Value.Should().Be("10.0.0.1");
-        result2[0].Port.Value.Should().Be(50001);
-
-        // Peer 1 announces again - should discover Peer 2
-        var result1Again = await _trackerClient.AnnounceAsync(rendezvousId, peer1, candidates1, SwarmPeerRole.Seeder);
-        result1Again.Should().HaveCount(1);
-        result1Again[0].Host.Value.Should().Be("10.0.0.2");
-        result1Again[0].Port.Value.Should().Be(50002);
-
-        // Peer 2 unregisters
-        await _trackerClient.UnregisterAsync(rendezvousId, peer2);
-
-        // Peer 1 announces again - Peer 2 gone
-        var result1Final = await _trackerClient.AnnounceAsync(rendezvousId, peer1, candidates1, SwarmPeerRole.Seeder);
-        result1Final.Should().BeEmpty();
     }
 
     private sealed class TestClock : IDateTimeProvider

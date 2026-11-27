@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package percolator.infrastructure;
+
+option csharp_namespace = "Percolator.Infrastructure.Protos";
+
+service SwarmTrackerService {
+    rpc Announce (SwarmAnnounceRequestProto) returns (SwarmAnnounceResponseProto);
+    rpc Unregister (SwarmUnregisterRequestProto) returns (SwarmUnregisterResponseProto);
+}
+
+service TransferPipeService {
+    rpc OpenPipe (stream PipeChunkProto) returns (stream PipeChunkProto);
+}
+
+message SwarmAnnounceRequestProto {
+    bytes swarm_rendezvous_id = 1;
+    bytes ephemeral_peer_id = 2;
+    uint32 peer_role = 3;
+}
+
+message SwarmAnnounceResponseProto {
+    repeated bytes active_ephemeral_peer_ids = 1;
+    string stun_host = 2;
+    uint32 stun_port = 3;
+    bool supports_transfer_pipe = 4;
+}
+
+message SwarmUnregisterRequestProto {
+    bytes swarm_rendezvous_id = 1;
+    bytes ephemeral_peer_id = 2;
+}
+
+message SwarmUnregisterResponseProto {
+    bool removed = 1;
+}
+
+message PipeChunkProto {
+    bytes rendezvous_token = 1;
+    bytes payload = 2;
+}

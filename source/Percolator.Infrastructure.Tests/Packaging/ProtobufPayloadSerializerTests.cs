@@ -70,16 +70,16 @@ public sealed class ProtobufPayloadSerializerTests
             sessionId,
             TransferBundleSummary.Create(manifest.RootName, manifest.TotalSize, manifest.TotalFiles, manifest.ChunkSize, manifest.TotalChunks, manifest.MerkleTree.Root),
             ManifestDistribution.FromInline(InlineManifestData.FromSpan(manifestBytes.Span)),
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
-            new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://relay.percolator.net/pipe"), RelayPipeToken.Generate()),
+            new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://exchange.test.local/pipe"), RelayPipeToken.Generate()),
             [new DirectEndpointCandidate(EndpointHost.Parse("192.168.1.25"), PortNumber.FromInt(5200), DirectCandidateKind.DirectLan)]);
 
         ReadOnlyMemory<byte> offerBytes = _serializer.Serialize(offer);
         DomainResult<FileTransferOfferPayload> offerRoundtrip = _serializer.Deserialize<FileTransferOfferPayload>(offerBytes);
         offerRoundtrip.IsSuccess.Should().BeTrue();
         offerRoundtrip.Value.TransferSessionId.Should().Be(sessionId);
+        offerRoundtrip.Value.SwarmRendezvousId.Should().Be(offer.SwarmRendezvousId);
         offerRoundtrip.Value.Summary.Should().Be(offer.Summary);
         offerRoundtrip.Value.DirectCandidates.Should().ContainSingle();
 

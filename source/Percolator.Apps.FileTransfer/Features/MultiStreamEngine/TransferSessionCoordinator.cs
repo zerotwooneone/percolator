@@ -71,8 +71,6 @@ public sealed class TransferSessionCoordinator
         ITransferStream stream,
         IDesktopFileStorage fileStorage,
         RootDirectoryPath rootPath,
-        TransferKey key,
-        BaseNonce baseNonce,
         CancellationToken ct = default)
     {
         if (!_scheduler.TryRecordInboundRequest(requesterId))
@@ -125,16 +123,10 @@ public sealed class TransferSessionCoordinator
                 sliceData.Span.CopyTo(rentedPlaintext.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
             }
 
-            byte[] encryptedBuffer = new byte[length + ChunkCryptoService.TagSizeBytes];
-            ChunkCryptoService.EncryptChunkInto(
-                rentedPlaintext.AsSpan(0, length),
-                key,
-                baseNonce,
-                chunkIdx,
-                encryptedBuffer);
-
-            EncryptedChunkData encrypted = EncryptedChunkData.FromMemory(encryptedBuffer);
-            await stream.SendFrameAsync(new ChunkDataFrame(chunkIdx, encrypted), ct);
+            byte[] chunkBuffer = new byte[length];
+            rentedPlaintext.AsSpan(0, length).CopyTo(chunkBuffer);
+            PlaintextChunkData plaintextChunk = PlaintextChunkData.FromBytes(chunkBuffer);
+            await stream.SendFrameAsync(new ChunkDataFrame(chunkIdx, plaintextChunk), ct);
 
             lock (_sessionSync)
             {
@@ -157,8 +149,6 @@ public sealed class TransferSessionCoordinator
         PublicIdentityId senderId,
         ChunkDataFrame chunkFrame,
         ITransferStream stream,
-        TransferKey key,
-        BaseNonce baseNonce,
         RootDirectoryPath destinationFolder,
         ITransferStreamPool? streamPool = null,
         CancellationToken ct = default)
@@ -169,75 +159,41 @@ public sealed class TransferSessionCoordinator
             return DomainResult.Failure(new DomainError("MultiStream.UnsolicitedChunk", $"Received unsolicited chunk index {chunkFrame.ChunkIndex.Value}."));
         }
 
-        if (chunkFrame.Data.Length < ChunkCryptoService.TagSizeBytes)
+        await _rateLimiter.ThrottleDownloadAsync(session.Id, TransferByteLength.FromBytes(chunkFrame.Data.Length), ct);
+
+        // 2. Verify Merkle leaf hash ONCE inside session.VerifyAndRecordChunk (via DiskChunkAssembler) BEFORE writing to disk
+        DomainResult assembleResult = await _assembler.AssembleChunkAsync(
+            session,
+            destinationFolder,
+            chunkFrame.ChunkIndex,
+            chunkFrame.Data,
+            _clock,
+            ct);
+
+        if (assembleResult.IsSuccess)
         {
-            await HandlePeerCryptoOrHashFailureAsync(session, senderId, chunkFrame.ChunkIndex, stream);
-            return DomainResult.Failure(new DomainError("MultiStream.CryptoAuthFailed", "Chunk AES-GCM authentication failed."));
-        }
-
-        int plaintextLength = chunkFrame.Data.Length - ChunkCryptoService.TagSizeBytes;
-        await _rateLimiter.ThrottleDownloadAsync(session.Id, TransferByteLength.FromBytes(plaintextLength), ct);
-
-        byte[] rentedPlaintext = ArrayPool<byte>.Shared.Rent(Math.Max(1, plaintextLength));
-        try
-        {
-            try
+            _scheduler.MarkCompleted(chunkFrame.ChunkIndex);
+            if (streamPool != null)
             {
-                ChunkCryptoService.DecryptChunkInto(
-                    chunkFrame.Data.Span,
-                    key,
-                    baseNonce,
-                    chunkFrame.ChunkIndex,
-                    rentedPlaintext.AsSpan(0, plaintextLength));
+                await streamPool.BroadcastFrameAsync(new HaveFrame(chunkFrame.ChunkIndex), ct);
             }
-            catch (CryptographicException)
-            {
-                await HandlePeerCryptoOrHashFailureAsync(session, senderId, chunkFrame.ChunkIndex, stream);
-                return DomainResult.Failure(new DomainError("MultiStream.CryptoAuthFailed", "Chunk AES-GCM authentication failed."));
-            }
-
-            PlaintextChunkData plaintext = PlaintextChunkData.FromMemory(rentedPlaintext.AsMemory(0, plaintextLength));
-
-            // 2. Verify Merkle leaf hash ONCE inside session.VerifyAndRecordChunk (via DiskChunkAssembler) BEFORE writing to disk
-            DomainResult assembleResult = await _assembler.AssembleChunkAsync(
-                session,
-                destinationFolder,
-                chunkFrame.ChunkIndex,
-                plaintext,
-                _clock,
-                ct);
-
-            if (assembleResult.IsSuccess)
-            {
-                _scheduler.MarkCompleted(chunkFrame.ChunkIndex);
-                if (streamPool != null)
-                {
-                    await streamPool.BroadcastFrameAsync(new HaveFrame(chunkFrame.ChunkIndex), ct);
-                }
-                return assembleResult;
-            }
-
-            if (assembleResult.Error.Code == "Transfer.CryptographicVerificationFailed")
-            {
-                await HandlePeerCryptoOrHashFailureAsync(session, senderId, chunkFrame.ChunkIndex, stream);
-                return DomainResult.Failure(new DomainError("MultiStream.CorruptedChunk", "Merkle leaf hash mismatch."));
-            }
-
-            _scheduler.ReleaseChunk(chunkFrame.ChunkIndex);
             return assembleResult;
         }
-        finally
+
+        if (assembleResult.Error.Code == "Transfer.CryptographicVerificationFailed")
         {
-            ArrayPool<byte>.Shared.Return(rentedPlaintext);
+            await HandlePeerHashFailureAsync(session, senderId, chunkFrame.ChunkIndex, stream);
+            return DomainResult.Failure(new DomainError("MultiStream.CorruptedChunk", "Merkle leaf hash mismatch."));
         }
+
+        _scheduler.ReleaseChunk(chunkFrame.ChunkIndex);
+        return assembleResult;
     }
 
     public async ValueTask<DomainResult> PumpPeerStreamsAsync(
         TransferSession session,
         PublicIdentityId peerId,
         ITransferStreamPool streamPool,
-        TransferKey key,
-        BaseNonce baseNonce,
         RootDirectoryPath destinationFolder,
         IDesktopFileStorage? fileStorage = null,
         SwarmCoordinator? swarmCoordinator = null,
@@ -256,8 +212,6 @@ public sealed class TransferSessionCoordinator
                 peerId,
                 stream,
                 streamPool,
-                key,
-                baseNonce,
                 destinationFolder,
                 fileStorage,
                 swarmCoordinator,
@@ -283,8 +237,6 @@ public sealed class TransferSessionCoordinator
         PublicIdentityId peerId,
         ITransferStream stream,
         ITransferStreamPool streamPool,
-        TransferKey key,
-        BaseNonce baseNonce,
         RootDirectoryPath destinationFolder,
         IDesktopFileStorage? fileStorage,
         SwarmCoordinator? swarmCoordinator,
@@ -393,8 +345,6 @@ public sealed class TransferSessionCoordinator
                         peerId,
                         chunkData,
                         stream,
-                        key,
-                        baseNonce,
                         destinationFolder,
                         streamPool,
                         ct);
@@ -430,8 +380,6 @@ public sealed class TransferSessionCoordinator
                             stream,
                             fileStorage,
                             destinationFolder,
-                            key,
-                            baseNonce,
                             ct);
 
                         if (uploadResult.IsFailure && uploadResult.Error.Code == "MultiStream.QueueFull")
@@ -523,7 +471,7 @@ public sealed class TransferSessionCoordinator
         return DomainResult.Success();
     }
 
-    private async ValueTask HandlePeerCryptoOrHashFailureAsync(
+    private async ValueTask HandlePeerHashFailureAsync(
         TransferSession session,
         PublicIdentityId senderId,
         ChunkIndex chunkIndex,

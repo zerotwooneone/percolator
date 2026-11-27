@@ -221,8 +221,7 @@ public sealed class TransferNegotiationTests
             sessionId,
             summary,
             ManifestDistribution.FromBlob(blob),
-            TransferKey.Generate(),
-            BaseNonce.Generate(),
+            SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
             RelayRendezvous: null,
             DirectCandidates: []);

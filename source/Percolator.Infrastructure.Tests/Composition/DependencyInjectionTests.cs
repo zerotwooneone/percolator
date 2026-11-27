@@ -186,7 +186,7 @@ public sealed class DependencyInjectionTests
             typeof(AbandonedInvitePruner),
             typeof(RelayBlobRetentionPruner),
             typeof(TransferOfferReaperWorker),
-            typeof(SwarmEndpointRetentionPruner),
+            typeof(UdpStunResponderService),
             typeof(RelayMailboxDrainHost),
             typeof(RelayGroupStreamWorker)
         ]);

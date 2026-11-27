@@ -23,16 +23,6 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
     }
 
     [Test]
-    public void Constructor_WithInvalidUri_ThrowsArgumentException()
-    {
-        var actNull = () => new NetworkInterfaceEndpointDiscoveryPort(relayBaseUri: "");
-        actNull.Should().Throw<ArgumentException>();
-
-        var actRelative = () => new NetworkInterfaceEndpointDiscoveryPort(relayBaseUri: "not-a-valid-uri");
-        actRelative.Should().Throw<ArgumentException>();
-    }
-
-    [Test]
     public async Task DiscoverLocalCandidatesAsync_WithCancellationToken_ThrowsWhenCanceled()
     {
         var port = new NetworkInterfaceEndpointDiscoveryPort();
@@ -49,7 +39,6 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
         // Arrange
         var port = new NetworkInterfaceEndpointDiscoveryPort(
             listenPort: 50001,
-            relayBaseUri: "https://relay.percolator.net/pipes",
             allowLoopback: true);
 
         // Act
@@ -66,7 +55,6 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
         // Arrange
         var port = new NetworkInterfaceEndpointDiscoveryPort(
             listenPort: 52345,
-            relayBaseUri: "https://relay.percolator.net/pipes",
             allowLoopback: true);
 
         // Act
@@ -77,13 +65,11 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
     }
 
     [Test]
-    public async Task AllocateRelayRendezvousAsync_ReturnsDescriptorWithConfiguredUri()
+    public async Task AllocateRelayRendezvousAsync_ReturnsNullBecausePipeEndpointIsDiscoveredViaTracker()
     {
         // Arrange
-        var customUri = "https://custom.relay.net/pipes";
         var port = new NetworkInterfaceEndpointDiscoveryPort(
             listenPort: 50001,
-            relayBaseUri: customUri,
             allowLoopback: false);
 
         var sessionId = TransferSessionId.New();
@@ -92,8 +78,6 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
         var descriptor = await port.AllocateRelayRendezvousAsync(sessionId);
 
         // Assert
-        descriptor.Should().NotBeNull();
-        descriptor!.EndpointUri.Value.Should().Be(customUri);
-        descriptor.Token.Memory.Length.Should().Be(32);
+        descriptor.Should().BeNull();
     }
 }

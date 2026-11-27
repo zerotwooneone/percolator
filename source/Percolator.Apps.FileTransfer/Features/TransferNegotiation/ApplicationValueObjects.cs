@@ -90,31 +90,6 @@ public sealed record RelayRendezvousDescriptor(
     RelayPipeToken Token);
 
 [ByteArray(length: 32)]
-public sealed partial record TransferKey : ISensitiveSecret
-{
-    public static TransferKey Generate() => FromBytes(RandomNumberGenerator.GetBytes(32));
-
-    public void Zeroize()
-    {
-        if (MemoryMarshal.TryGetArray(Memory, out var segment) && segment.Array != null)
-        {
-            CryptographicOperations.ZeroMemory(segment.Array.AsSpan(segment.Offset, segment.Count));
-        }
-    }
-
-    public void Dispose()
-    {
-        Zeroize();
-    }
-}
-
-[ByteArray(length: 12)]
-public sealed partial record BaseNonce
-{
-    public static BaseNonce Generate() => FromBytes(RandomNumberGenerator.GetBytes(12));
-}
-
-[ByteArray(length: 32)]
 public sealed partial record StreamAuthToken
 {
     public static StreamAuthToken Generate() => FromBytes(RandomNumberGenerator.GetBytes(32));
@@ -123,12 +98,29 @@ public sealed partial record StreamAuthToken
 [ByteArray(length: 32)]
 public sealed partial record SwarmRendezvousId
 {
-    public static SwarmRendezvousId Derive(TransferKey key)
-    {
-        byte[] derived = HMACSHA256.HashData(key.Span, System.Text.Encoding.UTF8.GetBytes("swarm-rendezvous"));
-        return FromBytes(derived);
-    }
+    public static SwarmRendezvousId Generate() => FromBytes(RandomNumberGenerator.GetBytes(32));
 }
+
+[ByteArray(length: 32)]
+public sealed partial record EphemeralSwarmPeerId
+{
+    public static EphemeralSwarmPeerId Generate() => FromBytes(RandomNumberGenerator.GetBytes(32));
+}
+
+[ByteArray(length: 32)]
+public sealed partial record PipeRendezvousToken
+{
+    public static PipeRendezvousToken Generate() => FromBytes(RandomNumberGenerator.GetBytes(32));
+}
+
+public sealed record StunEndpointDescriptor(
+    EndpointHost Host,
+    PortNumber Port);
+
+public sealed record SwarmAnnounceResult(
+    IReadOnlyList<EphemeralSwarmPeerId> ActivePeers,
+    StunEndpointDescriptor? StunEndpoint,
+    bool SupportsTransferPipe);
 
 public readonly record struct StreamIndex(int Value)
 {
@@ -176,17 +168,6 @@ public sealed record ResolvedFilePath
         new(Path.Combine(root.Value, relativePath.Value));
 }
 
-public sealed record EncryptedChunkData
-{
-    public ReadOnlyMemory<byte> CiphertextWithAuthTag { get; }
-    public int Length => CiphertextWithAuthTag.Length;
-    public ReadOnlySpan<byte> Span => CiphertextWithAuthTag.Span;
-
-    private EncryptedChunkData(ReadOnlyMemory<byte> data) => CiphertextWithAuthTag = data;
-    public static EncryptedChunkData FromBytes(byte[] data) => new(data ?? throw new ArgumentNullException(nameof(data)));
-    public static EncryptedChunkData FromMemory(ReadOnlyMemory<byte> memory) => new(memory);
-}
-
 public sealed record InlineManifestData
 {
     public ReadOnlyMemory<byte> SerializedBytes { get; }
@@ -210,7 +191,9 @@ public sealed record ManifestBlobDescriptor(
     BlobId BlobId,
     ChunkHash CiphertextSha256,
     TotalBundleBytes PlaintextSizeBytes,
-    RelayPipeEndpointUri RelayEndpointUri);
+    RelayPipeEndpointUri RelayEndpointUri,
+    byte[]? BlobEncryptionKey = null,
+    byte[]? BlobBaseNonce = null);
 
 public enum ManifestDistributionKind : byte
 {
@@ -269,8 +252,8 @@ public sealed record TransferSessionTransportContext(
     TransferSessionId SessionId,
     ChannelId ChannelId,
     PublicIdentityId LocalIdentityId,
-    TransferKey SessionEncryptionKey,
-    BaseNonce BaseNonce,
+    SwarmRendezvousId SwarmRendezvousId,
+    EphemeralSwarmPeerId EphemeralPeerId,
     StreamAuthToken StreamAuthToken,
     DirectWanPolicy WanPolicy,
     RelayRendezvousDescriptor? RelayRendezvous,

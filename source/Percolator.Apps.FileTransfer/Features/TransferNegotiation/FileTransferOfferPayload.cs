@@ -7,8 +7,7 @@ public sealed record FileTransferOfferPayload(
     TransferSessionId TransferSessionId,
     TransferBundleSummary Summary,
     ManifestDistribution Manifest,
-    TransferKey SessionEncryptionKey,
-    BaseNonce BaseNonce,
+    SwarmRendezvousId SwarmRendezvousId,
     StreamAuthToken StreamAuthToken,
     RelayRendezvousDescriptor? RelayRendezvous,
     IReadOnlyList<DirectEndpointCandidate> DirectCandidates);

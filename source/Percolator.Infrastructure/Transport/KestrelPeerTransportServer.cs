@@ -98,11 +98,17 @@ public sealed class KestrelPeerTransportServer : IPeerTransportServer, IHostedSe
                 new ParentContainerServiceActivator<AuthenticatedRelayEndpoint>(_serviceProvider));
             builder.Services.AddSingleton<IGrpcServiceActivator<AnonymousGroupRelayEndpoint>>(
                 new ParentContainerServiceActivator<AnonymousGroupRelayEndpoint>(_serviceProvider));
+            builder.Services.AddSingleton<IGrpcServiceActivator<ExchangeSwarmTrackerEndpoint>>(
+                new ParentContainerServiceActivator<ExchangeSwarmTrackerEndpoint>(_serviceProvider));
+            builder.Services.AddSingleton<IGrpcServiceActivator<ExchangeTransferPipeEndpoint>>(
+                new ParentContainerServiceActivator<ExchangeTransferPipeEndpoint>(_serviceProvider));
 
             app = builder.Build();
             app.MapGrpcService<UnauthenticatedDeliveryEndpoint>();
             app.MapGrpcService<AuthenticatedRelayEndpoint>();
             app.MapGrpcService<AnonymousGroupRelayEndpoint>();
+            app.MapGrpcService<ExchangeSwarmTrackerEndpoint>();
+            app.MapGrpcService<ExchangeTransferPipeEndpoint>();
 
             _app = app;
         }

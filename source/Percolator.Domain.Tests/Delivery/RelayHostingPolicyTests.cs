@@ -83,4 +83,48 @@ public sealed class RelayHostingPolicyTests
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("RELAY_PREKEYS_REJECTED");
     }
+
+    [Test]
+    public void DefaultAndHostManagedPolicies_DisableSwarmTrackerAndTransferPipeByDefault()
+    {
+        RelayHostingPolicy.Default.IsFeatureEnabled(RelayFeatureFlags.PreKeys).Should().BeTrue();
+        RelayHostingPolicy.Default.IsFeatureEnabled(RelayFeatureFlags.Profiles).Should().BeTrue();
+        RelayHostingPolicy.Default.IsFeatureEnabled(RelayFeatureFlags.Blobs).Should().BeTrue();
+        RelayHostingPolicy.Default.IsFeatureEnabled(RelayFeatureFlags.Groups).Should().BeTrue();
+        RelayHostingPolicy.Default.IsFeatureEnabled(RelayFeatureFlags.SwarmTracker).Should().BeFalse();
+        RelayHostingPolicy.Default.IsFeatureEnabled(RelayFeatureFlags.TransferPipe).Should().BeFalse();
+
+        RelayHostingPolicy.HostManaged.IsFeatureEnabled(RelayFeatureFlags.SwarmTracker).Should().BeFalse();
+        RelayHostingPolicy.HostManaged.IsFeatureEnabled(RelayFeatureFlags.TransferPipe).Should().BeFalse();
+
+        var optedIn = new RelayHostingPolicy(
+            enabledFeatures: RelayFeatureFlags.DefaultCore | RelayFeatureFlags.SwarmTracker | RelayFeatureFlags.TransferPipe);
+        optedIn.IsFeatureEnabled(RelayFeatureFlags.SwarmTracker).Should().BeTrue();
+        optedIn.IsFeatureEnabled(RelayFeatureFlags.TransferPipe).Should().BeTrue();
+    }
+
+    [Test]
+    public void RelayHostingPolicy_RejectsNonPositiveSwarmAndPipeQuotas()
+    {
+        var actSwarms = () => new RelayHostingPolicy(maxActiveSwarms: 0);
+        actSwarms.Should().Throw<ArgumentOutOfRangeException>();
+
+        var actPeers = () => new RelayHostingPolicy(maxPeersPerSwarm: 0);
+        actPeers.Should().Throw<ArgumentOutOfRangeException>();
+
+        var actSwarmTtl = () => new RelayHostingPolicy(swarmPeerEntryTtl: TimeSpan.Zero);
+        actSwarmTtl.Should().Throw<ArgumentOutOfRangeException>();
+
+        var actPipes = () => new RelayHostingPolicy(maxConcurrentPipes: 0);
+        actPipes.Should().Throw<ArgumentOutOfRangeException>();
+
+        var actRate = () => new RelayHostingPolicy(maxBytesPerSecondPerPipe: 0);
+        actRate.Should().Throw<ArgumentOutOfRangeException>();
+
+        var actSessionBytes = () => new RelayHostingPolicy(maxBytesPerSession: -1);
+        actSessionBytes.Should().Throw<ArgumentOutOfRangeException>();
+
+        var actIdle = () => new RelayHostingPolicy(pipeIdleTimeout: TimeSpan.Zero);
+        actIdle.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }

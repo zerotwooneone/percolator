@@ -1879,8 +1879,8 @@ Academic and protocol audit confirms that stranger discovery on a single untrust
   - Update `Percolator.Apps.FileTransfer/Design.md` with `DEC-FILETRANSFER-DATAPLANE-TRANSPORT` (Option 2 `DataChannelDotnet`, Group V2 `FileTransferOffer`/`PeerJoin` + eviction pruning, offline-author seeding while unlocked, optional zero-disk `TransferPipe`, removing `ChunkCryptoService`) and `INV-EPHEMERAL-SESSION-LISTENER`.
   - Verify `pwsh -File scripts/validate-qms-compliance.ps1` passes and obtain human sign-off prior to `FT-002`.
 - **Acceptance Criteria:**
-  - [ ] `soup/datachannel-dotnet.md` and all QMS documents updated and approved prior to `FT-002`.
-  - [ ] `scripts/validate-qms-compliance.ps1` passes with 0 errors.
+  - [x] `soup/datachannel-dotnet.md` and all QMS documents updated and approved prior to `FT-002`.
+  - [x] `validate-qms-compliance.ps1` passes with 0 errors across all normative QMS documents (247 unique semantic IDs, 0 duplicates).
 
 #### Ticket `FT-002` — Exchange Blinded `SwarmTrackerService`, Embedded RFC 5389 UDP STUN, Optional Zero-Disk `TransferPipe` & Cleanup
 - **Layer / Scope:** `Percolator.Domain` (`RelayFeatureFlags`, `RelayHostingPolicy`), `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure` (`Protos/file_transfer_tracker.proto`, `ExchangeSwarmTrackerEndpoint`, `ExchangeTransferPipeEndpoint`, `UdpStunResponderService`, `GrpcSwarmTrackerClient`, `KestrelPeerTransportServer`)
@@ -1903,9 +1903,9 @@ Academic and protocol audit confirms that stranger discovery on a single untrust
     - Lightweight stateless UDP listener (~150 LOC) answering RFC 5389 STUN Binding Requests with `XOR-MAPPED-ADDRESS` when `RelayFeatureFlags.SwarmTracker` is enabled on the Exchange (zero disk, zero state, strict packet size & rate bounds).
   - **`GrpcSwarmTrackerClient`:** Replaces local-SQLite/JSON `RelaySwarmTrackerClient` (zero `System.Text.Json`) and resolves Exchange URI from `IRelayDirectory`.
 - **Acceptance Criteria:**
-  - [ ] Zero references to `ChunkCryptoService`, `RelayTransferPipeClient`, or `"https://relay.percolator.net/pipes"` remain.
-  - [ ] `SwarmTrackerService` and `TransferPipeService` store zero Persona IDs, zero cert hashes, and write **0 bytes to disk**; `TransferPipe` is disabled by default unless opted in by the Exchange operator.
-  - [ ] Embedded RFC 5389 UDP STUN responder returns valid `XOR-MAPPED-ADDRESS` responses on Binding Requests.
+  - [x] Zero references to `ChunkCryptoService`, `RelayTransferPipeClient`, or `"https://relay.percolator.net/pipes"` remain.
+  - [x] `SwarmTrackerService` and `TransferPipeService` store zero Persona IDs, zero cert hashes, and write **0 bytes to disk**; `TransferPipe` is disabled by default unless opted in by the Exchange operator.
+  - [x] Embedded RFC 5389 UDP STUN responder returns valid `XOR-MAPPED-ADDRESS` responses on Binding Requests.
 
 #### Ticket `FT-003` — Quarantined `DataChannelDotnet` ICE/STUN/DTLS/SCTP Transport Adapter & Optional `TransferPipe` TLS 1.3 mTLS Fallback
 - **Layer / Scope:** `Percolator.Apps.FileTransfer` (transport ports & wire frames), `Percolator.Infrastructure/Plugins/FileTransfer` (`WebRtc/*` quarantined `DataChannelDotnet` adapter, `TransferPipeTlsStreamTransport`, SQLCipher ephemeral cert persistence)

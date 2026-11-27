@@ -177,13 +177,22 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         }
         else if (offer.Manifest.Kind == ManifestDistributionKind.RemoteBlob && offer.Manifest.BlobDescriptor != null)
         {
-            distProto.RemoteBlob = new ManifestBlobDescriptorProto
+            var blobProto = new ManifestBlobDescriptorProto
             {
                 BlobId = offer.Manifest.BlobDescriptor.BlobId.HexDigest,
                 CiphertextSha256 = ByteString.CopyFrom(offer.Manifest.BlobDescriptor.CiphertextSha256.Span),
                 PlaintextSizeBytes = offer.Manifest.BlobDescriptor.PlaintextSizeBytes.Bytes,
                 RelayEndpointUri = offer.Manifest.BlobDescriptor.RelayEndpointUri.Value
             };
+            if (offer.Manifest.BlobDescriptor.BlobEncryptionKey != null)
+            {
+                blobProto.BlobEncryptionKey = ByteString.CopyFrom(offer.Manifest.BlobDescriptor.BlobEncryptionKey);
+            }
+            if (offer.Manifest.BlobDescriptor.BlobBaseNonce != null)
+            {
+                blobProto.BlobBaseNonce = ByteString.CopyFrom(offer.Manifest.BlobDescriptor.BlobBaseNonce);
+            }
+            distProto.RemoteBlob = blobProto;
         }
 
         FileTransferOfferProto proto = new()
@@ -199,8 +208,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
                 MerkleRoot = ByteString.CopyFrom(offer.Summary.MerkleRoot.Span)
             },
             Manifest = distProto,
-            SessionEncryptionKey = ByteString.CopyFrom(offer.SessionEncryptionKey.Span),
-            BaseNonce = ByteString.CopyFrom(offer.BaseNonce.Span),
+            SwarmRendezvousId = ByteString.CopyFrom(offer.SwarmRendezvousId.Span),
             StreamAuthToken = ByteString.CopyFrom(offer.StreamAuthToken.Span)
         };
 
@@ -247,12 +255,13 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
                 new BlobId(proto.Manifest.RemoteBlob.BlobId),
                 ChunkHash.FromSpan(proto.Manifest.RemoteBlob.CiphertextSha256.Span),
                 TotalBundleBytes.FromBytes(proto.Manifest.RemoteBlob.PlaintextSizeBytes),
-                RelayPipeEndpointUri.Parse(proto.Manifest.RemoteBlob.RelayEndpointUri))),
+                RelayPipeEndpointUri.Parse(proto.Manifest.RemoteBlob.RelayEndpointUri),
+                proto.Manifest.RemoteBlob.BlobEncryptionKey.IsEmpty ? null : proto.Manifest.RemoteBlob.BlobEncryptionKey.ToByteArray(),
+                proto.Manifest.RemoteBlob.BlobBaseNonce.IsEmpty ? null : proto.Manifest.RemoteBlob.BlobBaseNonce.ToByteArray())),
             _ => throw new InvalidOperationException($"Unknown ManifestDistributionKind: {proto.Manifest.Kind}")
         };
 
-        TransferKey sessionKey = TransferKey.FromSpan(proto.SessionEncryptionKey.Span);
-        BaseNonce baseNonce = BaseNonce.FromSpan(proto.BaseNonce.Span);
+        SwarmRendezvousId swarmRendezvousId = SwarmRendezvousId.FromSpan(proto.SwarmRendezvousId.Span);
         StreamAuthToken streamAuthToken = StreamAuthToken.FromSpan(proto.StreamAuthToken.Span);
 
         RelayRendezvousDescriptor? relay = proto.RelayRendezvous != null
@@ -274,8 +283,7 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             sessionId,
             summary,
             manifestDist,
-            sessionKey,
-            baseNonce,
+            swarmRendezvousId,
             streamAuthToken,
             relay,
             candidates);

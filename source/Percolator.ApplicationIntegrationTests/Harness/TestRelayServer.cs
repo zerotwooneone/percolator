@@ -123,6 +123,13 @@ public sealed class TestRelayServer : IAsyncDisposable
         services.AddSingleton<ILocalChunkStore>(new LocalFileChunkStore(blobDir));
 
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
+        services.AddSingleton<InMemorySwarmTrackerRegistry>();
+        services.AddSingleton<InMemoryTransferPipeBroker>();
+        services.AddSingleton(new UdpStunResponderOptions { BindAddress = IPAddress.Loopback, Port = 0 });
+        services.AddSingleton<UdpStunResponderService>();
+        services.AddSingleton<IUdpStunEndpointProvider>(sp => sp.GetRequiredService<UdpStunResponderService>());
+        services.AddScoped<ExchangeSwarmTrackerEndpoint>();
+        services.AddScoped<ExchangeTransferPipeEndpoint>();
         services.AddScoped(sp => new AuthenticatedRelayEndpoint(
             sp.GetRequiredService<IRelayMailboxCapabilityStore>(),
             sp.GetRequiredService<IRelayPreKeyRepository>(),
@@ -141,6 +148,9 @@ public sealed class TestRelayServer : IAsyncDisposable
 
         var serviceProvider = services.BuildServiceProvider();
         var certProvider = serviceProvider.GetRequiredService<ITransportCertificateProvider>();
+        var stunService = serviceProvider.GetRequiredService<UdpStunResponderService>();
+        await stunService.StartAsync(CancellationToken.None).ConfigureAwait(false);
+
         var server = new KestrelPeerTransportServer(certProvider, serviceProvider, new PeerTransportServerOptions());
 
         await server.StartAsync(IPAddress.Loopback, new PortNumber(0)).ConfigureAwait(false);
@@ -151,6 +161,11 @@ public sealed class TestRelayServer : IAsyncDisposable
             Endpoint = RelayEndpoint.FromHostAndPort("127.0.0.1", boundPort)
         };
     }
+
+    public IPEndPoint? StunEndpoint => _serviceProvider.GetRequiredService<IUdpStunEndpointProvider>().BoundEndpoint;
+    public InMemorySwarmTrackerRegistry SwarmTrackerRegistry => _serviceProvider.GetRequiredService<InMemorySwarmTrackerRegistry>();
+    public InMemoryTransferPipeBroker TransferPipeBroker => _serviceProvider.GetRequiredService<InMemoryTransferPipeBroker>();
+    public string BlobStorageDirectory => _blobStorageDir;
 
     public async Task StopAsync() => await _server.StopAsync().ConfigureAwait(false);
 
@@ -186,6 +201,11 @@ public sealed class TestRelayServer : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _server.DisposeAsync().ConfigureAwait(false);
+        var stunService = _serviceProvider.GetService<UdpStunResponderService>();
+        if (stunService != null)
+        {
+            await stunService.DisposeAsync().ConfigureAwait(false);
+        }
         await _serviceProvider.DisposeAsync().ConfigureAwait(false);
         await _keeperConnection.DisposeAsync().ConfigureAwait(false);
 

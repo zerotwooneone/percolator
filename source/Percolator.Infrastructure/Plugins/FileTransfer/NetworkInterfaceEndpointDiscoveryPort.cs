@@ -15,12 +15,10 @@ using Percolator.Apps.FileTransfer.Ports;
 public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDiscoveryPort
 {
     private readonly PortNumber _listenPort;
-    private readonly RelayPipeEndpointUri _relayPipeUri;
     private readonly bool _allowLoopback;
 
     public NetworkInterfaceEndpointDiscoveryPort(
         int listenPort = 50001,
-        string relayBaseUri = "https://relay.percolator.net/pipes",
         bool allowLoopback = false)
     {
         if (listenPort is < 1 or > 65535)
@@ -28,14 +26,7 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
             throw new ArgumentOutOfRangeException(nameof(listenPort), listenPort, "Port must be between 1 and 65535.");
         }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(relayBaseUri);
-        if (!Uri.TryCreate(relayBaseUri, UriKind.Absolute, out _))
-        {
-            throw new ArgumentException("Relay base URI must be a valid absolute URI.", nameof(relayBaseUri));
-        }
-
         _listenPort = PortNumber.FromInt(listenPort);
-        _relayPipeUri = RelayPipeEndpointUri.Parse(relayBaseUri);
         _allowLoopback = allowLoopback;
     }
 
@@ -106,11 +97,6 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-
-        var descriptor = new RelayRendezvousDescriptor(
-            _relayPipeUri,
-            RelayPipeToken.Generate());
-
-        return ValueTask.FromResult<RelayRendezvousDescriptor?>(descriptor);
+        return ValueTask.FromResult<RelayRendezvousDescriptor?>(null);
     }
 }
