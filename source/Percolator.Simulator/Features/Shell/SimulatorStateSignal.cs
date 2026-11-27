@@ -17,7 +17,6 @@ internal enum SignalCategory
     ProfileChanged,
     GroupStateChanged,
     SwarmProgressChanged,
-    DiscoveryStateChanged,
     FileTransferOfferReceived,
     FileTransferCompleted
 }

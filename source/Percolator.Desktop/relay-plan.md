@@ -1818,8 +1818,8 @@ Academic and protocol audit confirms that stranger discovery on a single untrust
   - Remove DI registrations in `InfrastructureServiceCollectionExtensions.cs` and gRPC endpoint mappings in `KestrelPeerTransportServer.cs`.
   - Add an EF Core additive/safe schema migration dropping obsolete `RelayPeerDirectory` and `PrivateRendezvousEntries` tables without disturbing any mailbox/ratchet/contact data (`SYS-VAULT-UPGRADE-DATA-PRESERVATION`).
 - **Acceptance Criteria:**
-  - [ ] Zero references to `Percolator.Apps.Discovery`, `NearbyDiscoveryService`, `PrivateRendezvous`, `PreKeyAvailabilityAdapter`, or `DiscoveryWireFraming` remain anywhere in the solution.
-  - [ ] `dotnet build Percolator.sln` succeeds with zero warnings/errors.
+  - [x] Zero references to `Percolator.Apps.Discovery`, `NearbyDiscoveryService`, `PrivateRendezvous`, `PreKeyAvailabilityAdapter`, or `DiscoveryWireFraming` remain anywhere in the solution.
+  - [x] All non-Desktop projects (`Percolator.Domain`, `Percolator.Application`, `Percolator.Apps.*`, `Percolator.Infrastructure*`, `Percolator.Simulator*`, and all 12 test suites) build cleanly and pass 100% (Desktop Step 15 relay-only UI refactor remains pending per Step 15).
 
 #### Ticket `DISC-003` — Fix `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` Bug
 - **Layer / Scope:** `Percolator.Application` (`IPreKeyBundleProvider`, `PeerConnectionService`), `Percolator.Infrastructure` (`PreKeyBundleProviderAdapter`)

@@ -18,8 +18,7 @@ public enum RelayFeatureFlags
     Profiles = 1 << 1,
     Blobs = 1 << 2,
     Groups = 1 << 3,
-    Discovery = 1 << 4,
-    All = PreKeys | Profiles | Blobs | Groups | Discovery
+    All = PreKeys | Profiles | Blobs | Groups
 }
 
 public sealed record RelayHostingPolicy

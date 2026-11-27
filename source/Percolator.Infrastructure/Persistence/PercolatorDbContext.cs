@@ -52,9 +52,6 @@ public class PercolatorDbContext : DbContext
     public DbSet<ChatAttachmentEntity> ChatAttachments => Set<ChatAttachmentEntity>();
     public DbSet<ChatGroupInvitationEntity> ChatGroupInvitations => Set<ChatGroupInvitationEntity>();
     public DbSet<ChatUnknownGroupMessageEntity> ChatUnknownGroupMessages => Set<ChatUnknownGroupMessageEntity>();
-    // Chunk 4.2 Discovery & Rendezvous Entities
-    public DbSet<RelayPeerDirectoryEntity> RelayPeerDirectory => Set<RelayPeerDirectoryEntity>();
-    public DbSet<RelayRendezvousEntryEntity> RelayRendezvousEntries => Set<RelayRendezvousEntryEntity>();
     public DbSet<RelayRegistrationEntity> RelayRegistrations => Set<RelayRegistrationEntity>();
     public DbSet<RelayMailboxBindingEntity> RelayMailboxBindings => Set<RelayMailboxBindingEntity>();
     public DbSet<RelayMailboxCapabilityEntity> RelayMailboxCapabilities => Set<RelayMailboxCapabilityEntity>();
@@ -443,28 +440,7 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.ReceivedAtUnixMs)
                 .HasDatabaseName("ix_unknown_group_received");
         });
-        // 32. Relay Peer Directory (Chunk 4.2)
-        modelBuilder.Entity<RelayPeerDirectoryEntity>(entity =>
-        {
-            entity.ToTable("relay_peer_directory");
-            entity.HasKey(e => e.PeerId);
-            entity.Property(e => e.PeerId).HasColumnType("BLOB");
-            entity.Property(e => e.RoutingToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.DeliveryToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.HasIndex(e => e.LastUpdatedAtUtc)
-                .HasDatabaseName("ix_peer_directory_updated");
-        });
-        // 33. Relay Rendezvous Entries (Chunk 4.2)
-        modelBuilder.Entity<RelayRendezvousEntryEntity>(entity =>
-        {
-            entity.ToTable("relay_rendezvous_entries");
-            entity.HasKey(e => e.BlindedLocator);
-            entity.Property(e => e.BlindedLocator).HasColumnType("BLOB");
-            entity.Property(e => e.EncryptedRoute).HasColumnType("BLOB");
-            entity.HasIndex(e => e.PublishedAtUtc)
-                .HasDatabaseName("ix_rendezvous_published");
-        });
-        // 34. File Transfer Sessions (Chunk 4.4)
+        // 32. File Transfer Sessions (Chunk 4.4)
         modelBuilder.Entity<TransferSessionEntity>(entity =>
         {
             entity.ToTable("ft_transfer_sessions");

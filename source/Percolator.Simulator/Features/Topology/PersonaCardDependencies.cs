@@ -1,7 +1,6 @@
 using System;
 using Percolator.Application.Invitations;
 using Percolator.Simulator.Features.DirectChat;
-using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.Pairing;
 using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
@@ -28,7 +27,6 @@ internal sealed class PersonaCardDependencies
     public RichChatActionCoordinator RichChatCoordinator { get; }
     public ProfileSyncCoordinator ProfileCoordinator { get; }
     public GroupChatCoordinator GroupCoordinator { get; }
-    public DiscoverySimulationCoordinator DiscoveryCoordinator { get; }
     public IVirtualClockStateService VirtualClock { get; }
     public SwarmSimulationCoordinator SwarmCoordinator { get; }
     public IPeerInvitationCodec InvitationCodec { get; }
@@ -46,7 +44,6 @@ internal sealed class PersonaCardDependencies
         RichChatActionCoordinator richChatCoordinator,
         ProfileSyncCoordinator profileCoordinator,
         GroupChatCoordinator groupCoordinator,
-        DiscoverySimulationCoordinator discoveryCoordinator,
         IVirtualClockStateService virtualClock,
         SwarmSimulationCoordinator swarmCoordinator,
         IFlightRecorderStateService flightRecorder,
@@ -64,7 +61,6 @@ internal sealed class PersonaCardDependencies
         RichChatCoordinator = richChatCoordinator ?? throw new ArgumentNullException(nameof(richChatCoordinator));
         ProfileCoordinator = profileCoordinator ?? throw new ArgumentNullException(nameof(profileCoordinator));
         GroupCoordinator = groupCoordinator ?? throw new ArgumentNullException(nameof(groupCoordinator));
-        DiscoveryCoordinator = discoveryCoordinator ?? throw new ArgumentNullException(nameof(discoveryCoordinator));
         VirtualClock = virtualClock ?? throw new ArgumentNullException(nameof(virtualClock));
         SwarmCoordinator = swarmCoordinator ?? throw new ArgumentNullException(nameof(swarmCoordinator));
         FlightRecorder = flightRecorder ?? throw new ArgumentNullException(nameof(flightRecorder));

@@ -18,7 +18,7 @@ For formal layer boundaries, microkernel contract specifications, and technical 
 ### 1.2 Application Payload Isolation
 Communication in Percolator is multi-tenant and microkernel-driven:
 - **Application Segmentation:** Every plugin registers under a distinct application identifier (`AppId`). Payloads are tagged and routed exclusively to their designated plugin handlers.
-- **Cross-App Isolation:** Content from different applications is strictly partitioned. Interactive chat feeds, peer discovery announcements, and large-file distribution swarms operate over separate virtual streams and never cross-contaminate.
+- **Cross-App Isolation:** Content from different applications is strictly partitioned. Interactive chat feeds and large-file distribution swarms operate over separate virtual streams and never cross-contaminate.
 
 ### 1.3 Cryptographic Agnosticism for Plugins
 Pluggable applications focus on domain-specific feature logic without managing low-level cryptographic state:
@@ -62,7 +62,7 @@ The SDK defines transfer abstractions that align with the physical realities of 
 ```
 ┌────────────────────────────────────────────────────────┐
 │               Application Plugins                      │
-│     (Percolator.Apps.Chat, Discovery, etc.)            │
+│    (Percolator.Apps.Chat, FileTransfer, etc.)          │
 └───────────────────────────┬────────────────────────────┘
                             │ consumes
 ┌───────────────────────────▼────────────────────────────┐

@@ -1,4 +1,4 @@
-namespace Percolator.Infrastructure.Tests.Plugins.Discovery;
+namespace Percolator.Infrastructure.Tests.Transport;
 
 using System;
 using System.Collections.Generic;

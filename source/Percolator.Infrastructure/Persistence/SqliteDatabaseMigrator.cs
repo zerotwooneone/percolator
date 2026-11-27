@@ -48,6 +48,7 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
             }
 
             await ApplyPreKeySchemaUpgradesAsync(ct);
+            await ApplyRetiredTableCleanupAsync(ct);
 
             return DomainResult.Success();
         }
@@ -55,6 +56,14 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
         {
             return DomainResult.Failure(new DomainError("DATABASE_MIGRATION_FAILED", ex.Message));
         }
+    }
+
+    private async Task ApplyRetiredTableCleanupAsync(CancellationToken ct)
+    {
+        await _dbContext.Database.ExecuteSqlRawAsync("""
+            DROP TABLE IF EXISTS "relay_peer_directory";
+            DROP TABLE IF EXISTS "relay_rendezvous_entries";
+            """, ct);
     }
 
     private async Task ApplyPreKeySchemaUpgradesAsync(CancellationToken ct)

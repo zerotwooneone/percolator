@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Percolator.Apps.Chat.Features.Messaging;
-using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;
@@ -21,7 +20,6 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
     private readonly ISimulatorLogSink _logSink;
 
     public ReadOnlyReactiveProperty<DateTimeOffset> CurrentUtcNow => _currentTime;
-    public int CurrentDiscoveryEpoch => (int)(_currentTime.Value.ToUnixTimeSeconds() / 86400);
     public DateTimeOffset UtcNow => _currentTime.Value;
 
     public VirtualClockStateService(
@@ -86,32 +84,6 @@ internal sealed class VirtualClockStateService : IVirtualClockStateService, IDis
                         host.Id,
                         "VirtualClock",
                         $"Error processing clock advance on host {host.DisplayName}: {ex.Message}"));
-                }
-            }
-
-            var relays = _worldState.GetAllRelayHosts();
-            foreach (var relay in relays)
-            {
-                if (ct.IsCancellationRequested) break;
-                try
-                {
-                    await relay.PeerDirectory.GetDiscoverablePeersAsync(ct: ct).ConfigureAwait(false);
-                    await relay.RendezvousService.ResolveRendezvousAsync(Array.Empty<BlindedLocator>(), ct).ConfigureAwait(false);
-
-                    _stateBus.Publish(new SimulatorStateSignal(
-                        relay.Id,
-                        SignalCategory.DiscoveryStateChanged,
-                        Details: "EpochRotated"));
-                }
-                catch (Exception ex)
-                {
-                    _logSink.Log(new SimulatorLogEntry(
-                        newTime,
-                        LogLevel.Warning,
-                        relay.DisplayName,
-                        relay.Id,
-                        "VirtualClock",
-                        $"Error evicting expired discovery entries on relay {relay.DisplayName}: {ex.Message}"));
                 }
             }
         }

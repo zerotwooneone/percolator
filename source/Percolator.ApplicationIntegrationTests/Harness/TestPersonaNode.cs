@@ -126,7 +126,6 @@ public sealed class TestPersonaNode : IAsyncDisposable
         });
 
         services.AddBlobStorageInfrastructure();
-        services.AddDiscoveryInfrastructure();
         services.AddChatInfrastructure();
         services.AddChatApp();
 

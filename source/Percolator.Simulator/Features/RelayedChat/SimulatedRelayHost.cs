@@ -16,10 +16,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Percolator.Apps.Discovery.Features.PrivateRendezvous;
-using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using System.Linq;
-using Percolator.Apps.Discovery.Ports;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
@@ -75,8 +72,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     private SimulatorRelayQueryService? _queryService;
     private readonly RelayHostingPolicyHolder _policyHolder = new(RelayHostingPolicy.Default);
     private IExchangeRegistrationModerationService? _moderationService;
-    private IRelayPeerDirectory? _peerDirectory;
-    private IPrivateRendezvousService? _rendezvousService;
     private WebApplication? _app;
     private bool _isRunning;
     private bool _disposed;
@@ -98,8 +93,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
     public ISimulatorRelayQueryService QueryService => _queryService ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayPreKeyRepository PreKeyRepository => _preKeyRepository ?? throw new InvalidOperationException("Relay host not started.");
     public IRelayQueueChaosController ChaosController => _capabilityStore ?? throw new InvalidOperationException("Relay host not started.");
-    public IRelayPeerDirectory PeerDirectory => _peerDirectory ?? throw new InvalidOperationException("Relay host not started.");
-    public IPrivateRendezvousService RendezvousService => _rendezvousService ?? throw new InvalidOperationException("Relay host not started.");
     public IExchangeRegistrationModerationService ModerationService => _moderationService ?? throw new InvalidOperationException("Relay host not started.");
 
     public int TotalHeldEnvelopeCount => _capabilityStore?.TotalEnvelopeCount ?? 0;
@@ -202,23 +195,7 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         var cryptoEngine = new SignalCryptoEngine(new CryptographyOptions());
         var zkEngine = new ZkgroupCryptographyService();
 
-        // 2. Initialize Peer Directory and Private Rendezvous services using production PreKeyAvailabilityAdapter
-        var admissionGate = new DiscoveryAdmissionGate();
-        var preKeyAvailabilityAdapter = new PreKeyAvailabilityAdapter(_preKeyRepository);
-        _peerDirectory = new SqliteRelayPeerDirectory(
-            contextFactory,
-            admissionGate,
-            policy: RelayDiscoveryPolicy.Open,
-            preKeyAvailabilityPort: preKeyAvailabilityAdapter,
-            clock: _virtualClock,
-            registrationTtl: TimeSpan.FromHours(24));
-
-        _rendezvousService = new SqlitePrivateRendezvousService(
-            contextFactory,
-            clock: _virtualClock,
-            entryTtl: TimeSpan.FromHours(48));
-
-        // 3. Build Kestrel WebApplication with gRPC endpoints
+        // 2. Build Kestrel WebApplication with gRPC endpoints
         var builder = WebApplication.CreateBuilder();
 
         builder.WebHost.ConfigureKestrel(options =>
@@ -257,8 +234,6 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
             RelayIdentityId);
         var timeProvider = new SystemDateTimeProvider();
         var groupEndpoint = new AnonymousGroupRelayEndpoint(ledgerRepo, zkEngine, _chaosCapabilityStore, timeProvider, RelayIdentityId);
-        var nearbyEndpoint = new NearbyDiscoveryEndpoint(_peerDirectory, _chaosCapabilityStore, _preKeyRepository, _virtualClock, BoundPort, cryptoEngine);
-        var rendezvousEndpoint = new PrivateRendezvousRelayEndpoint(_rendezvousService);
 
         builder.Services.AddSingleton<IRelayHostingPolicyProvider>(_policyHolder);
         builder.Services.AddSingleton<ILocalRelayAssociationRepository>(localAssociationRepo);
@@ -269,21 +244,15 @@ internal sealed class SimulatedRelayHost : ISimulatedRelayHost
         builder.Services.AddSingleton<IRelayPreKeyRepository>(_preKeyRepository);
         builder.Services.AddSingleton<IRelayMailboxCapabilityStore>(_chaosCapabilityStore);
         builder.Services.AddSingleton<IDbContextFactory<PercolatorDbContext>>(contextFactory);
-        builder.Services.AddSingleton<IRelayPeerDirectory>(_peerDirectory);
-        builder.Services.AddSingleton<IPrivateRendezvousService>(_rendezvousService);
         builder.Services.AddSingleton(unauthEndpoint);
         builder.Services.AddSingleton(authEndpoint);
         builder.Services.AddSingleton(groupEndpoint);
-        builder.Services.AddSingleton(nearbyEndpoint);
-        builder.Services.AddSingleton(rendezvousEndpoint);
 
         _app = builder.Build();
 
         _app.MapGrpcService<UnauthenticatedDeliveryEndpoint>();
         _app.MapGrpcService<AuthenticatedRelayEndpoint>();
         _app.MapGrpcService<AnonymousGroupRelayEndpoint>();
-        _app.MapGrpcService<NearbyDiscoveryEndpoint>();
-        _app.MapGrpcService<PrivateRendezvousRelayEndpoint>();
 
         await _app.StartAsync(ct);
         _isRunning = true;

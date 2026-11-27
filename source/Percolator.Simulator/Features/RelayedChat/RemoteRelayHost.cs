@@ -2,8 +2,6 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Percolator.Application.Hosting;
-using Percolator.Apps.Discovery.Features.PrivateRendezvous;
-using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
@@ -32,8 +30,6 @@ internal sealed class RemoteRelayHost : ISimulatedRelayHost
     public IRelayMailboxCapabilityStore MailboxStore => null!;
     public ISimulatorRelayQueryService QueryService => null!;
     public IRelayQueueChaosController ChaosController => null!;
-    public IRelayPeerDirectory PeerDirectory => null!;
-    public IPrivateRendezvousService RendezvousService => null!;
     public IExchangeRegistrationModerationService ModerationService => null!;
 
     public int TotalHeldEnvelopeCount => 0;

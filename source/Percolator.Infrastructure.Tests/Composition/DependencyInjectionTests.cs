@@ -22,9 +22,6 @@ using Percolator.Application.Session.Ports;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;
-using Percolator.Apps.Discovery.Features.PrivateRendezvous;
-using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
-using Percolator.Apps.Discovery.Ports;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Common;
@@ -118,7 +115,6 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IUnknownGroupMessageCacheRepository>().Should().NotBeNull();
         sp.GetRequiredService<ITransferSessionRepository>().Should().NotBeNull();
         sp.GetRequiredService<IFileTransferFilterPolicyRepository>().Should().NotBeNull();
-        sp.GetRequiredService<IRelayPeerDirectory>().Should().NotBeNull();
 
         // 6. CQRS Query Services
         sp.GetRequiredService<IChatMessageQueryService>().Should().NotBeNull();
@@ -139,9 +135,7 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<IExchangeRegistrationModerationService>().Should().NotBeNull();
         sp.GetRequiredService<IAuthenticatedMemberRateLimiter>().Should().NotBeNull();
 
-        // 8. Discovery & Profile Delivery
-        sp.GetRequiredService<INearbyDiscoveryQueryClientPort>().Should().NotBeNull();
-        sp.GetRequiredService<IPreKeyAvailabilityPort>().Should().NotBeNull();
+        // 8. Pre-Key & Profile Delivery
         sp.GetRequiredService<IPreKeyBundleProvider>().Should().NotBeNull();
         sp.GetRequiredService<IProfileDeliveryClient>().Should().NotBeNull();
         sp.GetRequiredService<IProfileManager>().Should().NotBeNull();
@@ -164,7 +158,6 @@ public sealed class DependencyInjectionTests
         sp.GetRequiredService<ITransportCertificateProvider>().Should().NotBeNull();
         sp.GetRequiredService<IIdentityProfileRepository>().Should().NotBeNull();
         sp.GetRequiredService<IPortReservationService>().Should().NotBeNull();
-        sp.GetRequiredService<IPrivateRendezvousService>().Should().NotBeNull();
         sp.GetRequiredService<IProfileMetadataSerializer>().Should().NotBeNull();
 
         // 12. Session State
@@ -172,7 +165,7 @@ public sealed class DependencyInjectionTests
     }
 
     [Test]
-    public void All12HostedServices_RegisteredAndResolvable()
+    public void AllHostedServices_RegisteredAndResolvable()
     {
         // Arrange
         var options = new VaultStorageOptions { BaseDirectory = _tempDir };
@@ -191,7 +184,6 @@ public sealed class DependencyInjectionTests
             typeof(DisappearingMessageEvictionWorker),
             typeof(UnknownGroupMessageCachePruner),
             typeof(AbandonedInvitePruner),
-            typeof(RelayDiscoveryRegistrationPruner),
             typeof(RelayBlobRetentionPruner),
             typeof(TransferOfferReaperWorker),
             typeof(SwarmEndpointRetentionPruner),

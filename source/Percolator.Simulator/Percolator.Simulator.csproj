@@ -39,7 +39,6 @@
     <ProjectReference Include="..\Percolator.Infrastructure\Percolator.Infrastructure.csproj" />
     <ProjectReference Include="..\Percolator.PluginSdk\Percolator.PluginSdk.csproj" />
     <ProjectReference Include="..\Percolator.Apps.Chat\Percolator.Apps.Chat.csproj" />
-    <ProjectReference Include="..\Percolator.Apps.Discovery\Percolator.Apps.Discovery.csproj" />
     <ProjectReference Include="..\Percolator.Apps.FileTransfer\Percolator.Apps.FileTransfer.csproj" />
   </ItemGroup>
 

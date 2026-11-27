@@ -63,26 +63,6 @@ public sealed class RelayLedgerRoutingTokenEntity
     public Guid RoutingToken { get; set; }
 }
 
-public sealed class RelayPeerDirectoryEntity
-{
-    public byte[] PeerId { get; set; } = Array.Empty<byte>();
-    public int Visibility { get; set; }
-    public bool HasAuthenticatedHandshake { get; set; }
-    public bool HasActiveSignedPreKey { get; set; }
-    public byte[]? RoutingToken { get; set; }    // 16-byte mailbox routing token advertised when discoverable
-    public byte[]? DeliveryToken { get; set; }   // 32-byte delivery token advertised when discoverable
-    public DateTimeOffset RegisteredAtUtc { get; set; }
-    public DateTimeOffset LastUpdatedAtUtc { get; set; }
-}
-
-public sealed class RelayRendezvousEntryEntity
-{
-    public byte[] BlindedLocator { get; set; } = Array.Empty<byte>();
-    public byte[]? EncryptedRoute { get; set; }
-    public string? RouteDescriptor { get; set; }
-    public DateTimeOffset PublishedAtUtc { get; set; }
-}
-
 public sealed class RelayRegistrationEntity
 {
     public Guid RelayIdentityId { get; set; }

@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Hosting;
 using Percolator.Application.Ports;
-using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Delivery.Ports;
@@ -122,7 +121,6 @@ public sealed class TestRelayServer : IAsyncDisposable
 
         services.AddScoped<IExchangeRegistrationModerationService, ExchangeRegistrationModerationService>();
         services.AddSingleton<ILocalChunkStore>(new LocalFileChunkStore(blobDir));
-        services.AddSingleton<IPrivateRendezvousService, SqlitePrivateRendezvousService>();
 
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
         services.AddScoped(sp => new AuthenticatedRelayEndpoint(
@@ -134,7 +132,6 @@ public sealed class TestRelayServer : IAsyncDisposable
             sp.GetRequiredService<IPendingMailboxRegistrationRepository>(),
             sp.GetRequiredService<IAuthenticatedMemberRateLimiter>(),
             relayIdentityId));
-        services.AddScoped<PrivateRendezvousRelayEndpoint>();
         services.AddScoped(sp => new AnonymousGroupRelayEndpoint(
             sp.GetRequiredService<IRelayLedgerRepository>(),
             sp.GetRequiredService<IZkProofEngine>(),

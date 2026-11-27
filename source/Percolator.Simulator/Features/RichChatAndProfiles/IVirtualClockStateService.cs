@@ -9,7 +9,6 @@ namespace Percolator.Simulator.Features.RichChatAndProfiles;
 internal interface IVirtualClockStateService : IDateTimeProvider
 {
     ReadOnlyReactiveProperty<DateTimeOffset> CurrentUtcNow { get; }
-    int CurrentDiscoveryEpoch { get; }
     void AdvanceTime(TimeSpan delta);
     Task AdvanceTimeAsync(TimeSpan delta, CancellationToken ct = default);
 }

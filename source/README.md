@@ -1,6 +1,6 @@
 # Percolator
 
-Percolator is a modern, high-assurance peer-to-peer secure messaging and file-sharing ecosystem implemented in .NET. It incorporates Signal-grade end-to-end cryptography, privacy-preserving blinded rendezvous discovery, and multi-stream high-throughput bulk data transfer.
+Percolator is a modern, high-assurance peer-to-peer secure messaging and file-sharing ecosystem implemented in .NET. It incorporates Signal-grade end-to-end cryptography, explicit out-of-band peer invitations, and multi-stream high-throughput bulk data transfer.
 
 ---
 
@@ -26,7 +26,7 @@ Percolator is structured around strict **Onion Architecture** principles:
 ```
 
 *   **Domain Layer**: Core domain logic, immutable cryptographic state machines (Double Ratchet, X3DH key agreement, group sessions), Merkle tree verification, bitfield algebra, and strongly-typed domain primitives. Zero outward dependencies.
-*   **Application Layer**: Use-case orchestration, ingress/egress ratchet pipelines, outbox delivery, and modular application plugins (Chat, Discovery, File Transfer).
+*   **Application Layer**: Use-case orchestration, ingress/egress ratchet pipelines, outbox delivery, and modular application plugins (Chat, File Transfer).
 *   **Infrastructure Layer**: Cross-platform persistence (EF Core with encrypted SQLCipher), gRPC wire transport, Windows SChannel/CNG cryptographic adapters, and NTFS sparse file handling.
 *   **Presentation Layer**: Cross-platform desktop interface built on Avalonia UI with total network stealth startup.
 
@@ -51,7 +51,6 @@ For the complete specification schema, 3-tier regulatory mapping table, and Mast
 | **`Percolator.PluginSdk`** | Microkernel extension contracts and out-of-band media descriptors | [Design](Percolator.PluginSdk/Design.md) |
 | **`Percolator.Application`** | Ingress/egress ratchet pipelines, use-case orchestration, and outbox delivery | [Design](Percolator.Application/Design.md) \| [Requirements](Percolator.Application/Requirements.md) |
 | **`Percolator.Apps.Chat`** | E2EE messaging, stepped bucket padding, reactions, and disappearing messages | [Design](Percolator.Apps.Chat/Design.md) \| [Requirements](Percolator.Apps.Chat/Requirements.md) |
-| **`Percolator.Apps.Discovery`** | Privacy-preserving two-phase discovery and blinded rendezvous | [Design](Percolator.Apps.Discovery/Design.md) \| [Requirements](Percolator.Apps.Discovery/Requirements.md) |
 | **`Percolator.Apps.FileTransfer`** | High-throughput multi-stream bulk data transfer orchestration | [Design](Percolator.Apps.FileTransfer/Design.md) \| [Requirements](Percolator.Apps.FileTransfer/Requirements.md) |
 | **`Percolator.Infrastructure`** | Cross-platform persistence (SQLCipher), gRPC transport, and wire protocols | [Design](Percolator.Infrastructure/Design.md) \| [Requirements](Percolator.Infrastructure/Requirements.md) |
 | **`Percolator.Infrastructure.Windows`** | Windows CNG certificate storage and NTFS sparse storage adapters | [Design](Percolator.Infrastructure.Windows/Design.md) |
@@ -64,7 +63,7 @@ For the complete specification schema, 3-tier regulatory mapping table, and Mast
 
 *   **End-to-End Encryption**: Multi-layered session encryption utilizing the Double Ratchet algorithm and X3DH key agreement, providing forward secrecy and post-compromise security.
 *   **Cryptographic Peer Identities**: Peer authentication relies strictly on public cryptographic key bundles rather than centralized certificates or authority chains.
-*   **Denial-of-Service Defense**: Service-side rate-limiting, bounded work queues, and two-phase discovery to safeguard resources against prekey pool exhaustion attacks.
+*   **Denial-of-Service Defense**: Service-side rate-limiting, bounded work queues, and capability-gated mailbox/pre-key delivery to safeguard resources against prekey pool exhaustion attacks.
 *   **Memory Hygiene**: Explicit zeroization of sensitive cryptographic key material and plaintext buffers immediately following consumption.
 
 ---

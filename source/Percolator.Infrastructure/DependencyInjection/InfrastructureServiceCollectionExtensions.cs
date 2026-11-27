@@ -29,9 +29,6 @@ using Percolator.PluginSdk.Events;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Ingress;
-using Percolator.Apps.Discovery.Features.PrivateRendezvous;
-using Percolator.Apps.Discovery.Features.RelayDirectoryHosting;
-using Percolator.Apps.Discovery.Ports;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.Ports;
@@ -109,7 +106,6 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddTransportInfrastructure();
         services.AddSessionLifecycleInfrastructure();
         services.AddChatInfrastructure();
-        services.AddDiscoveryInfrastructure();
         services.AddBlobStorageInfrastructure();
         services.AddFileTransferInfrastructure();
 
@@ -299,9 +295,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<OutboxWorker>();
         services.AddScoped<MailboxDrainService>();
 
+        services.AddScoped<IPreKeyBundleProvider, PreKeyBundleProviderAdapter>();
+        services.AddScoped<IProfileDeliveryClient, GrpcProfileDeliveryClient>();
+        services.AddScoped<IProfileManager, ProfileManager>();
+
         services.AddScoped<UnauthenticatedDeliveryEndpoint>();
         services.AddScoped<AuthenticatedRelayEndpoint>();
-        services.AddScoped<PrivateRendezvousRelayEndpoint>();
 
         // Mailbox/group stream workers
         services.AddSingleton<DrainSchedulerOptions>();
@@ -360,25 +359,6 @@ public static class InfrastructureServiceCollectionExtensions
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<TimeProvider>()));
         services.AddHostedService(sp => new AbandonedInvitePruner(
-            sp.GetRequiredService<IServiceScopeFactory>(),
-            sp.GetRequiredService<TimeProvider>()));
-
-        return services;
-    }
-
-    public static IServiceCollection AddDiscoveryInfrastructure(this IServiceCollection services)
-    {
-        services.AddSingleton(TimeProvider.System);
-        services.AddScoped<IDiscoveryAdmissionGate, DiscoveryAdmissionGate>();
-        services.AddScoped<IRelayPeerDirectory, SqliteRelayPeerDirectory>();
-        services.AddScoped<IPrivateRendezvousService, SqlitePrivateRendezvousService>();
-        services.AddScoped<INearbyDiscoveryQueryClientPort, DiscoveryQueryClient>();
-        services.AddScoped<IPreKeyAvailabilityPort, PreKeyAvailabilityAdapter>();
-        services.AddScoped<IPreKeyBundleProvider, PreKeyBundleProviderAdapter>();
-        services.AddScoped<IProfileDeliveryClient, GrpcProfileDeliveryClient>();
-        services.AddScoped<IProfileManager, ProfileManager>();
-
-        services.AddHostedService(sp => new RelayDiscoveryRegistrationPruner(
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<TimeProvider>()));
 

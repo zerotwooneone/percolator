@@ -23,7 +23,6 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.Model;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Simulator.Features.DirectChat;
-using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.RichChatAndProfiles;
@@ -62,7 +61,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private readonly RichChatActionCoordinator _richChatCoordinator;
     private readonly ProfileSyncCoordinator _profileCoordinator;
     private readonly GroupChatCoordinator _groupCoordinator;
-    private readonly DiscoverySimulationCoordinator _discoveryCoordinator;
     private readonly SwarmSimulationCoordinator _swarmCoordinator;
 
     private readonly CoalescedActionGate _chatTranscriptGate;
@@ -82,16 +80,7 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isListening = true;
 
-    // Feature Flags (CTL-PER-03..06)
-    [ObservableProperty]
-    private bool _allowPeerDiscovery = true;
-
-    [ObservableProperty]
-    private bool _isChatTabActive = true;
-
-    [ObservableProperty]
-    private bool _isDiscoveryTabActive = false;
-
+    // Feature Flags (CTL-PER-04..06)
     [ObservableProperty]
     private bool _allowFileTransfers = true;
 
@@ -162,7 +151,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     public ObservableCollection<ChatMessageItemViewModel> ChatMessages { get; } = new();
 
-    public DiscoveryTabViewModel? DiscoveryTab { get; }
     public PersonaInvitationExportFlyoutViewModel? InvitationExport { get; }
     public PersonaConnectPeerFlyoutViewModel? ConnectPeer { get; }
     public RelayRegistrationFlyoutViewModel? RelayRegistration { get; }
@@ -193,7 +181,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         _richChatCoordinator = deps.RichChatCoordinator;
         _profileCoordinator = deps.ProfileCoordinator;
         _groupCoordinator = deps.GroupCoordinator ?? throw new ArgumentNullException(nameof(deps.GroupCoordinator));
-        _discoveryCoordinator = deps.DiscoveryCoordinator ?? throw new ArgumentNullException(nameof(deps.DiscoveryCoordinator));
         _swarmCoordinator = deps.SwarmCoordinator ?? throw new ArgumentNullException(nameof(deps.SwarmCoordinator));
 
         // 30 Hz refresh ceiling for chat transcript with 0ms leading edge
@@ -225,16 +212,9 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
             _isListening = host.IsListening.CurrentValue;
             _autoShareProfile = host.AutoShareProfile;
             _autoAcceptGroupInvites = host.AutoAcceptGroupInvites;
-            _allowPeerDiscovery = host.AllowPeerDiscovery;
             _allowFileTransfers = host.AllowFileTransfers;
             _relayOnlyRouting = host.RelayOnlyRouting;
             _autoAcceptFileTransfers = host.AutoAcceptFileTransfers;
-            DiscoveryTab = new DiscoveryTabViewModel(
-                host,
-                _discoveryCoordinator,
-                _worldState,
-                _toastService,
-                deps.VirtualClock);
         }
 
         // Subscribe to selection changes to switch active peer conversation dynamically
@@ -458,34 +438,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 _ = AcceptPendingFileOfferAsync();
             }
         }
-    }
-
-    partial void OnAllowPeerDiscoveryChanged(bool value)
-    {
-        if (_host != null)
-        {
-            _host.AllowPeerDiscovery = value;
-            UiTaskRunner.FireAndForget(
-                () => _discoveryCoordinator.SetDiscoveryVisibilityAsync(_host, value),
-                category: "Discovery",
-                logSink: _logSink,
-                nodeName: DisplayName,
-                nodeId: NodeId);
-        }
-    }
-
-    [RelayCommand]
-    private void SelectChatTab()
-    {
-        IsChatTabActive = true;
-        IsDiscoveryTabActive = false;
-    }
-
-    [RelayCommand]
-    private void SelectDiscoveryTab()
-    {
-        IsChatTabActive = false;
-        IsDiscoveryTabActive = true;
     }
 
     private void RefreshPendingHandshakes() => _pendingHandshakeGate.RequestExecution();
@@ -1267,7 +1219,6 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
 
     public override void Dispose()
     {
-        DiscoveryTab?.Dispose();
         ConnectPeer?.Dispose();
         RelayRegistration?.Dispose();
         _hostScope?.Dispose();

@@ -226,7 +226,7 @@ internal sealed partial class TopGlobalToolbarViewModel : ViewModelBase
     {
         _virtualClock.AdvanceTime(TimeSpan.FromHours(24));
         _flightRecorder.RecordStep(new AdvanceVirtualTimeStep(86400));
-        _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +24 Hours (Discovery Epoch rotated).", ToastSeverity.Informational);
+        _toastService.ShowToast("Virtual Clock", "Advanced virtual time by +24 Hours.", ToastSeverity.Informational);
     }
 
     [RelayCommand]

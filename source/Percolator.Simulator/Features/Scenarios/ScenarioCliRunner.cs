@@ -10,7 +10,6 @@ using Percolator.Application.Ports;
 using Percolator.Infrastructure.Transport;
 using Percolator.Simulator.Features.Chaos;
 using Percolator.Simulator.Features.DirectChat;
-using Percolator.Simulator.Features.DiscoverySimulation;
 using Percolator.Simulator.Features.GroupMessaging;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Pairing;
@@ -93,7 +92,6 @@ internal static class ScenarioCliRunner
         services.AddSingleton<RelayChatCoordinator>();
         services.AddSingleton<RelayProvisioningCoordinator>();
         services.AddSingleton<GroupChatCoordinator>();
-        services.AddSingleton<DiscoverySimulationCoordinator>();
         services.AddSingleton<SyntheticFilePresetGenerator>();
         services.AddSingleton<SwarmSimulationCoordinator>();
         services.AddSingleton<ScenarioRunnerService>();

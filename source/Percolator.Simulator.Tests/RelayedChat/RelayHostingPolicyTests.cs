@@ -32,7 +32,7 @@ public sealed class RelayHostingPolicyTests
         var updatedPolicy = new RelayHostingPolicy(
             registrationStrategy: RelayRegistrationStrategy.Open,
             autoApproveLocalhost: true,
-            enabledFeatures: RelayFeatureFlags.PreKeys | RelayFeatureFlags.Profiles | RelayFeatureFlags.Discovery,
+            enabledFeatures: RelayFeatureFlags.PreKeys | RelayFeatureFlags.Profiles | RelayFeatureFlags.Groups,
             maxMailboxes: 500,
             maxMailboxBytes: 5 * 1024 * 1024,
             envelopeTtl: TimeSpan.FromDays(7));
@@ -43,7 +43,7 @@ public sealed class RelayHostingPolicyTests
         current.RegistrationStrategy.Should().Be(RelayRegistrationStrategy.Open);
         current.AutoApproveLocalhost.Should().BeTrue();
         current.IsFeatureEnabled(RelayFeatureFlags.Profiles).Should().BeTrue();
-        current.IsFeatureEnabled(RelayFeatureFlags.Discovery).Should().BeTrue();
+        current.IsFeatureEnabled(RelayFeatureFlags.Groups).Should().BeTrue();
         current.IsFeatureEnabled(RelayFeatureFlags.Blobs).Should().BeFalse();
         current.MaxMailboxes.Should().Be(500);
         current.EnvelopeTtl.Should().Be(TimeSpan.FromDays(7));

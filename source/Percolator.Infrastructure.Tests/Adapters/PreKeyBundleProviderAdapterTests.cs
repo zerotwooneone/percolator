@@ -13,7 +13,7 @@ using Percolator.Infrastructure.Transport;
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
 
-namespace Percolator.Infrastructure.Tests.Plugins.Discovery;
+namespace Percolator.Infrastructure.Tests.Adapters;
 
 [TestFixture]
 public sealed class PreKeyBundleProviderAdapterTests

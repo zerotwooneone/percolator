@@ -1,8 +1,6 @@
 using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Percolator.Apps.Discovery.Features.NearbyPeerDiscovery;
-using Percolator.Apps.Discovery.Features.PrivateRendezvous;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
@@ -32,9 +30,6 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         options.Converters.Add(new GuidIdJsonConverter<PayloadId>());
         options.Converters.Add(new InvitationIdJsonConverter());
         options.Converters.Add(new BlobIdJsonConverter());
-        options.Converters.Add(new DiscoveryResultLimitJsonConverter());
-        options.Converters.Add(new BlindedLocatorJsonConverter());
-        options.Converters.Add(new EncryptedRendezvousRouteJsonConverter());
         options.Converters.Add(new GuidIdJsonConverter<BlindedRoutingToken>());
         options.Converters.Add(new DeliveryTokenJsonConverter());
         return options;
@@ -184,46 +179,6 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         {
             writer.WriteStringValue(value.HexDigest);
         }
-    }
-
-    private sealed class DiscoveryResultLimitJsonConverter : JsonConverter<DiscoveryResultLimit>
-    {
-        public override DiscoveryResultLimit Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            if (reader.TokenType == JsonTokenType.Number)
-            {
-                return new DiscoveryResultLimit(reader.GetInt32());
-            }
-            return DiscoveryResultLimit.Default;
-        }
-
-        public override void Write(Utf8JsonWriter writer, DiscoveryResultLimit value, JsonSerializerOptions options)
-        {
-            writer.WriteNumberValue(value.Value);
-        }
-    }
-
-    private sealed class BlindedLocatorJsonConverter : JsonConverter<BlindedLocator>
-    {
-        public override BlindedLocator Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            string? hex = reader.GetString();
-            return BlindedLocator.Create(hex ?? string.Empty).Value;
-        }
-
-        public override void Write(Utf8JsonWriter writer, BlindedLocator value, JsonSerializerOptions options)
-        {
-            writer.WriteStringValue(value.Value);
-        }
-    }
-
-    private sealed class EncryptedRendezvousRouteJsonConverter : JsonConverter<EncryptedRendezvousRoute>
-    {
-        public override EncryptedRendezvousRoute Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-            EncryptedRendezvousRoute.FromBytes(reader.GetBytesFromBase64()).Value;
-
-        public override void Write(Utf8JsonWriter writer, EncryptedRendezvousRoute value, JsonSerializerOptions options) =>
-            writer.WriteBase64StringValue(value.Span);
     }
 
     private sealed class DeliveryTokenJsonConverter : JsonConverter<DeliveryToken>

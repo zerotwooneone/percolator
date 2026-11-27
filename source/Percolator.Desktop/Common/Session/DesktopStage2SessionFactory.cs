@@ -44,7 +44,6 @@ public sealed class DesktopStage2SessionFactory : ISessionHostFactory
             services.AddTransportInfrastructure();
             services.AddSessionLifecycleInfrastructure();
             services.AddChatInfrastructure();
-            services.AddDiscoveryInfrastructure();
             services.AddBlobStorageInfrastructure();
             services.AddFileTransferInfrastructure();
 
