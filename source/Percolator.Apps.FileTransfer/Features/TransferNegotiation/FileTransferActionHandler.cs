@@ -26,7 +26,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly IDateTimeProvider _clock;
     private readonly IBlobStorageService _blobStorage;
     private readonly INetworkEndpointDiscoveryPort _endpointDiscovery;
-    private readonly ITransferStreamPool _streamPool;
+    private readonly ITransferSessionRuntime _runtime;
+    private readonly ITransferSessionCertificateStore _certificateStore;
     private readonly FileTransferIngressFilter _ingressFilter;
 
     public FileTransferActionHandler(
@@ -39,7 +40,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         FileTransferIngressFilter ingressFilter,
         IBlobStorageService blobStorage,
         INetworkEndpointDiscoveryPort endpointDiscovery,
-        ITransferStreamPool streamPool)
+        ITransferSessionRuntime runtime,
+        ITransferSessionCertificateStore certificateStore)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
@@ -50,7 +52,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         _ingressFilter = ingressFilter ?? throw new ArgumentNullException(nameof(ingressFilter));
         _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
         _endpointDiscovery = endpointDiscovery ?? throw new ArgumentNullException(nameof(endpointDiscovery));
-        _streamPool = streamPool ?? throw new ArgumentNullException(nameof(streamPool));
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _certificateStore = certificateStore ?? throw new ArgumentNullException(nameof(certificateStore));
     }
 
     public ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
@@ -68,7 +71,6 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 new DomainError(FileTransferIngressFilter.PolicyDisabledErrorCode, FileTransferIngressFilter.PrivacyNotice)));
         }
 
-        // Derive a deterministic local initiator distinct from all recipients when not explicitly provided
         PublicIdentityId defaultInitiator = CreateDistinctLocalInitiator(recipients);
         ChannelId defaultChannelId = ChannelId.New();
 
@@ -176,11 +178,14 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         SwarmRendezvousId rendezvousId = SwarmRendezvousId.Generate();
         EphemeralSwarmPeerId ephemeralPeerId = EphemeralSwarmPeerId.Generate();
         StreamAuthToken streamAuthToken = StreamAuthToken.Generate();
-        SeedRatio enforcedSeedRatio = targetSeedRatio ?? SeedRatio.Zero;
+        SeedRatio enforcedSeedRatio = targetSeedRatio ?? SeedRatio.Unlimited;
+        bool isGroupTransfer = recipients.Count > 1;
 
-        TransferSession session = recipients.Count == 1
-            ? TransferSession.CreateOutgoing1to1(sessionId, localInitiator, recipients[0], manifest, enforcedSeedRatio, _clock)
-            : TransferSession.CreateOutgoingMultiPeer(sessionId, localInitiator, recipients, manifest, enforcedSeedRatio, _clock);
+        using TransferSessionCertificateMaterial certMaterial = await _certificateStore.GetOrCreateAsync(sessionId, ct);
+
+        TransferSession session = isGroupTransfer
+            ? TransferSession.CreateOutgoingMultiPeer(sessionId, localInitiator, recipients, manifest, enforcedSeedRatio, _clock)
+            : TransferSession.CreateOutgoing1to1(sessionId, localInitiator, recipients[0], manifest, enforcedSeedRatio, _clock);
 
         IReadOnlyList<DirectEndpointCandidate> rawCandidates = await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct);
         IReadOnlyList<DirectEndpointCandidate> candidates = PexRateLimiter.FilterAndDeduplicate(rawCandidates, wanPolicy);
@@ -188,7 +193,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         RelayRendezvousDescriptor? relayRendezvous = await _endpointDiscovery.AllocateRelayRendezvousAsync(sessionId, ct);
 
         // Announce as Seeder to the blinded Exchange swarm tracker (zero Persona IDs, zero IP candidates)
-        await _trackerPort.AnnounceAsync(rendezvousId, ephemeralPeerId, SwarmPeerRole.Seeder, ct: ct);
+        SwarmAnnounceResult announceResult = await _trackerPort.AnnounceAsync(rendezvousId, ephemeralPeerId, SwarmPeerRole.Seeder, ct: ct);
 
         var transportContext = new TransferSessionTransportContext(
             sessionId,
@@ -200,10 +205,19 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             wanPolicy,
             relayRendezvous,
             candidates,
-            sourceRoot);
+            sourceRoot,
+            IsGroupTransfer: isGroupTransfer,
+            SenderCertSha256: certMaterial.Fingerprint);
 
         await _sessionRepository.SaveSessionAsync(session, ct);
         await _sessionRepository.SaveTransportContextAsync(transportContext, ct);
+        await _runtime.StartOrUpdateSessionAsync(
+            session,
+            transportContext,
+            sourceRoot,
+            announceResult.StunEndpoint,
+            announceResult.SupportsTransferPipe,
+            ct);
 
         ReadOnlyMemory<byte> serializedManifest = _serializer.Serialize(manifest);
         ManifestDistribution manifestDist;
@@ -244,16 +258,32 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             rendezvousId,
             streamAuthToken,
             relayRendezvous,
-            candidates);
+            candidates,
+            certMaterial.Fingerprint,
+            isGroupTransfer);
 
         byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Offer, _serializer.Serialize(offerPayload).Span);
 
-        foreach (PublicIdentityId recipient in recipients)
+        if (isGroupTransfer)
+        {
+            // Group V2 SenderKey broadcast: RecipientIdentityId MUST be null + DeliveryRoute.RelayedGroup
+            var groupOutbound = new OutboundPayloadContext(
+                channelId,
+                localInitiator,
+                RecipientIdentityId: null,
+                DeviceId.Primary,
+                AppId.FileTransferControl,
+                inBandBytes,
+                DeliveryRoute.RelayedGroup);
+
+            await _payloadSender.SendPayloadAsync(groupOutbound, ct);
+        }
+        else
         {
             var outboundContext = new OutboundPayloadContext(
                 channelId,
                 localInitiator,
-                recipient,
+                recipients[0],
                 DeviceId.Primary,
                 AppId.FileTransferControl,
                 inBandBytes,
@@ -303,7 +333,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (!diskCheck.HasSufficientSpace)
             return DomainResult.Failure(new DomainError("Storage.InsufficientSpace", $"Insufficient disk space. Required: {requiredBytes} bytes."));
 
-        // Scan existing partial files on disk to compute resumption bitfield (croc-style fast resumption)
+        // Scan existing partial files on disk to compute resumption bitfield
         Bitfield resumptionBitfield = await _fileStorage.ScanAndComputeBitfieldAsync(
             destinationFolder,
             session.Manifest,
@@ -336,6 +366,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         await _fileStorage.PreAllocateFilesAsync(destinationFolder, session.Manifest, chosenFiles, ct);
         await _sessionRepository.SaveSessionAsync(session, ct);
 
+        using TransferSessionCertificateMaterial certMaterial = await _certificateStore.GetOrCreateAsync(sessionId, ct);
+
         TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
         DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
 
@@ -347,22 +379,32 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
         if (transportContext != null)
         {
-            await _sessionRepository.SaveTransportContextAsync(
-                transportContext with { LocalRootPath = destinationFolder },
-                ct);
+            TransferSessionTransportContext updatedContext = transportContext with { LocalRootPath = destinationFolder };
+            await _sessionRepository.SaveTransportContextAsync(updatedContext, ct);
 
             // Announce to blinded Exchange swarm tracker (zero Persona IDs, zero IP candidates)
             SwarmPeerRole role = session.IsDownloadComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
-            await _trackerPort.AnnounceAsync(
-                transportContext.SwarmRendezvousId,
-                transportContext.EphemeralPeerId,
+            SwarmAnnounceResult announceResult = await _trackerPort.AnnounceAsync(
+                updatedContext.SwarmRendezvousId,
+                updatedContext.EphemeralPeerId,
                 role,
                 ct: ct);
 
-            // Establish out-of-band multi-stream connection
-            if (!session.IsDownloadComplete)
+            await _runtime.StartOrUpdateSessionAsync(
+                session,
+                updatedContext,
+                destinationFolder,
+                announceResult.StunEndpoint,
+                announceResult.SupportsTransferPipe,
+                ct);
+
+            if (updatedContext.SenderCertSha256 != null)
             {
-                await ConnectDirectWithRelayFallbackAsync(_streamPool, transportContext.DirectCandidates, transportContext.RelayRendezvous, ct);
+                await _runtime.RegisterPinnedPeerCertificateAsync(
+                    sessionId,
+                    session.InitiatorId,
+                    updatedContext.SenderCertSha256,
+                    ct: ct);
             }
         }
 
@@ -375,7 +417,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             sessionId,
             receiverCandidates,
             routingPref,
-            session.LocalBitfield);
+            session.LocalBitfield,
+            certMaterial.Fingerprint);
 
         byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Accept, _serializer.Serialize(acceptPayload).Span);
 
@@ -390,32 +433,30 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
         await _payloadSender.SendPayloadAsync(outboundContext, ct);
 
+        if (transportContext is { IsGroupTransfer: true })
+        {
+            FileTransferPeerJoinPayload peerJoinPayload = new(
+                sessionId,
+                transportContext.EphemeralPeerId,
+                certMaterial.Fingerprint);
+
+            byte[] peerJoinBytes = PrependOpcode(
+                FileTransferControlOpcode.PeerJoin,
+                _serializer.Serialize(peerJoinPayload).Span);
+
+            var groupJoinContext = new OutboundPayloadContext(
+                channelId,
+                localSenderId,
+                RecipientIdentityId: null,
+                DeviceId.Primary,
+                AppId.FileTransferControl,
+                peerJoinBytes,
+                DeliveryRoute.RelayedGroup);
+
+            await _payloadSender.SendPayloadAsync(groupJoinContext, ct);
+        }
+
         return DomainResult.Success();
-    }
-
-    internal static async ValueTask ConnectDirectWithRelayFallbackAsync(
-        ITransferStreamPool streamPool,
-        IReadOnlyList<DirectEndpointCandidate> directCandidates,
-        RelayRendezvousDescriptor? relayRendezvous,
-        CancellationToken ct)
-    {
-        if (directCandidates.Count > 0)
-        {
-            try
-            {
-                await streamPool.ConnectDirectAsync(directCandidates, ct);
-                return;
-            }
-            catch (Exception) when (relayRendezvous != null)
-            {
-                // Direct P2P failed (symmetric NAT / firewall): fall back to blind relay pipe
-            }
-        }
-
-        if (relayRendezvous != null)
-        {
-            await streamPool.ConnectRelayPipeAsync(relayRendezvous, ct);
-        }
     }
 
     public async ValueTask<DomainResult> PauseTransferAsync(TransferSessionId sessionId, CancellationToken ct = default)
@@ -427,10 +468,16 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (result.IsSuccess)
         {
             await _sessionRepository.SaveSessionAsync(session, ct);
-            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
-            if (transportContext != null)
+            bool wasActiveInRuntime = _runtime.HasActiveSession(sessionId);
+            await _runtime.StopSessionAsync(sessionId, deleteCertificate: false, ct);
+
+            if (!wasActiveInRuntime)
             {
-                await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
+                TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+                if (transportContext != null)
+                {
+                    await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
+                }
             }
         }
         return result;
@@ -442,7 +489,60 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
 
         DomainResult result = session.Resume(_clock);
-        if (result.IsSuccess) await _sessionRepository.SaveSessionAsync(session, ct);
+        if (result.IsSuccess)
+        {
+            await _sessionRepository.SaveSessionAsync(session, ct);
+
+            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+            if (transportContext != null)
+            {
+                SwarmPeerRole role = session.Role == TransferRole.Sender || session.IsDownloadComplete
+                    ? SwarmPeerRole.Seeder
+                    : SwarmPeerRole.Leecher;
+
+                SwarmAnnounceResult announceResult = await _trackerPort.AnnounceAsync(
+                    transportContext.SwarmRendezvousId,
+                    transportContext.EphemeralPeerId,
+                    role,
+                    ct: ct);
+
+                if (transportContext.LocalRootPath != null)
+                {
+                    await _runtime.StartOrUpdateSessionAsync(
+                        session,
+                        transportContext,
+                        transportContext.LocalRootPath,
+                        announceResult.StunEndpoint,
+                        announceResult.SupportsTransferPipe,
+                        ct);
+                }
+            }
+        }
+        return result;
+    }
+
+    public async ValueTask<DomainResult> StopSeedingAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct);
+        if (session == null) return DomainResult.Failure(new DomainError("Transfer.NotFound", "Session not found."));
+
+        DomainResult result = session.StopSeeding(_clock);
+        if (result.IsSuccess)
+        {
+            await _sessionRepository.SaveSessionAsync(session, ct);
+            bool wasActiveInRuntime = _runtime.HasActiveSession(sessionId);
+            await _runtime.StopSessionAsync(sessionId, deleteCertificate: true, ct);
+
+            if (!wasActiveInRuntime)
+            {
+                TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+                if (transportContext != null)
+                {
+                    await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
+                }
+            }
+        }
+
         return result;
     }
 
@@ -460,7 +560,10 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             PublicIdentityId localIdentity = transportContext?.LocalIdentityId ?? session.InitiatorId;
             ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
 
-            if (transportContext != null)
+            bool wasActiveInRuntime = _runtime.HasActiveSession(sessionId);
+            await _runtime.StopSessionAsync(sessionId, deleteCertificate: true, ct);
+
+            if (!wasActiveInRuntime && transportContext != null)
             {
                 await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
             }
@@ -469,17 +572,33 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             FileTransferCancelPayload cancelPayload = new(sessionId, reason);
             byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Cancel, _serializer.Serialize(cancelPayload).Span);
 
-            PublicIdentityId targetRecipient = DetermineCancelTarget(session, localIdentity);
-            var outboundContext = new OutboundPayloadContext(
-                channelId,
-                localIdentity,
-                targetRecipient,
-                DeviceId.Primary,
-                AppId.FileTransferControl,
-                inBandBytes,
-                DeliveryRoute.RelayedOneToOne);
+            if (transportContext is { IsGroupTransfer: true })
+            {
+                var groupCancel = new OutboundPayloadContext(
+                    channelId,
+                    localIdentity,
+                    RecipientIdentityId: null,
+                    DeviceId.Primary,
+                    AppId.FileTransferControl,
+                    inBandBytes,
+                    DeliveryRoute.RelayedGroup);
 
-            await _payloadSender.SendPayloadAsync(outboundContext, ct);
+                await _payloadSender.SendPayloadAsync(groupCancel, ct);
+            }
+            else
+            {
+                PublicIdentityId targetRecipient = DetermineCancelTarget(session, localIdentity);
+                var outboundContext = new OutboundPayloadContext(
+                    channelId,
+                    localIdentity,
+                    targetRecipient,
+                    DeviceId.Primary,
+                    AppId.FileTransferControl,
+                    inBandBytes,
+                    DeliveryRoute.RelayedOneToOne);
+
+                await _payloadSender.SendPayloadAsync(outboundContext, ct);
+            }
         }
         return result;
     }
@@ -492,7 +611,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         return session.Topology switch
         {
             TransferTopology.OneToOne oneToOne => oneToOne.RecipientId,
-            TransferTopology.MultiPeer multiPeer => multiPeer.Recipients[0],
+            TransferTopology.MultiPeer multiPeer when multiPeer.Recipients.Count > 0 => multiPeer.Recipients[0],
             _ => session.InitiatorId
         };
     }

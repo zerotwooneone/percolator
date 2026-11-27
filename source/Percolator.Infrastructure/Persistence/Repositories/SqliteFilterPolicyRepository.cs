@@ -16,19 +16,20 @@ using Percolator.Infrastructure.Persistence.Entities;
 
 public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepository
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbContextFactory;
 
-    public SqliteFilterPolicyRepository(PercolatorDbContext dbContext)
+    public SqliteFilterPolicyRepository(IDbContextFactory<PercolatorDbContext> dbContextFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
     }
 
     public async ValueTask SavePolicyAsync(FileTransferFilterPolicy policy, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(policy);
 
+        await using PercolatorDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         byte[] ownerBytes = policy.OwnerId.ToByteArray();
-        FilterPolicyEntity? existing = await _dbContext.FilterPolicies
+        FilterPolicyEntity? existing = await dbContext.FilterPolicies
             .FirstOrDefaultAsync(p => p.OwnerId == ownerBytes, ct)
             .ConfigureAwait(false);
 
@@ -38,7 +39,7 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
             {
                 OwnerId = ownerBytes
             };
-            _dbContext.FilterPolicies.Add(existing);
+            dbContext.FilterPolicies.Add(existing);
         }
 
         existing.BlockedPeersJson = JsonSerializer.Serialize(
@@ -49,13 +50,14 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
 
         existing.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     public async ValueTask<FileTransferFilterPolicy> GetPolicyAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
     {
+        await using PercolatorDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         byte[] ownerBytes = ownerId.ToByteArray();
-        FilterPolicyEntity? entity = await _dbContext.FilterPolicies
+        FilterPolicyEntity? entity = await dbContext.FilterPolicies
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.OwnerId == ownerBytes, ct)
             .ConfigureAwait(false);

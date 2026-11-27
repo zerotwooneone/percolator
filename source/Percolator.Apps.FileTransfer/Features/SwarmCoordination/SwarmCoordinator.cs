@@ -13,6 +13,7 @@ public sealed class SwarmCoordinator
 {
     public static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan DeadPeerTimeout = TimeSpan.FromSeconds(60);
+    public static readonly TimeSpan DefaultSeedingTtl = TimeSpan.FromHours(24);
 
     private readonly object _sync = new();
     private readonly Dictionary<PublicIdentityId, SwarmPeerLiveness> _peerLiveness = [];
@@ -116,6 +117,48 @@ public sealed class SwarmCoordinator
         return true;
     }
 
+    public async ValueTask<bool> EvaluateSeedingRetentionAsync(
+        TransferSession session,
+        DateTimeOffset seedingStartedAtUtc,
+        TimeSpan seedingTtl,
+        IDistributedTrackerPort trackerPort,
+        ITransferPeerTransport peerTransport,
+        SwarmRendezvousId rendezvousId,
+        EphemeralSwarmPeerId ephemeralPeerId,
+        bool manualStopRequested = false,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(trackerPort);
+        ArgumentNullException.ThrowIfNull(peerTransport);
+        ArgumentNullException.ThrowIfNull(rendezvousId);
+        ArgumentNullException.ThrowIfNull(ephemeralPeerId);
+
+        bool ttlExpired = seedingTtl > TimeSpan.Zero && (_clock.UtcNow - seedingStartedAtUtc) >= seedingTtl;
+        bool finiteRatioReached = !session.TargetSeedRatio.IsUnlimited
+                                  && !session.TargetSeedRatio.IsZero
+                                  && session.HasReachedTargetSeedRatio;
+
+        bool shouldStop = session.State == TransferSessionState.Completed
+                          || manualStopRequested
+                          || ttlExpired
+                          || finiteRatioReached;
+
+        if (!shouldStop)
+        {
+            return false;
+        }
+
+        if (session.State == TransferSessionState.Seeding)
+        {
+            session.StopSeeding(_clock);
+        }
+
+        await peerTransport.CloseSessionConnectionsAsync(session.Id, ct).ConfigureAwait(false);
+        await trackerPort.UnregisterAsync(rendezvousId, ephemeralPeerId, ct: ct).ConfigureAwait(false);
+        return true;
+    }
+
     public async ValueTask<bool> CheckSeedRatioCompletionAsync(
         TransferSession session,
         IDistributedTrackerPort trackerPort,
@@ -127,7 +170,11 @@ public sealed class SwarmCoordinator
         ArgumentNullException.ThrowIfNull(rendezvousId);
         ArgumentNullException.ThrowIfNull(ephemeralPeerId);
 
-        if (session.State == TransferSessionState.Completed || session.HasReachedTargetSeedRatio)
+        bool finiteRatioReached = !session.TargetSeedRatio.IsUnlimited
+                                  && !session.TargetSeedRatio.IsZero
+                                  && session.HasReachedTargetSeedRatio;
+
+        if (session.State == TransferSessionState.Completed || finiteRatioReached)
         {
             if (session.State != TransferSessionState.Completed)
             {

@@ -1951,9 +1951,9 @@ Academic and protocol audit confirms that stranger discovery on a single untrust
     - Coordinates rarest-first piece selection across connected peers, verifies every received chunk against `TransferManifest` SHA-256 Merkle leaf **before writing** (`INV-VERIFY-BEFORE-WRITE`), and atomically finalizes `.percolator-part` files via `IDesktopFileStorage`.
     - **Lifecycle & Teardown:** Pause, Cancel, Manual Stop Seeding, and Vault Lock cancel session CTS, tear down all ICE agents / DataChannels / `TransferPipe` streams within 1s, and call `SwarmTrackerService.Unregister`.
 - **Acceptance Criteria:**
-  - [ ] `NullTransferStreamPool` is removed from production DI wiring.
-  - [ ] Group V2 `FileTransferOffer` + `FileTransferPeerJoin` + `MemberLeft` cert revocation run end-to-end.
-  - [ ] Completed downloads keep seeding while unlocked and survive the original author going offline; vault lock tears down all sockets/ICE agents within 1s and unregisters from tracker.
+  - [x] `NullTransferStreamPool` is removed from production DI wiring.
+  - [x] Group V2 `FileTransferOffer` + `FileTransferPeerJoin` + `MemberLeft` cert revocation run end-to-end.
+  - [x] Completed downloads keep seeding while unlocked and survive the original author going offline; vault lock tears down all sockets/ICE agents within 1s and unregisters from tracker.
 
 #### Ticket `FT-005` — End-to-End Multi-Node File Transfer, Offline-Author Swarm & Fallback Integration Tests
 - **Layer / Scope:** `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.ApplicationIntegrationTests`

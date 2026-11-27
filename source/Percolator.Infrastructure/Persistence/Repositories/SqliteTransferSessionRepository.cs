@@ -66,7 +66,7 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             ? JsonSerializer.Serialize(session.SelectedFiles.Indices.Select(idx => idx.Value))
             : null;
 
-        existing.TargetSeedRatio = session.TargetSeedRatio.Multiplier;
+        existing.TargetSeedRatio = session.TargetSeedRatio.IsUnlimited ? -1.0 : session.TargetSeedRatio.Multiplier;
         existing.UploadedSizeBytes = session.UploadedBytes.Bytes;
         existing.CreatedAtUtc = session.CreatedAtUtc;
         existing.CompletedAtUtc = session.CompletedAtUtc;
@@ -274,7 +274,9 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             (DirectWanPolicy)entity.WanPolicy,
             relay,
             candidates,
-            string.IsNullOrWhiteSpace(entity.LocalRootPath) ? null : RootDirectoryPath.Parse(entity.LocalRootPath));
+            string.IsNullOrWhiteSpace(entity.LocalRootPath) ? null : RootDirectoryPath.Parse(entity.LocalRootPath),
+            entity.IsGroupTransfer,
+            entity.SenderCertSha256 is { Length: 32 } ? CertSha256Fingerprint.FromBytes(entity.SenderCertSha256) : null);
 
         _transportContexts[sessionId] = rehydrated;
         return rehydrated;
@@ -293,6 +295,8 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         entity.RelayPipeToken = context.RelayRendezvous?.Token.Span.ToArray();
         entity.DirectCandidatesJson = JsonSerializer.Serialize(
             context.DirectCandidates.Select(c => new PersistedCandidateDto(c.Host.Value, c.Port.Value, (int)c.Kind)).ToList());
+        entity.IsGroupTransfer = context.IsGroupTransfer;
+        entity.SenderCertSha256 = context.SenderCertSha256?.Span.ToArray();
     }
 
     private sealed record PersistedCandidateDto(string Host, int Port, int Kind);
@@ -369,6 +373,10 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             _ => new TransferTopology.IncomingStaged(initiatorId)
         };
 
+        SeedRatio targetSeedRatio = entity.TargetSeedRatio < 0
+            ? SeedRatio.Unlimited
+            : SeedRatio.FromMultiplier(entity.TargetSeedRatio);
+
         return TransferSession.Rehydrate(
             manifestId,
             (TransferRole)entity.Role,
@@ -377,7 +385,7 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             manifest,
             bitfield,
             selectedFiles,
-            SeedRatio.FromMultiplier(entity.TargetSeedRatio),
+            targetSeedRatio,
             TotalBundleBytes.FromBytes(entity.UploadedSizeBytes),
             Array.Empty<SwarmMember>(),
             entity.CreatedAtUtc,

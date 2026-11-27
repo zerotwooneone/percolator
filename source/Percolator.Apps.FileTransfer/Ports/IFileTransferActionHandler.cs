@@ -39,5 +39,6 @@ public interface IFileTransferActionHandler
 
     ValueTask<DomainResult> PauseTransferAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<DomainResult> ResumeTransferAsync(TransferSessionId sessionId, CancellationToken ct = default);
+    ValueTask<DomainResult> StopSeedingAsync(TransferSessionId sessionId, CancellationToken ct = default);
     ValueTask<DomainResult> CancelTransferAsync(TransferSessionId sessionId, TransferTerminationReason reason, CancellationToken ct = default);
 }

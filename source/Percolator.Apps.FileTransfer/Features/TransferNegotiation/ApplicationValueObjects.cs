@@ -351,4 +351,6 @@ public sealed record TransferSessionTransportContext(
     DirectWanPolicy WanPolicy,
     RelayRendezvousDescriptor? RelayRendezvous,
     IReadOnlyList<DirectEndpointCandidate> DirectCandidates,
-    RootDirectoryPath? LocalRootPath = null);
+    RootDirectoryPath? LocalRootPath = null,
+    bool IsGroupTransfer = false,
+    CertSha256Fingerprint? SenderCertSha256 = null);

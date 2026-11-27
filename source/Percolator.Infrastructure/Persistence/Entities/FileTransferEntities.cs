@@ -28,6 +28,8 @@ public sealed class TransferSessionEntity
     public string? RelayEndpointUri { get; set; }
     public byte[]? RelayPipeToken { get; set; }
     public string DirectCandidatesJson { get; set; } = string.Empty;
+    public bool IsGroupTransfer { get; set; }
+    public byte[]? SenderCertSha256 { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }
 }

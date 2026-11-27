@@ -105,6 +105,18 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
             await _dbContext.Database.ExecuteSqlRawAsync(
                 "ALTER TABLE ft_transfer_sessions ADD COLUMN EphemeralPeerId BLOB NOT NULL DEFAULT X'';", ct);
         }
+
+        if (!ftCols.Contains("IsGroupTransfer"))
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE ft_transfer_sessions ADD COLUMN IsGroupTransfer INTEGER NOT NULL DEFAULT 0;", ct);
+        }
+
+        if (!ftCols.Contains("SenderCertSha256"))
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE ft_transfer_sessions ADD COLUMN SenderCertSha256 BLOB NULL;", ct);
+        }
     }
 
     private async Task ApplyPreKeySchemaUpgradesAsync(CancellationToken ct)

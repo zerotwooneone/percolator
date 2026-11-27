@@ -453,6 +453,7 @@ public class PercolatorDbContext : DbContext
             entity.Property(e => e.EphemeralPeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.SenderCertSha256).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
         // 35. File Transfer Manifest Files (Chunk 4.4)
         modelBuilder.Entity<ManifestFileEntity>(entity =>

@@ -14,7 +14,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public override TransferSessionId Id { get; }
     public TransferRole Role { get; }
     public TransferSessionState State { get; private set; }
-    public TransferTopology Topology { get; }
+    public TransferTopology Topology { get; private set; }
     public PublicIdentityId InitiatorId => Topology.InitiatorId;
     public TransferManifest Manifest { get; }
     public Bitfield LocalBitfield { get; private set; }
@@ -593,6 +593,59 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
         State = TransferSessionState.Cancelled;
         AddDomainEvent(new TransferCancelledDomainEvent(Id, reason, clock.UtcNow));
+        return DomainResult.Success();
+    }
+
+    public DomainResult AuthorizeGroupPeer(PublicIdentityId peerId)
+    {
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot authorize group peer in terminal state '{State}'."));
+
+        if (Topology is TransferTopology.OneToOne)
+            return DomainResult.Failure(new DomainError("Transfer.NotGroupTopology", "Cannot authorize additional peers on a 1:1 transfer topology."));
+
+        if (Topology.ContainsParticipant(peerId))
+            return DomainResult.Success();
+
+        Topology = Topology switch
+        {
+            TransferTopology.IncomingStaged incoming => new TransferTopology.MultiPeer(incoming.InitiatorId, [peerId]),
+            TransferTopology.MultiPeer multiPeer => new TransferTopology.MultiPeer(
+                multiPeer.InitiatorId,
+                [.. multiPeer.Recipients, peerId]),
+            _ => Topology
+        };
+
+        return DomainResult.Success();
+    }
+
+    public DomainResult RevokeGroupPeer(PublicIdentityId peerId)
+    {
+        _swarmMembers.Remove(peerId);
+
+        if (Topology is TransferTopology.MultiPeer multiPeer &&
+            multiPeer.Recipients.Any(r => r == peerId))
+        {
+            List<PublicIdentityId> remaining = multiPeer.Recipients.Where(r => r != peerId).ToList();
+            Topology = new TransferTopology.MultiPeer(multiPeer.InitiatorId, remaining);
+        }
+
+        return DomainResult.Success();
+    }
+
+    public DomainResult StopSeeding(IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        if (State != TransferSessionState.Seeding &&
+            !(Role == TransferRole.Sender && State is TransferSessionState.Offered or TransferSessionState.InFlight or TransferSessionState.Stalled))
+        {
+            return DomainResult.Failure(new DomainError("Transfer.InvalidState", $"Cannot stop seeding in state '{State}'."));
+        }
+
+        State = TransferSessionState.Completed;
+        DateTimeOffset now = clock.UtcNow;
+        CompletedAtUtc = now;
+        AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
         return DomainResult.Success();
     }
 

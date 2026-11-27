@@ -240,6 +240,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             proto.SenderCertSha256 = ByteString.CopyFrom(offer.SenderCertSha256.Span);
         }
 
+        proto.IsGroupTransfer = offer.IsGroupTransfer;
+
         return proto;
     }
 
@@ -300,7 +302,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             streamAuthToken,
             relay,
             candidates,
-            senderCertSha256);
+            senderCertSha256,
+            proto.IsGroupTransfer);
     }
 
     private static FileTransferAcceptProto ToAcceptProto(FileTransferAcceptPayload accept)

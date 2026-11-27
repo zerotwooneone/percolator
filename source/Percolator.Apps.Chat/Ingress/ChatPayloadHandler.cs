@@ -12,6 +12,7 @@ using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 using Percolator.PluginSdk.Profiles;
 
 namespace Percolator.Apps.Chat.Ingress;
@@ -35,6 +36,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly IProfileManager _profileManager;
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IPeerMailboxRoutingRepository _peerMailboxRoutingRepo;
+    private readonly IEventPublisher _eventPublisher;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -49,7 +51,8 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IProfileDeliveryClient profileDeliveryClient,
         IProfileManager profileManager,
         ICryptoEngine cryptoEngine,
-        IPeerMailboxRoutingRepository peerMailboxRoutingRepo)
+        IPeerMailboxRoutingRepository peerMailboxRoutingRepo,
+        IEventPublisher eventPublisher)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -64,6 +67,7 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _profileManager = profileManager ?? throw new ArgumentNullException(nameof(profileManager));
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _peerMailboxRoutingRepo = peerMailboxRoutingRepo ?? throw new ArgumentNullException(nameof(peerMailboxRoutingRepo));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -831,6 +835,13 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
                 }
 
                 await _channelRepo.SaveGroupAsync(group, ct).ConfigureAwait(false);
+                await _eventPublisher.PublishAsync(
+                    new GroupMemberRemovedApplicationEvent(
+                        group.Id,
+                        dto.AffectedIdentity.Value,
+                        group.CurrentEpoch,
+                        _timeProvider.UtcNow),
+                    ct).ConfigureAwait(false);
             }
             else
             {

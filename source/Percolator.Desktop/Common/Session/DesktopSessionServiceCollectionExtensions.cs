@@ -90,16 +90,14 @@ internal static class DesktopSessionServiceCollectionExtensions
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as
         // unhandled terminal rejections. AddChatApp is verbatim-safe (all lifetimes
-        // consistent); file transfer is composed manually because AddFileTransferApp
-        // registers FileTransferPayloadHandler/FileTransferIngressFilter as singletons
-        // with scoped repo deps (captive under this host's ValidateScopes), and the
-        // filter's IsEnabled default of false would discard every FT payload.
+        // consistent); file transfer registers the session-scoped TransferSessionRuntime
+        // (disposed on vault lock) and scoped FileTransferPayloadHandler while omitting
+        // FileTransferIngressFilter whose IsEnabled default of false would discard ingress.
         services.AddChatApp();
         services.AddSingleton<IAppPlugin, FileTransferPlugin>();
+        services.AddSingleton<TransferSessionRuntimeOptions>(_ => new TransferSessionRuntimeOptions());
+        services.AddSingleton<ITransferSessionRuntime, Percolator.Apps.FileTransfer.Features.Runtime.TransferSessionRuntime>();
         services.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
-        // Null Object default from AddFileTransferApp — pool connection is a session
-        // UX concern, not required for mailbox ingress.
-        services.AddSingleton<ITransferStreamPool>(NullTransferStreamPool.Instance);
 
         // Session-bound window manager: window scopes come off the SESSION root — no
         // provider parameter on Show/ShowDialogAsync and zero call-site changes (the

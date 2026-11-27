@@ -31,7 +31,7 @@ public sealed class SqliteTransferSessionRepositoryTests
     {
         _db = new SqliteTestDb();
         _sessionRepo = new SqliteTransferSessionRepository(_db.DbContext);
-        _policyRepo = new SqliteFilterPolicyRepository(_db.DbContext);
+        _policyRepo = new SqliteFilterPolicyRepository(_db.ContextFactory);
     }
 
     [TearDown]
@@ -147,8 +147,7 @@ public sealed class SqliteTransferSessionRepositoryTests
 
         await _policyRepo.SavePolicyAsync(policy);
 
-        using var readDb = _db.CreateNewContext();
-        var readRepo = new SqliteFilterPolicyRepository(readDb);
+        var readRepo = new SqliteFilterPolicyRepository(_db.ContextFactory);
 
         var loaded = await readRepo.GetPolicyAsync(ownerId);
         loaded.OwnerId.Should().Be(ownerId);
@@ -156,6 +155,67 @@ public sealed class SqliteTransferSessionRepositoryTests
         loaded.EvaluatePeer(Domain.Identities.PublicIdentityId.New()).Should().Be(PeerFilterDecision.Allowed);
         loaded.EvaluateRelay(blockedRelay).Should().Be(RelayFilterDecision.Blocked);
         loaded.EvaluateRelay(RelayPipeEndpointUri.Parse("https://trusted.relay.net/pipes")).Should().Be(RelayFilterDecision.Allowed);
+    }
+
+    [Test]
+    public async Task RoundTrip_GroupTransfer_PreservesUnlimitedSeedRatioAndSenderCertSha256()
+    {
+        var sessionId = TransferSessionId.New();
+        var initiatorId = Domain.Identities.PublicIdentityId.New();
+        var member1 = Domain.Identities.PublicIdentityId.New();
+        var member2 = Domain.Identities.PublicIdentityId.New();
+        byte[] chunk0 = new byte[65536];
+        RandomNumberGenerator.Fill(chunk0);
+        var leaf0 = MerkleTreeBuilder.HashLeaf(chunk0);
+        var merkleTree = MerkleTreeIndex.Create(MerkleRoot.FromSpan(leaf0.Span), [leaf0]);
+        var manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("GroupShare"),
+            ChunkSizeBytes.FromBytes(65536),
+            merkleTree,
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("clip.bin"), FileSizeBytes.FromBytes(65536), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
+
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        var session = TransferSession.CreateOutgoingMultiPeer(
+            sessionId,
+            initiatorId,
+            [member1, member2],
+            manifest,
+            SeedRatio.Unlimited,
+            clock);
+
+        var senderCertFp = CertSha256Fingerprint.FromBytes(RandomNumberGenerator.GetBytes(32));
+        var context = new TransferSessionTransportContext(
+            sessionId,
+            ChannelId.New(),
+            initiatorId,
+            SwarmRendezvousId.Generate(),
+            EphemeralSwarmPeerId.Generate(),
+            StreamAuthToken.Generate(),
+            DirectWanPolicy.ExplicitlyAllowed,
+            null,
+            [],
+            IsGroupTransfer: true,
+            SenderCertSha256: senderCertFp);
+
+        await _sessionRepo.SaveTransportContextAsync(context);
+        await _sessionRepo.SaveSessionAsync(session);
+
+        using var readDb = _db.CreateNewContext();
+        var readRepo = new SqliteTransferSessionRepository(readDb);
+
+        TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
+        TransferSessionTransportContext? loadedCtx = await readRepo.GetTransportContextAsync(sessionId);
+
+        loaded.Should().NotBeNull();
+        loaded!.TargetSeedRatio.IsUnlimited.Should().BeTrue();
+        loaded.Topology.Should().BeOfType<TransferTopology.MultiPeer>();
+        loaded.Topology.ContainsParticipant(member1).Should().BeTrue();
+        loaded.Topology.ContainsParticipant(member2).Should().BeTrue();
+
+        loadedCtx.Should().NotBeNull();
+        loadedCtx!.IsGroupTransfer.Should().BeTrue();
+        loadedCtx.SenderCertSha256.Should().Be(senderCertFp);
     }
 
     private sealed class TestClock : IDateTimeProvider

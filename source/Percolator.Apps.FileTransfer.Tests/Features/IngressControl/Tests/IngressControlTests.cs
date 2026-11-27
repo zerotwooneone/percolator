@@ -2,7 +2,9 @@ using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Apps.FileTransfer.Features.Runtime;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
@@ -19,6 +21,8 @@ public sealed class IngressControlTests
     private InMemoryTransferSessionRepository _sessionRepository = null!;
     private InMemoryFilterPolicyRepository _policyRepository = null!;
     private IPayloadSerializer _serializer = null!;
+    private RecordingPayloadSender _payloadSender = null!;
+    private TransferSessionRuntime _runtime = null!;
 
     [SetUp]
     public void SetUp()
@@ -27,6 +31,22 @@ public sealed class IngressControlTests
         _sessionRepository = new InMemoryTransferSessionRepository();
         _policyRepository = new InMemoryFilterPolicyRepository();
         _serializer = new TestPayloadSerializer();
+        _payloadSender = new RecordingPayloadSender();
+        _runtime = new TransferSessionRuntime(
+            new FakeTransferPeerTransport(),
+            new InMemoryTransferSessionCertificateStore(),
+            new RecordingTrackerPort(),
+            new InMemoryDesktopFileStorage(),
+            new RecordingTransferRateLimiter(),
+            _clock,
+            new InMemoryEventBusForTests(),
+            new TransferSessionRuntimeOptions());
+    }
+
+    [TearDown]
+    public async Task TearDown()
+    {
+        await _runtime.DisposeAsync();
     }
 
     [Test]
@@ -81,7 +101,7 @@ public sealed class IngressControlTests
         RelayPipeEndpointUri blockedRelay = RelayPipeEndpointUri.Parse("https://malicious-relay.com/pipe");
         _policyRepository.Policy = FileTransferFilterPolicy.CreateDefault().BlockRelay(blockedRelay);
 
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), new FakeTransferStreamPool());
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), _runtime, _payloadSender);
 
         TransferSessionId sessionId = TransferSessionId.New();
         FileTransferOfferPayload offer = CreateValidOffer(sessionId, relayUri: blockedRelay);
@@ -107,7 +127,7 @@ public sealed class IngressControlTests
     [Test]
     public async Task UT_ING_04_IngressOfferStagingForAllowedPeer()
     {
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), new FakeTransferStreamPool());
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), _runtime, _payloadSender);
 
         TransferSessionId sessionId = TransferSessionId.New();
         FileTransferOfferPayload offer = CreateValidOffer(sessionId);
@@ -248,7 +268,7 @@ public sealed class IngressControlTests
     [Test]
     public async Task UT_ING_10_InboundCancellationFromAuthorizedInitiator()
     {
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), new FakeTransferStreamPool());
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), _runtime, _payloadSender);
 
         TransferSessionId sessionId = TransferSessionId.New();
         PublicIdentityId initiatorId = PublicIdentityId.New();
@@ -285,7 +305,7 @@ public sealed class IngressControlTests
     [Test]
     public async Task UT_ING_11_InboundCancellationFromUnauthorizedThirdParty()
     {
-        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), new FakeTransferStreamPool());
+        FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), _runtime, _payloadSender);
 
         TransferSessionId sessionId = TransferSessionId.New();
         byte[] idBytes1 = new byte[16];

@@ -68,6 +68,7 @@ message FileTransferOfferProto {
   RelayRendezvousDescriptorProto relay_rendezvous = 7;
   repeated DirectEndpointCandidateProto direct_candidates = 8;
   bytes sender_cert_sha256 = 9;    // 32-byte E2E-pinned ephemeral ECDSA P-256 cert SHA-256
+  bool is_group_transfer = 10;
 }
 
 message FileTransferAcceptProto {

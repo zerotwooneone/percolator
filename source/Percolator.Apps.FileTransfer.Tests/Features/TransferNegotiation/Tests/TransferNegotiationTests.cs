@@ -2,9 +2,11 @@ using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Apps.FileTransfer.Features.Runtime;
 using Percolator.Apps.FileTransfer.Features.Storage;
 using Percolator.Apps.FileTransfer.Features.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
@@ -22,6 +24,8 @@ public sealed class TransferNegotiationTests
     private RecordingPayloadSender _payloadSender = null!;
     private RecordingTrackerPort _trackerPort = null!;
     private InMemoryFilterPolicyRepository _policyRepository = null!;
+    private InMemoryTransferSessionCertificateStore _certStore = null!;
+    private TransferSessionRuntime _runtime = null!;
     private FileTransferActionHandler _handler = null!;
 
     [SetUp]
@@ -33,6 +37,16 @@ public sealed class TransferNegotiationTests
         _payloadSender = new RecordingPayloadSender();
         _trackerPort = new RecordingTrackerPort();
         _policyRepository = new InMemoryFilterPolicyRepository();
+        _certStore = new InMemoryTransferSessionCertificateStore();
+        _runtime = new TransferSessionRuntime(
+            new FakeTransferPeerTransport(),
+            _certStore,
+            _trackerPort,
+            _fileStorage,
+            new RecordingTransferRateLimiter(),
+            _clock,
+            new InMemoryEventBusForTests(),
+            new TransferSessionRuntimeOptions());
         var defaultFilter = new FileTransferIngressFilter(_policyRepository) { IsEnabled = true };
 
         _handler = new FileTransferActionHandler(
@@ -45,7 +59,14 @@ public sealed class TransferNegotiationTests
             defaultFilter,
             new InMemoryBlobStorageService(),
             new FakeNetworkEndpointDiscoveryPort(),
-            new FakeTransferStreamPool());
+            _runtime,
+            _certStore);
+    }
+
+    [TearDown]
+    public async Task TearDown()
+    {
+        await _runtime.DisposeAsync();
     }
 
     [Test]
@@ -247,7 +268,8 @@ public sealed class TransferNegotiationTests
             filter,
             new InMemoryBlobStorageService(),
             new FakeNetworkEndpointDiscoveryPort(),
-            new FakeTransferStreamPool());
+            _runtime,
+            _certStore);
 
         var initiateResult = await handler.InitiateTransferAsync(
             [PublicIdentityId.New()],
@@ -286,7 +308,8 @@ public sealed class TransferNegotiationTests
             filter,
             new InMemoryBlobStorageService(),
             new FakeNetworkEndpointDiscoveryPort(),
-            new FakeTransferStreamPool());
+            _runtime,
+            _certStore);
 
         var initiateResult = await handler.InitiateTransferAsync(
             [],

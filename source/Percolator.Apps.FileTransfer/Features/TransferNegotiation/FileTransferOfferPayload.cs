@@ -11,4 +11,5 @@ public sealed record FileTransferOfferPayload(
     StreamAuthToken StreamAuthToken,
     RelayRendezvousDescriptor? RelayRendezvous,
     IReadOnlyList<DirectEndpointCandidate> DirectCandidates,
-    CertSha256Fingerprint? SenderCertSha256 = null);
+    CertSha256Fingerprint? SenderCertSha256 = null,
+    bool IsGroupTransfer = false);

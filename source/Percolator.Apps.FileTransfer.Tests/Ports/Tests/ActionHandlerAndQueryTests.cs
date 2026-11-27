@@ -3,6 +3,7 @@ using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Apps.FileTransfer.Features.Runtime;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
@@ -22,10 +23,11 @@ public sealed class ActionHandlerAndQueryTests
     private InMemoryDesktopFileStorage _fileStorage = null!;
     private RecordingPayloadSender _payloadSender = null!;
     private RecordingTrackerPort _trackerPort = null!;
-private InMemoryBlobStorageService _blobStorage = null!;
+    private InMemoryBlobStorageService _blobStorage = null!;
     private FileTransferIngressFilter _ingressFilter = null!;
     private FakeNetworkEndpointDiscoveryPort _endpointDiscovery = null!;
-    private FakeTransferStreamPool _streamPool = null!;
+    private InMemoryTransferSessionCertificateStore _certStore = null!;
+    private TransferSessionRuntime _runtime = null!;
     private TestPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
     private FileTransferQueryService _queryService = null!;
@@ -41,7 +43,16 @@ private InMemoryBlobStorageService _blobStorage = null!;
         _trackerPort = new RecordingTrackerPort();
         _blobStorage = new InMemoryBlobStorageService();
         _endpointDiscovery = new FakeNetworkEndpointDiscoveryPort();
-        _streamPool = new FakeTransferStreamPool();
+        _certStore = new InMemoryTransferSessionCertificateStore();
+        _runtime = new TransferSessionRuntime(
+            new FakeTransferPeerTransport(),
+            _certStore,
+            _trackerPort,
+            _fileStorage,
+            new RecordingTransferRateLimiter(),
+            _clock,
+            new InMemoryEventBusForTests(),
+            new TransferSessionRuntimeOptions());
         _serializer = new TestPayloadSerializer();
         _ingressFilter = new FileTransferIngressFilter(new InMemoryFilterPolicyRepository()) { IsEnabled = true };
 
@@ -55,7 +66,8 @@ private InMemoryBlobStorageService _blobStorage = null!;
             _ingressFilter,
             _blobStorage,
             _endpointDiscovery,
-            _streamPool);
+            _runtime,
+            _certStore);
 
         _queryService = new FileTransferQueryService(_sessionRepo);
         _reaperService = new TransferOfferReaperService(_sessionRepo, _clock);
@@ -64,7 +76,7 @@ private InMemoryBlobStorageService _blobStorage = null!;
     [TearDown]
     public async Task TearDown()
     {
-        await _streamPool.DisposeAsync();
+        await _runtime.DisposeAsync();
     }
 
     [Test]
@@ -225,7 +237,8 @@ private InMemoryBlobStorageService _blobStorage = null!;
             _serializer,
             _clock,
             _blobStorage,
-            _streamPool);
+            _runtime,
+            _payloadSender);
 
         var inboundCtx = new InboundPayloadContext(
             channelId,
@@ -246,7 +259,7 @@ private InMemoryBlobStorageService _blobStorage = null!;
     }
 
     [Test]
-    public async Task UT_CMD_06_CrocResumptionBitfieldAndDirectToRelayFallback()
+    public async Task UT_CMD_06_CrocResumptionBitfieldAndRuntimeCertPinning()
     {
         ChannelId channelId = ChannelId.New();
         PublicIdentityId senderId = PublicIdentityId.New();
@@ -274,7 +287,32 @@ private InMemoryBlobStorageService _blobStorage = null!;
         {
             Policy = FileTransferFilterPolicy.DefaultPermissive(recipientId)
         };
-        var payloadHandler = new FileTransferPayloadHandler(recipientRepo, policyRepo, _serializer, _clock, _blobStorage, new FakeTransferStreamPool());
+        InMemoryDesktopFileStorage recipientStorage = new()
+        {
+            ConfiguredResumptionBitfield = Bitfield.Empty(ChunkCount.FromInt(3)).WithChunk(ChunkIndex.FromInt(0))
+        };
+        RecordingPayloadSender recipientSender = new();
+        RecordingTrackerPort recipientTracker = new();
+        InMemoryTransferSessionCertificateStore recipientCertStore = new();
+        await using TransferSessionRuntime recipientRuntime = new(
+            new FakeTransferPeerTransport(),
+            recipientCertStore,
+            recipientTracker,
+            recipientStorage,
+            new RecordingTransferRateLimiter(),
+            _clock,
+            new InMemoryEventBusForTests(),
+            new TransferSessionRuntimeOptions());
+
+        var payloadHandler = new FileTransferPayloadHandler(
+            recipientRepo,
+            policyRepo,
+            _serializer,
+            _clock,
+            _blobStorage,
+            recipientRuntime,
+            recipientSender);
+
         await payloadHandler.HandleInboundAsync(new InboundPayloadContext(
             channelId,
             recipientId,
@@ -283,18 +321,6 @@ private InMemoryBlobStorageService _blobStorage = null!;
             AppId.FileTransferControl,
             _payloadSender.SentPayloads[0].Payload,
             _clock.UtcNow));
-
-        // Simulate partial resumption on disk (chunk 0 already verified on disk) and direct P2P failure -> relay fallback
-        InMemoryDesktopFileStorage recipientStorage = new()
-        {
-            ConfiguredResumptionBitfield = Bitfield.Empty(ChunkCount.FromInt(3)).WithChunk(ChunkIndex.FromInt(0))
-        };
-        await using FakeTransferStreamPool recipientPool = new()
-        {
-            SimulateDirectConnectionFailure = true
-        };
-        RecordingPayloadSender recipientSender = new();
-        RecordingTrackerPort recipientTracker = new();
 
         var recipientActionHandler = new FileTransferActionHandler(
             recipientRepo,
@@ -306,7 +332,8 @@ private InMemoryBlobStorageService _blobStorage = null!;
             _ingressFilter,
             _blobStorage,
             _endpointDiscovery,
-            recipientPool);
+            recipientRuntime,
+            recipientCertStore);
 
         DomainResult acceptResult = await recipientActionHandler.AcceptTransferAsync(
             sessionId,
@@ -327,9 +354,16 @@ private InMemoryBlobStorageService _blobStorage = null!;
             a.EphemeralPeerId == recipientCtx.EphemeralPeerId &&
             a.Role == SwarmPeerRole.Leecher);
 
-        // 3. Verify croc-style direct-to-relay fallback connected to the relay pipe when direct failed
-        recipientPool.ConnectedRelayRendezvous.Should().NotBeNull();
-        recipientPool.ConnectedRelayRendezvous!.EndpointUri.Value.Should().Be("https://exchange.test.local/pipe/session");
+        // 3. Verify recipient runtime started session, pinned sender's cert, and emitted ReceiverCertSha256
+        recipientRuntime.HasActiveSession(sessionId).Should().BeTrue();
+        using var senderCert = await _certStore.GetAsync(sessionId);
+        recipientRuntime.GetPinnedPeerCertificate(sessionId, senderId).Should().Be(senderCert!.Fingerprint);
+
+        recipientSender.SentPayloads.Should().ContainSingle();
+        recipientSender.SentPayloads[0].Payload.Span[0].Should().Be((byte)FileTransferControlOpcode.Accept);
+        var acceptPayload = _serializer.Deserialize<FileTransferAcceptPayload>(recipientSender.SentPayloads[0].Payload.Slice(1)).Value;
+        using var receiverCert = await recipientCertStore.GetAsync(sessionId);
+        acceptPayload.ReceiverCertSha256.Should().Be(receiverCert!.Fingerprint);
     }
 
     [Test]

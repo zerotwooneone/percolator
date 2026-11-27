@@ -14,6 +14,7 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 using Percolator.PluginSdk.Profiles;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -34,6 +35,7 @@ public class ChatPayloadHandlerTests
     private ChatTestCryptoEngine _cryptoEngine = null!;
     private TestPayloadSender _payloadSender = null!;
     private FakePeerMailboxRoutingRepository _peerMailboxRoutingRepo = null!;
+    private RecordingEventPublisher _eventPublisher = null!;
     private ChatPayloadHandler _sut = null!;
 
     [SetUp]
@@ -51,6 +53,7 @@ public class ChatPayloadHandlerTests
         _cryptoEngine = new ChatTestCryptoEngine();
         _payloadSender = new TestPayloadSender();
         _peerMailboxRoutingRepo = new FakePeerMailboxRoutingRepository();
+        _eventPublisher = new RecordingEventPublisher();
 
         _sut = new ChatPayloadHandler(
             _chatRepo,
@@ -65,7 +68,8 @@ public class ChatPayloadHandlerTests
             _profileDeliveryClient,
             _profileManager,
             _cryptoEngine,
-            _peerMailboxRoutingRepo);
+            _peerMailboxRoutingRepo,
+            _eventPublisher);
     }
 
     [Test]
@@ -992,7 +996,8 @@ public class ChatPayloadHandlerTests
             _profileDeliveryClient,
             _profileManager,
             _cryptoEngine,
-            new FakePeerMailboxRoutingRepository());
+            new FakePeerMailboxRoutingRepository(),
+            _eventPublisher);
 
         var msgId = PayloadId.New();
         var msgDto = new ChatMessageDto(
@@ -1296,6 +1301,12 @@ public class ChatPayloadHandlerTests
         var updatedGroup = await _channelRepo.GetGroupByIdAsync(group.Id);
         updatedGroup.Should().NotBeNull();
         updatedGroup!.Members.Select(m => m.Id).Should().NotContain(memberToEvict);
+        _eventPublisher.PublishedEvents
+            .OfType<GroupMemberRemovedApplicationEvent>()
+            .Should().ContainSingle(ev =>
+                ev.ChannelId == group.Id &&
+                ev.MemberId == memberToEvict &&
+                ev.NewEpoch == updatedGroup.CurrentEpoch);
     }
 
     [Test]
@@ -1336,6 +1347,18 @@ public class ChatPayloadHandlerTests
     }
 
     #endregion
+
+    private sealed class RecordingEventPublisher : IEventPublisher
+    {
+        public List<IApplicationEvent> PublishedEvents { get; } = [];
+
+        public ValueTask PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+            where TEvent : IApplicationEvent
+        {
+            PublishedEvents.Add(@event);
+            return ValueTask.CompletedTask;
+        }
+    }
 
     private sealed class InMemoryUnknownGroupCache : IUnknownGroupMessageCacheRepository
     {

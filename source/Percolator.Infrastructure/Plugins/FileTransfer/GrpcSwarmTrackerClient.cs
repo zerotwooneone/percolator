@@ -2,33 +2,36 @@ namespace Percolator.Infrastructure.Plugins.FileTransfer;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using Microsoft.EntityFrameworkCore;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
-using Percolator.Domain.Delivery.Ports;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
 
 /// <summary>
 /// Pure binary gRPC client for the blinded Exchange SwarmTrackerService over
-/// ChannelPoolKind.Unauthenticated. Resolves Exchange URI from IRelayDirectory when
-/// not explicitly supplied. Zero local SQLite, zero JSON, zero Persona IDs.
+/// ChannelPoolKind.Unauthenticated. Resolves default Exchange URI via
+/// IDbContextFactory&lt;PercolatorDbContext&gt; when not explicitly supplied.
+/// Thread-safe Singleton; zero local JSON, zero Persona IDs.
 /// </summary>
 public sealed class GrpcSwarmTrackerClient : IDistributedTrackerPort
 {
     private readonly IPeerGrpcChannelFactory _channelFactory;
-    private readonly IRelayDirectory _relayDirectory;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbContextFactory;
 
     public GrpcSwarmTrackerClient(
         IPeerGrpcChannelFactory channelFactory,
-        IRelayDirectory relayDirectory)
+        IDbContextFactory<PercolatorDbContext> dbContextFactory)
     {
         _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
-        _relayDirectory = relayDirectory ?? throw new ArgumentNullException(nameof(relayDirectory));
+        _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
     }
 
     public async ValueTask<SwarmAnnounceResult> AnnounceAsync(
@@ -113,12 +116,18 @@ public sealed class GrpcSwarmTrackerClient : IDistributedTrackerPort
             return explicitEndpoint.ToUri();
         }
 
-        var relays = await _relayDirectory.ListAsync(ct).ConfigureAwait(false);
-        if (relays.Count == 0)
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        string? endpointString = await db.RelayRegistrations
+            .AsNoTracking()
+            .Select(r => r.Endpoint)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(endpointString))
         {
             return null;
         }
 
-        return relays[0].Endpoint.ToUri();
+        return RelayEndpoint.Parse(endpointString).ToUri();
     }
 }

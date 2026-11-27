@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Threading.Channels;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
@@ -11,6 +12,7 @@ using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
+using Percolator.PluginSdk.Events;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.FileTransfer.Tests.TestDoubles;
@@ -448,4 +450,331 @@ public sealed class InMemoryBlobStorageService : IBlobStorageService
         _blobs.TryRemove(blobId, out _);
         return ValueTask.CompletedTask;
     }
+}
+
+public sealed class InMemoryTransferSessionCertificateStore : ITransferSessionCertificateStore
+{
+    private readonly ConcurrentDictionary<TransferSessionId, (CertSha256Fingerprint Fingerprint, byte[] CertDer, byte[] KeyPkcs8)> _store = new();
+    public List<TransferSessionId> DeletedSessions { get; } = [];
+
+    public ValueTask<TransferSessionCertificateMaterial> GetOrCreateAsync(
+        TransferSessionId sessionId,
+        CancellationToken ct = default)
+    {
+        var entry = _store.GetOrAdd(sessionId, _ =>
+        {
+            byte[] fp = RandomNumberGenerator.GetBytes(32);
+            byte[] cert = RandomNumberGenerator.GetBytes(64);
+            byte[] key = RandomNumberGenerator.GetBytes(48);
+            return (CertSha256Fingerprint.FromBytes(fp), cert, key);
+        });
+
+        return ValueTask.FromResult(new TransferSessionCertificateMaterial(
+            entry.Fingerprint,
+            entry.CertDer.ToArray(),
+            entry.KeyPkcs8.ToArray()));
+    }
+
+    public ValueTask<TransferSessionCertificateMaterial?> GetAsync(
+        TransferSessionId sessionId,
+        CancellationToken ct = default)
+    {
+        if (!_store.TryGetValue(sessionId, out var entry))
+        {
+            return ValueTask.FromResult<TransferSessionCertificateMaterial?>(null);
+        }
+
+        return ValueTask.FromResult<TransferSessionCertificateMaterial?>(new TransferSessionCertificateMaterial(
+            entry.Fingerprint,
+            entry.CertDer.ToArray(),
+            entry.KeyPkcs8.ToArray()));
+    }
+
+    public ValueTask DeleteAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        _store.TryRemove(sessionId, out _);
+        DeletedSessions.Add(sessionId);
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class InMemoryEventBusForTests : IEventPublisher, IEventSubscriber
+{
+    private readonly object _sync = new();
+    private readonly Dictionary<Type, List<Func<IApplicationEvent, CancellationToken, ValueTask>>> _handlers = [];
+
+    public int SubscriptionCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _handlers.Values.Sum(l => l.Count);
+            }
+        }
+    }
+
+    public async ValueTask PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+        where TEvent : IApplicationEvent
+    {
+        List<Func<IApplicationEvent, CancellationToken, ValueTask>> snapshot;
+        lock (_sync)
+        {
+            if (!_handlers.TryGetValue(typeof(TEvent), out var list))
+            {
+                return;
+            }
+            snapshot = list.ToList();
+        }
+
+        foreach (var handler in snapshot)
+        {
+            await handler(@event, cancellationToken);
+        }
+    }
+
+    public IDisposable Subscribe<TEvent>(Func<TEvent, CancellationToken, ValueTask> handler)
+        where TEvent : IApplicationEvent
+    {
+        Func<IApplicationEvent, CancellationToken, ValueTask> wrapper = (ev, ct) => handler((TEvent)ev, ct);
+        lock (_sync)
+        {
+            if (!_handlers.TryGetValue(typeof(TEvent), out var list))
+            {
+                list = [];
+                _handlers[typeof(TEvent)] = list;
+            }
+            list.Add(wrapper);
+        }
+
+        return new Unsubscriber(() =>
+        {
+            lock (_sync)
+            {
+                if (_handlers.TryGetValue(typeof(TEvent), out var list))
+                {
+                    list.Remove(wrapper);
+                }
+            }
+        });
+    }
+
+    public IDisposable RegisterFaultHandler(Action<EventDispatchError> handler) => new Unsubscriber(() => { });
+
+    private sealed class Unsubscriber(Action onDispose) : IDisposable
+    {
+        private int _disposed;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                onDispose();
+            }
+        }
+    }
+}
+
+public sealed class InMemoryPairedTransferDataChannel : ITransferDataChannel
+{
+    private readonly ChannelWriter<IStreamFramePayload> _outbound;
+    private readonly ChannelReader<IStreamFramePayload> _inbound;
+    private int _disposed;
+
+    public StreamIndex Index => StreamIndex.FromInt(0);
+    public string Label => "test-paired-dc";
+    public bool IsOpen => Volatile.Read(ref _disposed) == 0;
+    public long BufferedAmount => 0;
+    public TransferTransportKind TransportKind { get; }
+    public CertSha256Fingerprint VerifiedRemoteCertSha256 { get; }
+    public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+    private InMemoryPairedTransferDataChannel(
+        ChannelWriter<IStreamFramePayload> outbound,
+        ChannelReader<IStreamFramePayload> inbound,
+        CertSha256Fingerprint verifiedRemoteCertSha256,
+        TransferTransportKind transportKind)
+    {
+        _outbound = outbound;
+        _inbound = inbound;
+        VerifiedRemoteCertSha256 = verifiedRemoteCertSha256;
+        TransportKind = transportKind;
+    }
+
+    public static (InMemoryPairedTransferDataChannel SideA, InMemoryPairedTransferDataChannel SideB) CreatePair(
+        CertSha256Fingerprint certOfSideA,
+        CertSha256Fingerprint certOfSideB,
+        TransferTransportKind kind = TransferTransportKind.DirectWebRtcDtls)
+    {
+        var aToB = Channel.CreateUnbounded<IStreamFramePayload>();
+        var bToA = Channel.CreateUnbounded<IStreamFramePayload>();
+
+        var sideA = new InMemoryPairedTransferDataChannel(aToB.Writer, bToA.Reader, certOfSideB, kind);
+        var sideB = new InMemoryPairedTransferDataChannel(bToA.Writer, aToB.Reader, certOfSideA, kind);
+        return (sideA, sideB);
+    }
+
+    public async ValueTask SendFrameAsync(IStreamFramePayload frame, CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+            throw new ObjectDisposedException(nameof(InMemoryPairedTransferDataChannel));
+
+        await _outbound.WriteAsync(frame, ct).ConfigureAwait(false);
+    }
+
+    public async ValueTask<IStreamFramePayload> ReceiveFrameAsync(CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+            throw new ObjectDisposedException(nameof(InMemoryPairedTransferDataChannel));
+
+        return await _inbound.ReadAsync(ct).ConfigureAwait(false);
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _outbound.TryComplete();
+        }
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class FakeTransferPeerConnection : ITransferPeerConnection
+{
+    public TransferSessionId SessionId { get; }
+    public PublicIdentityId RemotePeerId { get; }
+    public TransferTransportKind TransportKind => TransferTransportKind.DirectWebRtcDtls;
+    public CertSha256Fingerprint? LocalDtlsFingerprint { get; }
+    public CertSha256Fingerprint? RemoteDtlsFingerprint { get; private set; }
+    public bool IsDisposed { get; private set; }
+    public List<string> AppliedAnswers { get; } = [];
+    public List<(string Candidate, string Mid)> AddedCandidates { get; } = [];
+
+    private readonly TaskCompletionSource<ITransferDataChannel> _channelTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public event Action<IceSignalOutboundEvent>? SignalProduced;
+
+    public FakeTransferPeerConnection(
+        TransferSessionId sessionId,
+        PublicIdentityId remotePeerId,
+        CertSha256Fingerprint localFingerprint)
+    {
+        SessionId = sessionId;
+        RemotePeerId = remotePeerId;
+        LocalDtlsFingerprint = localFingerprint;
+    }
+
+    public void EmitIceCandidate(string candidate, string mid = "0") =>
+        SignalProduced?.Invoke(new IceSignalOutboundEvent(SessionId, RemotePeerId, IceSignalKind.IceCandidate, candidate, mid, LocalDtlsFingerprint));
+
+    public void CompleteChannel(ITransferDataChannel channel) => _channelTcs.TrySetResult(channel);
+
+    public ValueTask<string> CreateOfferAsync(CancellationToken ct = default) =>
+        ValueTask.FromResult($"v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=fingerprint:sha-256 {LocalDtlsFingerprint!.ToColonHexUpper()}\r\n");
+
+    public ValueTask<string> AcceptOfferAndCreateAnswerAsync(
+        string remoteSdpOffer,
+        CertSha256Fingerprint? expectedRemoteDtlsFingerprint,
+        CancellationToken ct = default)
+    {
+        RemoteDtlsFingerprint = expectedRemoteDtlsFingerprint;
+        return ValueTask.FromResult($"v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=fingerprint:sha-256 {LocalDtlsFingerprint!.ToColonHexUpper()}\r\n");
+    }
+
+    public ValueTask ApplyRemoteAnswerAsync(
+        string remoteSdpAnswer,
+        CertSha256Fingerprint? expectedRemoteDtlsFingerprint,
+        CancellationToken ct = default)
+    {
+        RemoteDtlsFingerprint = expectedRemoteDtlsFingerprint;
+        AppliedAnswers.Add(remoteSdpAnswer);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask AddRemoteIceCandidateAsync(string candidate, string mid, CancellationToken ct = default)
+    {
+        AddedCandidates.Add((candidate, mid));
+        return ValueTask.CompletedTask;
+    }
+
+    public async ValueTask<ITransferDataChannel> WaitForAuthenticatedChannelAsync(
+        StreamAuthToken expectedAuthToken,
+        PublicIdentityId localIdentityId,
+        CancellationToken ct = default)
+    {
+        return await _channelTcs.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        IsDisposed = true;
+        _channelTcs.TrySetCanceled();
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed class FakeTransferPeerTransport : ITransferPeerTransport
+{
+    private readonly CertSha256Fingerprint _localFingerprint;
+    public List<FakeTransferPeerConnection> CreatedConnections { get; } = [];
+    public List<TransferSessionId> ClosedSessionIds { get; } = [];
+    public int CloseAllCallCount { get; private set; }
+    public Func<RelayedPipeConnectionOptions, ITransferDataChannel>? PipeChannelFactory { get; set; }
+
+    public int ActiveConnectionCount => CreatedConnections.Count(c => !c.IsDisposed);
+
+    public FakeTransferPeerTransport(CertSha256Fingerprint? localFingerprint = null)
+    {
+        _localFingerprint = localFingerprint ?? CertSha256Fingerprint.FromBytes(RandomNumberGenerator.GetBytes(32));
+    }
+
+    public ValueTask<ITransferPeerConnection> CreateDirectConnectionAsync(
+        DirectPeerConnectionOptions options,
+        CancellationToken ct = default)
+    {
+        var conn = new FakeTransferPeerConnection(options.SessionId, options.RemotePeerId, _localFingerprint);
+        CreatedConnections.Add(conn);
+        return ValueTask.FromResult<ITransferPeerConnection>(conn);
+    }
+
+    public ValueTask<ITransferDataChannel> OpenRelayedPipeChannelAsync(
+        RelayedPipeConnectionOptions options,
+        CancellationToken ct = default)
+    {
+        if (!options.ExchangeSupportsTransferPipe)
+        {
+            throw new TransferTransportException(
+                TransferTransportErrorCodes.TransferPipeUnavailable,
+                "Exchange does not advertise TransferPipe.");
+        }
+
+        if (PipeChannelFactory != null)
+        {
+            return ValueTask.FromResult(PipeChannelFactory(options));
+        }
+
+        throw new TransferTransportException(
+            TransferTransportErrorCodes.TransferPipeUnavailable,
+            "No fake pipe channel configured.");
+    }
+
+    public async ValueTask CloseSessionConnectionsAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        ClosedSessionIds.Add(sessionId);
+        foreach (var conn in CreatedConnections.Where(c => c.SessionId == sessionId))
+        {
+            await conn.DisposeAsync();
+        }
+    }
+
+    public async ValueTask CloseAllConnectionsAsync(CancellationToken ct = default)
+    {
+        CloseAllCallCount++;
+        foreach (var conn in CreatedConnections)
+        {
+            await conn.DisposeAsync();
+        }
+    }
+
+    public ValueTask DisposeAsync() => CloseAllConnectionsAsync();
 }

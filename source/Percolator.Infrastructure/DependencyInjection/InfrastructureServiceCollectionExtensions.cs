@@ -397,9 +397,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ITransferSessionCertificateStore, SqliteTransferSessionCertificateStore>();
         services.AddSingleton<ITransferPeerTransport, TransferPeerTransport>();
         services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
-        services.AddScoped<IDistributedTrackerPort, GrpcSwarmTrackerClient>();
+        services.AddSingleton<IDistributedTrackerPort, GrpcSwarmTrackerClient>();
         services.AddScoped<ITransferSessionRepository, SqliteTransferSessionRepository>();
-        services.AddScoped<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
+        services.AddSingleton<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
         services.AddScoped<IFileTransferQueryService, SqlFileTransferQueryService>();
         services.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
 

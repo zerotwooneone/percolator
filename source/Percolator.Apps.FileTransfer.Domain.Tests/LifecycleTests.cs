@@ -264,4 +264,52 @@ public sealed class LifecycleTests
         session.State.Should().Be(TransferSessionState.InFlight);
         session.SwarmMembers.Single().WeInterestedInPeer.Should().Be(PeerInterestStatus.Interested);
     }
+
+    [Test]
+    public void GroupPeerAuthorizationAndRevocation_UpdatesTopologyAndSwarmMembers()
+    {
+        PublicIdentityId peerB = PublicIdentityId.New();
+        PublicIdentityId peerC = PublicIdentityId.New();
+
+        TransferSession session = TransferSession.CreateOutgoingMultiPeer(
+            TransferSessionId.New(),
+            _initiatorId,
+            [peerB],
+            _manifest,
+            SeedRatio.Unlimited,
+            _clock);
+
+        session.AuthorizeGroupPeer(peerC).IsSuccess.Should().BeTrue();
+        session.Topology.ContainsParticipant(peerC).Should().BeTrue();
+        session.RegisterSwarmMember(peerC, Bitfield.Empty(_manifest.TotalChunks), _clock).IsSuccess.Should().BeTrue();
+        session.SwarmMembers.Should().Contain(m => m.PeerId == peerC);
+
+        session.RevokeGroupPeer(peerC).IsSuccess.Should().BeTrue();
+        session.Topology.ContainsParticipant(peerC).Should().BeFalse();
+        session.SwarmMembers.Should().NotContain(m => m.PeerId == peerC);
+        session.RegisterSwarmMember(peerC, Bitfield.Empty(_manifest.TotalChunks), _clock).IsFailure.Should().BeTrue();
+    }
+
+    [Test]
+    public void StopSeeding_TransitionsSeedingToCompleted_AndRejectsNonSeedingState()
+    {
+        TransferSession session = TransferSession.CreateIncomingStaged(
+            TransferSessionId.New(),
+            _initiatorId,
+            _manifest,
+            SeedRatio.Unlimited,
+            _clock);
+
+        session.StopSeeding(_clock).IsFailure.Should().BeTrue();
+
+        session.AcceptTransfer(SelectedFileIndices.FromIndices([FileIndex.FromInt(0)], _manifest.TotalFiles), _clock).IsSuccess.Should().BeTrue();
+        byte[] chunk0Data = new byte[1024 * 1024];
+        BitConverter.GetBytes(0).CopyTo(chunk0Data, 0);
+        session.VerifyAndRecordChunk(ChunkIndex.FromInt(0), PlaintextChunkData.FromBytes(chunk0Data), _clock).IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Seeding);
+
+        session.StopSeeding(_clock).IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Completed);
+        session.CompletedAtUtc.Should().Be(_clock.UtcNow);
+    }
 }

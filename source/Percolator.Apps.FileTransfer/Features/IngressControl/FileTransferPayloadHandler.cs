@@ -19,7 +19,8 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _clock;
     private readonly IBlobStorageService _blobStorage;
-    private readonly ITransferStreamPool _streamPool;
+    private readonly ITransferSessionRuntime _runtime;
+    private readonly IPayloadSender _payloadSender;
 
     public AppId TargetAppId => AppId.FileTransferControl;
 
@@ -29,14 +30,16 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         IPayloadSerializer serializer,
         IDateTimeProvider clock,
         IBlobStorageService blobStorage,
-        ITransferStreamPool streamPool)
+        ITransferSessionRuntime runtime,
+        IPayloadSender payloadSender)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _policyRepository = policyRepository ?? throw new ArgumentNullException(nameof(policyRepository));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
-        _streamPool = streamPool ?? throw new ArgumentNullException(nameof(streamPool));
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _payloadSender = payloadSender ?? throw new ArgumentNullException(nameof(payloadSender));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -53,15 +56,18 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
 
         return opcodeByte switch
         {
-            (byte)FileTransferControlOpcode.Offer => await HandleOfferAsync(context.ChannelId, context.SenderIdentityId, body, policy, ct),
-            (byte)FileTransferControlOpcode.Accept => await HandleAcceptAsync(context.SenderIdentityId, body, ct),
+            (byte)FileTransferControlOpcode.Offer => await HandleOfferAsync(context.ChannelId, context.RecipientIdentityId, context.SenderIdentityId, body, policy, ct),
+            (byte)FileTransferControlOpcode.Accept => await HandleAcceptAsync(context.ChannelId, context.SenderIdentityId, body, ct),
             (byte)FileTransferControlOpcode.Cancel => await HandleCancelAsync(context.SenderIdentityId, body, ct),
+            (byte)FileTransferControlOpcode.PeerJoin => await HandlePeerJoinAsync(context.SenderIdentityId, body, ct),
+            (byte)FileTransferControlOpcode.IceSignal => await HandleIceSignalAsync(context.ChannelId, context.RecipientIdentityId, context.SenderIdentityId, body, ct),
             _ => DomainResult.Failure(new DomainError("Payload.UnknownOpcode", $"Unknown control opcode 0x{opcodeByte:X2}."))
         };
     }
 
     private async ValueTask<DomainResult> HandleOfferAsync(
         ChannelId channelId,
+        PublicIdentityId localRecipientId,
         PublicIdentityId senderId,
         ReadOnlyMemory<byte> body,
         FileTransferFilterPolicy policy,
@@ -88,7 +94,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
             offer.TransferSessionId,
             senderId,
             manifest,
-            SeedRatio.Zero,
+            SeedRatio.Unlimited,
             _clock);
 
         IReadOnlyList<DirectEndpointCandidate> filteredCandidates = PexRateLimiter.FilterAndDeduplicate(
@@ -98,13 +104,16 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         var transportContext = new TransferSessionTransportContext(
             offer.TransferSessionId,
             channelId,
-            policy.OwnerId,
+            localRecipientId,
             offer.SwarmRendezvousId,
             EphemeralSwarmPeerId.Generate(),
             offer.StreamAuthToken,
             DirectWanPolicy.DisabledByDefault,
             offer.RelayRendezvous,
-            filteredCandidates);
+            filteredCandidates,
+            LocalRootPath: null,
+            IsGroupTransfer: offer.IsGroupTransfer,
+            SenderCertSha256: offer.SenderCertSha256);
 
         await _sessionRepository.SaveSessionAsync(session, ct);
         await _sessionRepository.SaveTransportContextAsync(transportContext, ct);
@@ -166,6 +175,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     }
 
     private async ValueTask<DomainResult> HandleAcceptAsync(
+        ChannelId channelId,
         PublicIdentityId senderId,
         ReadOnlyMemory<byte> body,
         CancellationToken ct)
@@ -186,20 +196,97 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
 
         await _sessionRepository.SaveSessionAsync(session, ct);
 
-        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(accept.TransferSessionId, ct);
-        DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
+        if (accept.ReceiverCertSha256 != null)
+        {
+            await _runtime.RegisterPinnedPeerCertificateAsync(
+                accept.TransferSessionId,
+                senderId,
+                accept.ReceiverCertSha256,
+                ct: ct);
 
-        IReadOnlyList<DirectEndpointCandidate> filteredCandidates = accept.RoutingPreference == TransportRoutingPreference.RelayOnly
-            ? []
-            : PexRateLimiter.FilterAndDeduplicate(accept.ReceiverCandidates, wanPolicy, transportContext?.DirectCandidates);
+            if (_runtime.HasActiveSession(accept.TransferSessionId))
+            {
+                TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(accept.TransferSessionId, ct);
+                if (transportContext != null)
+                {
+                    await _runtime.InitiateDirectConnectionAsync(
+                        accept.TransferSessionId,
+                        senderId,
+                        (signalPayload, signalCt) => SendIceSignalOneToOneAsync(
+                            transportContext.ChannelId,
+                            transportContext.LocalIdentityId,
+                            senderId,
+                            signalPayload,
+                            signalCt),
+                        ct);
+                }
+            }
+        }
 
-        await FileTransferActionHandler.ConnectDirectWithRelayFallbackAsync(
-            _streamPool,
-            filteredCandidates,
-            transportContext?.RelayRendezvous,
+        return DomainResult.Success();
+    }
+
+    private async ValueTask<DomainResult> HandlePeerJoinAsync(
+        PublicIdentityId senderId,
+        ReadOnlyMemory<byte> body,
+        CancellationToken ct)
+    {
+        DomainResult<FileTransferPeerJoinPayload> joinResult = _serializer.Deserialize<FileTransferPeerJoinPayload>(body);
+        if (joinResult.IsFailure)
+            return DomainResult.Success(); // Silent drop on malformed PeerJoin
+
+        FileTransferPeerJoinPayload join = joinResult.Value;
+
+        TransferSession? session = await _sessionRepository.GetSessionByIdAsync(join.TransferSessionId, ct);
+        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(join.TransferSessionId, ct);
+        if (session == null || transportContext == null || !transportContext.IsGroupTransfer)
+            return DomainResult.Success(); // Ignore PeerJoin for unknown or non-group sessions
+
+        if (senderId == transportContext.LocalIdentityId)
+            return DomainResult.Success();
+
+        DomainResult authResult = session.AuthorizeGroupPeer(senderId);
+        if (authResult.IsFailure)
+            return authResult;
+
+        await _sessionRepository.SaveSessionAsync(session, ct);
+        await _runtime.RegisterPinnedPeerCertificateAsync(
+            join.TransferSessionId,
+            senderId,
+            join.CertSha256,
+            join.EphemeralPeerId,
             ct);
 
         return DomainResult.Success();
+    }
+
+    private async ValueTask<DomainResult> HandleIceSignalAsync(
+        ChannelId channelId,
+        PublicIdentityId localIdentityId,
+        PublicIdentityId senderId,
+        ReadOnlyMemory<byte> body,
+        CancellationToken ct)
+    {
+        DomainResult<FileTransferIceSignalPayload> signalResult = _serializer.Deserialize<FileTransferIceSignalPayload>(body);
+        if (signalResult.IsFailure)
+            return DomainResult.Failure(signalResult.Error);
+
+        FileTransferIceSignalPayload signal = signalResult.Value;
+        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(signal.TransferSessionId, ct);
+        ChannelId replyChannelId = transportContext?.ChannelId ?? channelId;
+        PublicIdentityId replyLocalId = transportContext?.LocalIdentityId ?? localIdentityId;
+
+        return await _runtime.HandleInboundIceSignalAsync(
+            signal.TransferSessionId,
+            senderId,
+            signal,
+            (replyPayload, replyCt) => SendIceSignalOneToOneAsync(
+                replyChannelId,
+                replyLocalId,
+                senderId,
+                replyPayload,
+                replyCt),
+            ct);
     }
 
     private async ValueTask<DomainResult> HandleCancelAsync(
@@ -221,8 +308,33 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         if (result.IsSuccess)
         {
             await _sessionRepository.SaveSessionAsync(session, ct);
+            await _runtime.StopSessionAsync(cancel.TransferSessionId, deleteCertificate: true, ct);
         }
 
         return DomainResult.Success();
+    }
+
+    private async ValueTask SendIceSignalOneToOneAsync(
+        ChannelId channelId,
+        PublicIdentityId localIdentityId,
+        PublicIdentityId remotePeerId,
+        FileTransferIceSignalPayload signalPayload,
+        CancellationToken ct)
+    {
+        ReadOnlyMemory<byte> serialized = _serializer.Serialize(signalPayload);
+        byte[] framed = new byte[1 + serialized.Length];
+        framed[0] = (byte)FileTransferControlOpcode.IceSignal;
+        serialized.Span.CopyTo(framed.AsSpan(1));
+
+        var outboundContext = new OutboundPayloadContext(
+            channelId,
+            localIdentityId,
+            remotePeerId,
+            DeviceId.Primary,
+            AppId.FileTransferControl,
+            framed,
+            DeliveryRoute.RelayedOneToOne);
+
+        await _payloadSender.SendPayloadAsync(outboundContext, ct);
     }
 }
