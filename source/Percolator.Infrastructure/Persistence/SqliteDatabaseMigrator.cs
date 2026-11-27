@@ -177,5 +177,15 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
                     """, ct);
             }
         }
+
+        await _dbContext.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "ft_session_certificates" (
+                "TransferId" TEXT NOT NULL CONSTRAINT "PK_ft_session_certificates" PRIMARY KEY,
+                "CertSha256" BLOB NOT NULL,
+                "CertificateDer" BLOB NOT NULL,
+                "PrivateKeyPkcs8" BLOB NOT NULL,
+                "CreatedAtUtc" TEXT NOT NULL
+            );
+            """, ct);
     }
 }

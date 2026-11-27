@@ -50,6 +50,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
                 Type t when t == typeof(FileTransferOfferPayload) => FromOfferProto(FileTransferOfferProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(FileTransferAcceptPayload) => FromAcceptProto(FileTransferAcceptProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(FileTransferCancelPayload) => FromCancelProto(FileTransferCancelProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(FileTransferPeerJoinPayload) => FromPeerJoinProto(FileTransferPeerJoinProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(FileTransferIceSignalPayload) => FromIceSignalProto(FileTransferIceSignalProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(ChatPayloadEnvelopeDto) => FromEnvelopeProto(ChatPayloadEnvelopeProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(ChatMessageDto) => FromChatMessageProto(ChatMessageProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(MessageEditDto) => FromEditProto(MessageEditProto.Parser.ParseFrom(data.Span)),
@@ -82,6 +84,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             FileTransferOfferPayload offer => ToOfferProto(offer),
             FileTransferAcceptPayload accept => ToAcceptProto(accept),
             FileTransferCancelPayload cancel => ToCancelProto(cancel),
+            FileTransferPeerJoinPayload peerJoin => ToPeerJoinProto(peerJoin),
+            FileTransferIceSignalPayload iceSignal => ToIceSignalProto(iceSignal),
             ChatPayloadEnvelopeDto envelope => ToEnvelopeProto(envelope),
             ChatMessageDto msg => ToChatMessageProto(msg),
             MessageEditDto edit => ToEditProto(edit),
@@ -231,6 +235,11 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             });
         }
 
+        if (offer.SenderCertSha256 != null)
+        {
+            proto.SenderCertSha256 = ByteString.CopyFrom(offer.SenderCertSha256.Span);
+        }
+
         return proto;
     }
 
@@ -279,6 +288,10 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
                 (DirectCandidateKind)c.Kind));
         }
 
+        CertSha256Fingerprint? senderCertSha256 = proto.SenderCertSha256.IsEmpty
+            ? null
+            : CertSha256Fingerprint.FromSpan(proto.SenderCertSha256.Span);
+
         return new FileTransferOfferPayload(
             sessionId,
             summary,
@@ -286,7 +299,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             swarmRendezvousId,
             streamAuthToken,
             relay,
-            candidates);
+            candidates,
+            senderCertSha256);
     }
 
     private static FileTransferAcceptProto ToAcceptProto(FileTransferAcceptPayload accept)
@@ -309,6 +323,11 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             });
         }
 
+        if (accept.ReceiverCertSha256 != null)
+        {
+            proto.ReceiverCertSha256 = ByteString.CopyFrom(accept.ReceiverCertSha256.Span);
+        }
+
         return proto;
     }
 
@@ -327,7 +346,11 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         }
 
         Bitfield bitfield = Bitfield.FromBytes(proto.ResumptionBitfield.Span, ChunkCount.FromInt(proto.TotalChunks));
-        return new FileTransferAcceptPayload(sessionId, candidates, routing, bitfield);
+        CertSha256Fingerprint? receiverCertSha256 = proto.ReceiverCertSha256.IsEmpty
+            ? null
+            : CertSha256Fingerprint.FromSpan(proto.ReceiverCertSha256.Span);
+
+        return new FileTransferAcceptPayload(sessionId, candidates, routing, bitfield, receiverCertSha256);
     }
 
     private static FileTransferCancelProto ToCancelProto(FileTransferCancelPayload cancel) =>
@@ -341,6 +364,58 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
         new(
             TransferSessionId.FromBytes(proto.TransferSessionId.Span),
             TransferTerminationReason.FromText(proto.Reason));
+
+    private static FileTransferPeerJoinProto ToPeerJoinProto(FileTransferPeerJoinPayload peerJoin) =>
+        new()
+        {
+            TransferSessionId = ByteString.CopyFrom(peerJoin.TransferSessionId.ToByteArray()),
+            EphemeralPeerId = ByteString.CopyFrom(peerJoin.EphemeralPeerId.Span),
+            CertSha256 = ByteString.CopyFrom(peerJoin.CertSha256.Span)
+        };
+
+    private static FileTransferPeerJoinPayload FromPeerJoinProto(FileTransferPeerJoinProto proto) =>
+        new(
+            TransferSessionId.FromBytes(proto.TransferSessionId.Span),
+            EphemeralSwarmPeerId.FromSpan(proto.EphemeralPeerId.Span),
+            CertSha256Fingerprint.FromSpan(proto.CertSha256.Span));
+
+    private static FileTransferIceSignalProto ToIceSignalProto(FileTransferIceSignalPayload signal)
+    {
+        FileTransferIceSignalProto proto = new()
+        {
+            TransferSessionId = ByteString.CopyFrom(signal.TransferSessionId.ToByteArray()),
+            Kind = (uint)signal.Kind,
+            SdpOrCandidate = signal.SdpOrCandidate ?? string.Empty,
+            CandidateMid = signal.CandidateMid ?? string.Empty
+        };
+
+        if (signal.DtlsFingerprintSha256 != null)
+        {
+            proto.DtlsFingerprintSha256 = ByteString.CopyFrom(signal.DtlsFingerprintSha256.Span);
+        }
+
+        if (signal.PipeToken != null)
+        {
+            proto.PipeToken = ByteString.CopyFrom(signal.PipeToken.Span);
+        }
+
+        if (signal.PipeEndpointUri != null)
+        {
+            proto.PipeEndpointUri = signal.PipeEndpointUri.Value;
+        }
+
+        return proto;
+    }
+
+    private static FileTransferIceSignalPayload FromIceSignalProto(FileTransferIceSignalProto proto) =>
+        new(
+            TransferSessionId.FromBytes(proto.TransferSessionId.Span),
+            (IceSignalKind)proto.Kind,
+            proto.SdpOrCandidate,
+            string.IsNullOrEmpty(proto.CandidateMid) ? null : proto.CandidateMid,
+            proto.DtlsFingerprintSha256.IsEmpty ? null : CertSha256Fingerprint.FromSpan(proto.DtlsFingerprintSha256.Span),
+            proto.PipeToken.IsEmpty ? null : PipeRendezvousToken.FromSpan(proto.PipeToken.Span),
+            string.IsNullOrEmpty(proto.PipeEndpointUri) ? null : RelayPipeEndpointUri.Parse(proto.PipeEndpointUri));
 
     // Chat DTO Serialization
 

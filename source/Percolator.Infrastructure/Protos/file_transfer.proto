@@ -67,6 +67,7 @@ message FileTransferOfferProto {
   bytes stream_auth_token = 6;     // 32-byte StreamAuthToken
   RelayRendezvousDescriptorProto relay_rendezvous = 7;
   repeated DirectEndpointCandidateProto direct_candidates = 8;
+  bytes sender_cert_sha256 = 9;    // 32-byte E2E-pinned ephemeral ECDSA P-256 cert SHA-256
 }
 
 message FileTransferAcceptProto {
@@ -75,9 +76,26 @@ message FileTransferAcceptProto {
   uint32 routing_preference = 3;   // 1 = DirectPreferred, 2 = RelayOnly
   int32 total_chunks = 4;
   bytes resumption_bitfield = 5;
+  bytes receiver_cert_sha256 = 6;  // 32-byte E2E-pinned ephemeral ECDSA P-256 cert SHA-256
 }
 
 message FileTransferCancelProto {
   bytes transfer_session_id = 1;   // 16-byte UUID
   string reason = 2;
+}
+
+message FileTransferPeerJoinProto {
+  bytes transfer_session_id = 1;   // 16-byte UUID
+  bytes ephemeral_peer_id = 2;     // 32-byte EphemeralSwarmPeerId
+  bytes cert_sha256 = 3;           // 32-byte E2E-pinned ephemeral ECDSA P-256 cert SHA-256
+}
+
+message FileTransferIceSignalProto {
+  bytes transfer_session_id = 1;   // 16-byte UUID
+  uint32 kind = 2;                 // 1 = SdpOffer, 2 = SdpAnswer, 3 = IceCandidate, 4 = PipeRendezvous
+  string sdp_or_candidate = 3;
+  string candidate_mid = 4;
+  bytes dtls_fingerprint_sha256 = 5; // 32-byte DTLS cert SHA-256 fingerprint
+  bytes pipe_token = 6;            // 32-byte random one-time PipeRendezvousToken
+  string pipe_endpoint_uri = 7;
 }

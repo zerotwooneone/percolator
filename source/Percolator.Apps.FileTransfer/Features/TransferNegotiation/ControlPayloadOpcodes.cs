@@ -4,5 +4,7 @@ public enum FileTransferControlOpcode : byte
 {
     Offer = 0x01,
     Accept = 0x02,
-    Cancel = 0x03
+    Cancel = 0x03,
+    PeerJoin = 0x04,
+    IceSignal = 0x05
 }

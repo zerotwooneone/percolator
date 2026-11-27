@@ -86,17 +86,17 @@ public sealed class TcpMultiStreamPoolTests
         // 12. PexPeers
         var candidates = new List<DirectEndpointCandidate>
         {
-            new(EndpointHost.Parse("192.168.1.10"), PortNumber.FromInt(50001), DirectCandidateKind.DirectLan),
-            new(EndpointHost.Parse("203.0.113.50"), PortNumber.FromInt(50002), DirectCandidateKind.DirectWanUpnp)
+            new(EndpointHost.Parse("192.168.1.10"), PortNumber.FromInt(49200), DirectCandidateKind.DirectLan),
+            new(EndpointHost.Parse("203.0.113.50"), PortNumber.FromInt(49201), DirectCandidateKind.DirectWanUpnp)
         };
         var pex = new PexPeersFrame(candidates);
         var decodedPex = (PexPeersFrame)RoundtripFrame(pex);
         decodedPex.Candidates.Should().HaveCount(2);
         decodedPex.Candidates[0].Host.Value.Should().Be("192.168.1.10");
-        decodedPex.Candidates[0].Port.Value.Should().Be(50001);
+        decodedPex.Candidates[0].Port.Value.Should().Be(49200);
         decodedPex.Candidates[0].Kind.Should().Be(DirectCandidateKind.DirectLan);
         decodedPex.Candidates[1].Host.Value.Should().Be("203.0.113.50");
-        decodedPex.Candidates[1].Port.Value.Should().Be(50002);
+        decodedPex.Candidates[1].Port.Value.Should().Be(49201);
         decodedPex.Candidates[1].Kind.Should().Be(DirectCandidateKind.DirectWanUpnp);
     }
 

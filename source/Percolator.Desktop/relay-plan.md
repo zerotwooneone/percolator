@@ -1929,10 +1929,10 @@ Academic and protocol audit confirms that stranger discovery on a single untrust
       - If the Exchange advertises `RelayFeatureFlags.TransferPipe`, exchange a random one-time `PipeRendezvousToken` over the E2E channel, open `TransferPipeService.OpenPipe`, and wrap the stream in standard `.NET` **`SslStream` TLS 1.3 mTLS** pinning the exact same E2E-verified SHA-256 cert fingerprints on both client and server.
       - Otherwise fail cleanly with `DIRECT_NAT_TRAVERSAL_FAILED`.
 - **Acceptance Criteria:**
-  - [ ] Zero listening UDP/TCP sockets exist before transfer start or after stop/pause/cancel/lock.
-  - [ ] Every DataChannel (DTLS) and optional `TransferPipe` stream (TLS 1.3 mTLS) enforces E2E-pinned SHA-256 cert fingerprints on both peers.
-  - [ ] Zero `DataChannelDotnet` types leak outside `Percolator.Infrastructure`.
-  - [ ] Hardcoded port `50001` is completely eliminated.
+  - [x] Zero listening UDP/TCP sockets exist before transfer start or after stop/pause/cancel/lock.
+  - [x] Every DataChannel (DTLS) and optional `TransferPipe` stream (TLS 1.3 mTLS) enforces E2E-pinned SHA-256 cert fingerprints on both peers.
+  - [x] Zero `DataChannelDotnet` types leak outside `Percolator.Infrastructure`.
+  - [x] Hardcoded port `50001` is completely eliminated.
 
 #### Ticket `FT-004` — Session-Scoped `ITransferSessionRuntime`, Group V2 Swarming, Offline-Author Seeding & DI Fix
 - **Layer / Scope:** `Percolator.Apps.FileTransfer` (`ServiceCollectionExtensions`, `FileTransferActionHandler`, `FileTransferPayloadHandler`, `SwarmCoordinator`, new `ITransferSessionRuntime` / `TransferSessionRuntime`)

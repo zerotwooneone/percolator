@@ -10,4 +10,5 @@ public sealed record FileTransferOfferPayload(
     SwarmRendezvousId SwarmRendezvousId,
     StreamAuthToken StreamAuthToken,
     RelayRendezvousDescriptor? RelayRendezvous,
-    IReadOnlyList<DirectEndpointCandidate> DirectCandidates);
+    IReadOnlyList<DirectEndpointCandidate> DirectCandidates,
+    CertSha256Fingerprint? SenderCertSha256 = null);

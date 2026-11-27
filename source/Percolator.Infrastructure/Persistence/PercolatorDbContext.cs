@@ -62,6 +62,7 @@ public class PercolatorDbContext : DbContext
     public DbSet<ManifestFileEntity> ManifestFiles => Set<ManifestFileEntity>();
     public DbSet<TransferBitfieldEntity> TransferBitfields => Set<TransferBitfieldEntity>();
     public DbSet<FilterPolicyEntity> FilterPolicies => Set<FilterPolicyEntity>();
+    public DbSet<TransferSessionCertificateEntity> TransferSessionCertificates => Set<TransferSessionCertificateEntity>();
     public DbSet<IdentitySettingsEntity> IdentitySettings => Set<IdentitySettingsEntity>();
     public DbSet<AppSettingEntity> AppSettings => Set<AppSettingEntity>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -480,6 +481,15 @@ public class PercolatorDbContext : DbContext
             entity.ToTable("ft_filter_policies");
             entity.HasKey(e => e.OwnerId);
             entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        // 38b. File Transfer Ephemeral Session Certificates
+        modelBuilder.Entity<TransferSessionCertificateEntity>(entity =>
+        {
+            entity.ToTable("ft_session_certificates");
+            entity.HasKey(e => e.TransferId);
+            entity.Property(e => e.CertSha256).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.CertificateDer).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.PrivateKeyPkcs8).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
         // 39. Relay Registrations (Phase 3)
         modelBuilder.Entity<RelayRegistrationEntity>(entity =>

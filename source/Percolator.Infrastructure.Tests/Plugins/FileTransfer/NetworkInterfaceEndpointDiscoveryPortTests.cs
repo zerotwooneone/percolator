@@ -34,11 +34,21 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
     }
 
     [Test]
+    public async Task DiscoverLocalCandidatesAsync_DefaultNullListenPort_ReturnsEmptyBecauseIceGathersEphemeralPorts()
+    {
+        var port = new NetworkInterfaceEndpointDiscoveryPort();
+
+        var candidates = await port.DiscoverLocalCandidatesAsync(DirectWanPolicy.DisabledByDefault);
+
+        candidates.Should().BeEmpty();
+    }
+
+    [Test]
     public async Task DiscoverLocalCandidatesAsync_WithAllowLoopback_IncludesLoopbackCandidate()
     {
         // Arrange
         var port = new NetworkInterfaceEndpointDiscoveryPort(
-            listenPort: 50001,
+            listenPort: 49200,
             allowLoopback: true);
 
         // Act
@@ -46,7 +56,7 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
 
         // Assert
         candidates.Should().NotBeEmpty();
-        candidates.Should().Contain(c => c.Host.Value == "127.0.0.1" && c.Port.Value == 50001);
+        candidates.Should().Contain(c => c.Host.Value == "127.0.0.1" && c.Port.Value == 49200);
     }
 
     [Test]
@@ -69,7 +79,7 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
     {
         // Arrange
         var port = new NetworkInterfaceEndpointDiscoveryPort(
-            listenPort: 50001,
+            listenPort: null,
             allowLoopback: false);
 
         var sessionId = TransferSessionId.New();

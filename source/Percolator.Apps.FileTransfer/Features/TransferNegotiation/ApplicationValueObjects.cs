@@ -113,6 +113,99 @@ public sealed partial record PipeRendezvousToken
     public static PipeRendezvousToken Generate() => FromBytes(RandomNumberGenerator.GetBytes(32));
 }
 
+[ByteArray(length: 32)]
+public sealed partial record CertSha256Fingerprint
+{
+    public static CertSha256Fingerprint ComputeFromCertificateDer(ReadOnlySpan<byte> certificateDer)
+    {
+        if (certificateDer.IsEmpty)
+            throw new ArgumentException("Certificate DER bytes cannot be empty.", nameof(certificateDer));
+        return FromBytes(SHA256.HashData(certificateDer));
+    }
+
+    public string ToColonHexUpper()
+    {
+        ReadOnlySpan<byte> bytes = Span;
+        char[] chars = new char[(bytes.Length * 3) - 1];
+        const string Hex = "0123456789ABCDEF";
+        int pos = 0;
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            if (i > 0) chars[pos++] = ':';
+            chars[pos++] = Hex[bytes[i] >> 4];
+            chars[pos++] = Hex[bytes[i] & 0x0F];
+        }
+        return new string(chars);
+    }
+
+    public static bool TryParseColonHex(ReadOnlySpan<char> colonHex, out CertSha256Fingerprint? result)
+    {
+        result = null;
+        if (colonHex.Length != 95) // 32 * 2 hex + 31 colons
+            return false;
+
+        byte[] bytes = new byte[32];
+        for (int i = 0; i < 32; i++)
+        {
+            int offset = i * 3;
+            if (i > 0 && colonHex[offset - 1] != ':')
+                return false;
+
+            int hi = ParseHexNibble(colonHex[offset]);
+            int lo = ParseHexNibble(colonHex[offset + 1]);
+            if (hi < 0 || lo < 0)
+                return false;
+
+            bytes[i] = (byte)((hi << 4) | lo);
+        }
+
+        result = FromBytes(bytes);
+        return true;
+    }
+
+    private static int ParseHexNibble(char c) => c switch
+    {
+        >= '0' and <= '9' => c - '0',
+        >= 'a' and <= 'f' => c - 'a' + 10,
+        >= 'A' and <= 'F' => c - 'A' + 10,
+        _ => -1
+    };
+}
+
+public sealed class TransferSessionCertificateMaterial : IDisposable
+{
+    private readonly byte[] _certificateDer;
+    private readonly byte[] _privateKeyPkcs8;
+    private bool _disposed;
+
+    public CertSha256Fingerprint Fingerprint { get; }
+    public ReadOnlySpan<byte> CertificateDer => _disposed ? throw new ObjectDisposedException(nameof(TransferSessionCertificateMaterial)) : _certificateDer;
+    public ReadOnlySpan<byte> PrivateKeyPkcs8 => _disposed ? throw new ObjectDisposedException(nameof(TransferSessionCertificateMaterial)) : _privateKeyPkcs8;
+
+    public TransferSessionCertificateMaterial(
+        CertSha256Fingerprint fingerprint,
+        byte[] certificateDer,
+        byte[] privateKeyPkcs8)
+    {
+        Fingerprint = fingerprint ?? throw new ArgumentNullException(nameof(fingerprint));
+        if (certificateDer == null || certificateDer.Length == 0)
+            throw new ArgumentException("Certificate DER cannot be empty.", nameof(certificateDer));
+        if (privateKeyPkcs8 == null || privateKeyPkcs8.Length == 0)
+            throw new ArgumentException("Private key PKCS#8 cannot be empty.", nameof(privateKeyPkcs8));
+
+        _certificateDer = certificateDer;
+        _privateKeyPkcs8 = privateKeyPkcs8;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        CryptographicOperations.ZeroMemory(_privateKeyPkcs8);
+    }
+}
+
 public sealed record StunEndpointDescriptor(
     EndpointHost Host,
     PortNumber Port);

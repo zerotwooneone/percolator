@@ -99,7 +99,7 @@ public sealed class SqliteTransferSessionRepositoryTests
             new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://exchange.test.local/pipe"), RelayPipeToken.Generate()),
             new List<DirectEndpointCandidate>
             {
-                new(EndpointHost.Parse("127.0.0.1"), PortNumber.FromInt(50001), DirectCandidateKind.DirectLan)
+                new(EndpointHost.Parse("127.0.0.1"), PortNumber.FromInt(49200), DirectCandidateKind.DirectLan)
             });
 
         await _sessionRepo.SaveTransportContextAsync(context);

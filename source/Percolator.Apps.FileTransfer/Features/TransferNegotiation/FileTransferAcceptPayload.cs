@@ -6,4 +6,5 @@ public sealed record FileTransferAcceptPayload(
     TransferSessionId TransferSessionId,
     IReadOnlyList<DirectEndpointCandidate> ReceiverCandidates,
     TransportRoutingPreference RoutingPreference,
-    Bitfield ResumptionBitfield);
+    Bitfield ResumptionBitfield,
+    CertSha256Fingerprint? ReceiverCertSha256 = null);

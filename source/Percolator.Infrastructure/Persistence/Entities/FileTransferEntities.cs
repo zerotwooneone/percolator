@@ -57,3 +57,12 @@ public sealed class FilterPolicyEntity
     public string BlockedRelaysJson { get; set; } = string.Empty;
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
+
+public sealed class TransferSessionCertificateEntity
+{
+    public Guid TransferId { get; set; }
+    public byte[] CertSha256 { get; set; } = Array.Empty<byte>();
+    public byte[] CertificateDer { get; set; } = Array.Empty<byte>();
+    public byte[] PrivateKeyPkcs8 { get; set; } = Array.Empty<byte>();
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}

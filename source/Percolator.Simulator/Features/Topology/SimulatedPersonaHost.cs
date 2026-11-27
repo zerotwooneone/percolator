@@ -194,7 +194,7 @@ internal sealed class SimulatedPersonaHost : ISimulatedPersonaHost
         {
             // 1. Core infrastructure registration
             services.AddAuthenticatedInfrastructure(_masterKeyHandle, storageOptions);
-            services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(50001, allowLoopback: true));
+            services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>(_ => new NetworkInterfaceEndpointDiscoveryPort(allowLoopback: true));
             services.AddSingleton<IRelayMailboxCapabilityStore, SqliteRelayMailboxCapabilityStore>();
             services.AddSingleton<IDateTimeProvider>(_virtualClock);
 #if WINDOWS

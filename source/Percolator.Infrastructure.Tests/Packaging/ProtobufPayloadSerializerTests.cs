@@ -65,7 +65,8 @@ public sealed class ProtobufPayloadSerializerTests
         manifestRoundtrip.Value.MerkleTree.Should().Be(manifest.MerkleTree);
         manifestRoundtrip.Value.Files.Should().HaveCount(2);
 
-        // 2. Offer roundtrip
+        // 2. Offer roundtrip (with SenderCertSha256)
+        CertSha256Fingerprint senderCertFp = CertSha256Fingerprint.ComputeFromCertificateDer(new byte[] { 0x10, 0x20, 0x30 });
         FileTransferOfferPayload offer = new(
             sessionId,
             TransferBundleSummary.Create(manifest.RootName, manifest.TotalSize, manifest.TotalFiles, manifest.ChunkSize, manifest.TotalChunks, manifest.MerkleTree.Root),
@@ -73,7 +74,8 @@ public sealed class ProtobufPayloadSerializerTests
             SwarmRendezvousId.Generate(),
             StreamAuthToken.Generate(),
             new RelayRendezvousDescriptor(RelayPipeEndpointUri.Parse("https://exchange.test.local/pipe"), RelayPipeToken.Generate()),
-            [new DirectEndpointCandidate(EndpointHost.Parse("192.168.1.25"), PortNumber.FromInt(5200), DirectCandidateKind.DirectLan)]);
+            [new DirectEndpointCandidate(EndpointHost.Parse("192.168.1.25"), PortNumber.FromInt(5200), DirectCandidateKind.DirectLan)],
+            senderCertFp);
 
         ReadOnlyMemory<byte> offerBytes = _serializer.Serialize(offer);
         DomainResult<FileTransferOfferPayload> offerRoundtrip = _serializer.Deserialize<FileTransferOfferPayload>(offerBytes);
@@ -82,20 +84,24 @@ public sealed class ProtobufPayloadSerializerTests
         offerRoundtrip.Value.SwarmRendezvousId.Should().Be(offer.SwarmRendezvousId);
         offerRoundtrip.Value.Summary.Should().Be(offer.Summary);
         offerRoundtrip.Value.DirectCandidates.Should().ContainSingle();
+        offerRoundtrip.Value.SenderCertSha256.Should().Be(senderCertFp);
 
-        // 3. Accept roundtrip
+        // 3. Accept roundtrip (with ReceiverCertSha256)
+        CertSha256Fingerprint receiverCertFp = CertSha256Fingerprint.ComputeFromCertificateDer(new byte[] { 0x40, 0x50, 0x60 });
         Bitfield resumptionBitfield = Bitfield.Empty(manifest.TotalChunks).WithChunk(ChunkIndex.FromInt(0));
         FileTransferAcceptPayload accept = new(
             sessionId,
             [new DirectEndpointCandidate(EndpointHost.Parse("192.168.1.30"), PortNumber.FromInt(5201), DirectCandidateKind.DirectLan)],
             TransportRoutingPreference.DirectPreferred,
-            resumptionBitfield);
+            resumptionBitfield,
+            receiverCertFp);
 
         ReadOnlyMemory<byte> acceptBytes = _serializer.Serialize(accept);
         DomainResult<FileTransferAcceptPayload> acceptRoundtrip = _serializer.Deserialize<FileTransferAcceptPayload>(acceptBytes);
         acceptRoundtrip.IsSuccess.Should().BeTrue();
         acceptRoundtrip.Value.TransferSessionId.Should().Be(sessionId);
         acceptRoundtrip.Value.ResumptionBitfield.Should().Be(resumptionBitfield);
+        acceptRoundtrip.Value.ReceiverCertSha256.Should().Be(receiverCertFp);
 
         // 4. Cancel roundtrip
         FileTransferCancelPayload cancel = new(sessionId, TransferTerminationReason.SenderCancelled);
@@ -103,5 +109,28 @@ public sealed class ProtobufPayloadSerializerTests
         DomainResult<FileTransferCancelPayload> cancelRoundtrip = _serializer.Deserialize<FileTransferCancelPayload>(cancelBytes);
         cancelRoundtrip.IsSuccess.Should().BeTrue();
         cancelRoundtrip.Value.Should().Be(cancel);
+
+        // 5. PeerJoin roundtrip
+        var peerJoin = new FileTransferPeerJoinPayload(sessionId, EphemeralSwarmPeerId.Generate(), receiverCertFp);
+        ReadOnlyMemory<byte> peerJoinBytes = _serializer.Serialize(peerJoin);
+        DomainResult<FileTransferPeerJoinPayload> peerJoinRoundtrip = _serializer.Deserialize<FileTransferPeerJoinPayload>(peerJoinBytes);
+        peerJoinRoundtrip.IsSuccess.Should().BeTrue();
+        peerJoinRoundtrip.Value.Should().Be(peerJoin);
+
+        // 6. IceSignal roundtrip (SDP + PipeRendezvous)
+        var pipeToken = PipeRendezvousToken.Generate();
+        var pipeUri = RelayPipeEndpointUri.Parse("https://exchange.test.local:5443");
+        var iceSignal = new FileTransferIceSignalPayload(
+            sessionId,
+            IceSignalKind.PipeRendezvous,
+            "v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n",
+            "0",
+            senderCertFp,
+            pipeToken,
+            pipeUri);
+        ReadOnlyMemory<byte> iceSignalBytes = _serializer.Serialize(iceSignal);
+        DomainResult<FileTransferIceSignalPayload> iceSignalRoundtrip = _serializer.Deserialize<FileTransferIceSignalPayload>(iceSignalBytes);
+        iceSignalRoundtrip.IsSuccess.Should().BeTrue();
+        iceSignalRoundtrip.Value.Should().Be(iceSignal);
     }
 }

@@ -14,19 +14,23 @@ using Percolator.Apps.FileTransfer.Ports;
 
 public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDiscoveryPort
 {
-    private readonly PortNumber _listenPort;
+    private readonly PortNumber? _listenPort;
     private readonly bool _allowLoopback;
 
     public NetworkInterfaceEndpointDiscoveryPort(
-        int listenPort = 50001,
+        int? listenPort = null,
         bool allowLoopback = false)
     {
-        if (listenPort is < 1 or > 65535)
+        if (listenPort.HasValue)
         {
-            throw new ArgumentOutOfRangeException(nameof(listenPort), listenPort, "Port must be between 1 and 65535.");
+            if (listenPort.Value is < 1 or > 65535)
+            {
+                throw new ArgumentOutOfRangeException(nameof(listenPort), listenPort, "Port must be between 1 and 65535.");
+            }
+
+            _listenPort = PortNumber.FromInt(listenPort.Value);
         }
 
-        _listenPort = PortNumber.FromInt(listenPort);
         _allowLoopback = allowLoopback;
     }
 
@@ -36,6 +40,13 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
     {
         ct.ThrowIfCancellationRequested();
 
+        if (!_listenPort.HasValue)
+        {
+            // Ephemeral ICE candidates are gathered dynamically per active transfer session.
+            return ValueTask.FromResult<IReadOnlyList<DirectEndpointCandidate>>(Array.Empty<DirectEndpointCandidate>());
+        }
+
+        PortNumber boundPort = _listenPort.Value;
         var candidates = new List<DirectEndpointCandidate>();
 
         try
@@ -59,7 +70,7 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
                     {
                         candidates.Add(new DirectEndpointCandidate(
                             EndpointHost.Parse(uni.Address.ToString()),
-                            _listenPort,
+                            boundPort,
                             DirectCandidateKind.DirectLan));
                     }
                 }
@@ -77,14 +88,14 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
         {
             candidates.Add(new DirectEndpointCandidate(
                 EndpointHost.Parse(loopbackV4),
-                _listenPort,
+                boundPort,
                 DirectCandidateKind.DirectLan));
         }
         else if (candidates.Count == 0)
         {
             candidates.Add(new DirectEndpointCandidate(
                 EndpointHost.Parse(loopbackV4),
-                _listenPort,
+                boundPort,
                 DirectCandidateKind.DirectLan));
         }
 

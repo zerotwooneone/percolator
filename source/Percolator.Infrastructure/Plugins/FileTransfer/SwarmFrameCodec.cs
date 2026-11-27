@@ -1,20 +1,207 @@
 namespace Percolator.Infrastructure.Plugins.FileTransfer;
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Domain.Identities.ValueObjects;
 
+public readonly struct PooledEncodedFrame : IDisposable
+{
+    private readonly byte[] _rentedBuffer;
+
+    public int Length { get; }
+    public ReadOnlySpan<byte> Span => _rentedBuffer.AsSpan(0, Length);
+    public ReadOnlyMemory<byte> Memory => _rentedBuffer.AsMemory(0, Length);
+
+    internal PooledEncodedFrame(byte[] rentedBuffer, int length)
+    {
+        _rentedBuffer = rentedBuffer;
+        Length = length;
+    }
+
+    public void Dispose()
+    {
+        if (_rentedBuffer != null)
+        {
+            ArrayPool<byte>.Shared.Return(_rentedBuffer, clearArray: false);
+        }
+    }
+}
+
 public static class SwarmFrameCodec
 {
+    public const int FrameHeaderSizeBytes = 5;
     public const int MaxPayloadSizeBytes = 262_144; // 256 KB
+    public const int MaxWireFrameSizeBytes = FrameHeaderSizeBytes + MaxPayloadSizeBytes;
     public const int HandshakePayloadSizeBytes = 68;
+
+    public static PooledEncodedFrame EncodePooled(IStreamFramePayload frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+
+        byte opcode = (byte)frame.FrameType;
+        int payloadLen = ComputePayloadLength(frame);
+        if (payloadLen > MaxPayloadSizeBytes)
+        {
+            throw new InvalidOperationException($"Encoded frame payload {payloadLen} exceeds 256 KB limit.");
+        }
+
+        int totalLen = FrameHeaderSizeBytes + payloadLen;
+        byte[] rented = ArrayPool<byte>.Shared.Rent(totalLen);
+        try
+        {
+            rented[0] = opcode;
+            BinaryPrimitives.WriteUInt32BigEndian(rented.AsSpan(1, 4), (uint)payloadLen);
+            WritePayload(frame, rented.AsSpan(FrameHeaderSizeBytes, payloadLen));
+            return new PooledEncodedFrame(rented, totalLen);
+        }
+        catch
+        {
+            ArrayPool<byte>.Shared.Return(rented, clearArray: false);
+            throw;
+        }
+    }
+
+    public static IStreamFramePayload DecodeFramed(ReadOnlySpan<byte> wireFrame)
+    {
+        if (wireFrame.Length < FrameHeaderSizeBytes || wireFrame.Length > MaxWireFrameSizeBytes)
+        {
+            throw new InvalidDataException($"Framed payload size {wireFrame.Length} is outside valid bounds [{FrameHeaderSizeBytes}..{MaxWireFrameSizeBytes}].");
+        }
+
+        byte opcode = wireFrame[0];
+        uint declaredLen = BinaryPrimitives.ReadUInt32BigEndian(wireFrame.Slice(1, 4));
+        if (declaredLen > MaxPayloadSizeBytes)
+        {
+            throw new InvalidDataException($"Frame payload length {declaredLen} exceeds maximum allowed 256 KB limit.");
+        }
+
+        if (wireFrame.Length != FrameHeaderSizeBytes + (int)declaredLen)
+        {
+            throw new InvalidDataException($"Frame length mismatch: declared {declaredLen} bytes, received {wireFrame.Length - FrameHeaderSizeBytes}.");
+        }
+
+        return Decode(opcode, wireFrame.Slice(FrameHeaderSizeBytes, (int)declaredLen));
+    }
+
+    public static async ValueTask<IStreamFramePayload> ReadFramePooledAsync(
+        Stream stream,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        byte[] header = ArrayPool<byte>.Shared.Rent(FrameHeaderSizeBytes);
+        byte opcode;
+        int payloadLen;
+        try
+        {
+            await stream.ReadExactlyAsync(header.AsMemory(0, FrameHeaderSizeBytes), ct).ConfigureAwait(false);
+            opcode = header[0];
+            uint rawLen = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(1, 4));
+            if (rawLen > MaxPayloadSizeBytes)
+            {
+                throw new InvalidDataException($"Frame payload length {rawLen} exceeds maximum allowed 256 KB limit.");
+            }
+            payloadLen = (int)rawLen;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(header, clearArray: false);
+        }
+
+        if (payloadLen == 0)
+        {
+            return Decode(opcode, ReadOnlySpan<byte>.Empty);
+        }
+
+        byte[] payloadBuf = ArrayPool<byte>.Shared.Rent(payloadLen);
+        try
+        {
+            await stream.ReadExactlyAsync(payloadBuf.AsMemory(0, payloadLen), ct).ConfigureAwait(false);
+            return Decode(opcode, payloadBuf.AsSpan(0, payloadLen));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(payloadBuf, clearArray: false);
+        }
+    }
+
+    private static int ComputePayloadLength(IStreamFramePayload frame) => frame switch
+    {
+        HandshakeFrame => HandshakePayloadSizeBytes,
+        BitfieldFrame bitfield => 4 + ((bitfield.Bitfield.TotalChunks.Count + 7) / 8),
+        HaveFrame => 4,
+        RequestChunkFrame => 4,
+        ChunkDataFrame chunkData => 4 + chunkData.Data.Length,
+        CancelChunkFrame => 4,
+        ChokeFrame => 0,
+        UnchokeFrame => 0,
+        InterestedFrame => 0,
+        NotInterestedFrame => 0,
+        KeepAliveFrame => 0,
+        PexPeersFrame pex => ComputePexPeersLength(pex),
+        _ => throw new NotSupportedException($"Unsupported frame type: {frame.GetType().Name}")
+    };
+
+    private static int ComputePexPeersLength(PexPeersFrame frame)
+    {
+        int total = 2;
+        foreach (DirectEndpointCandidate c in frame.Candidates)
+        {
+            total += 2 + Encoding.UTF8.GetByteCount(c.Host.Value) + 2 + 1;
+        }
+        return total;
+    }
+
+    private static void WritePayload(IStreamFramePayload frame, Span<byte> destination)
+    {
+        switch (frame)
+        {
+            case HandshakeFrame handshake:
+                handshake.AuthToken.Span.CopyTo(destination.Slice(0, 32));
+                handshake.SessionId.TryWriteBytes(destination.Slice(32, 16));
+                BinaryPrimitives.WriteInt32BigEndian(destination.Slice(48, 4), handshake.StreamIndex.Value);
+                handshake.SenderPeerId.TryWriteBytes(destination.Slice(52, 16));
+                break;
+            case BitfieldFrame bitfield:
+                BinaryPrimitives.WriteInt32BigEndian(destination.Slice(0, 4), bitfield.Bitfield.TotalChunks.Count);
+                bitfield.Bitfield.ToByteArray().CopyTo(destination.Slice(4));
+                break;
+            case HaveFrame have:
+                BinaryPrimitives.WriteInt32BigEndian(destination.Slice(0, 4), have.ChunkIndex.Value);
+                break;
+            case RequestChunkFrame req:
+                BinaryPrimitives.WriteInt32BigEndian(destination.Slice(0, 4), req.ChunkIndex.Value);
+                break;
+            case ChunkDataFrame chunkData:
+                BinaryPrimitives.WriteInt32BigEndian(destination.Slice(0, 4), chunkData.ChunkIndex.Value);
+                chunkData.Data.Span.CopyTo(destination.Slice(4));
+                break;
+            case CancelChunkFrame cancel:
+                BinaryPrimitives.WriteInt32BigEndian(destination.Slice(0, 4), cancel.ChunkIndex.Value);
+                break;
+            case ChokeFrame:
+            case UnchokeFrame:
+            case InterestedFrame:
+            case NotInterestedFrame:
+            case KeepAliveFrame:
+                break;
+            case PexPeersFrame pex:
+                EncodePexPeers(pex).CopyTo(destination);
+                break;
+            default:
+                throw new NotSupportedException($"Unsupported frame type: {frame.GetType().Name}");
+        }
+    }
 
     public static (byte Opcode, byte[] Payload) Encode(IStreamFramePayload frame)
     {
