@@ -24,31 +24,28 @@ Spec: [deployable-requirements-spec](../spec/deployable-requirements-spec.md)
 5. **`DEP-INFRA-CHAT-PERSISTENCE` (Chat History, Keyset Pagination, and Cascade Purge):** `[Verify: Integration]`
    The deployable implements relational persistence and fast-path CQRS query projections for chat conversations, messages, reactions, and attachments, enforcing composite timeline indexing, cryptographic deletion cascades, and scheduled disappearing message purging across disk caches (realizes [`SYS-RETENTION-PURGE`](../SystemRequirements.md#1-functional-system-capabilities)).
 
-6. **`DEP-INFRA-DISCOVERY-RENDEZVOUS-STORE` (Blinded Rendezvous Table & Lease Eviction):** `[Verify: Integration]`
-   The deployable persists discovery directory leases and blinded rendezvous locators with sliding TTL eviction (24h/48h) and strict capacity clamping (max 10,000 entries), enforcing pre-key presence checks and clamping batch query results to 100 entries (realizes [`SYS-RELAY-ONLY-CLOAKING`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants) and [`SYS-BOUNDED-RELAY-QUOTAS`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries)).
-
-7. **`DEP-INFRA-LOCAL-BLOB-STORE` (Content-Addressed Blind Blob Storage & Quota Guard):** `[Verify: Integration]`
+6. **`DEP-INFRA-LOCAL-BLOB-STORE` (Content-Addressed Blind Blob Storage & Quota Guard):** `[Verify: Integration]`
    The deployable implements content-addressed local chunk and media blob storage at the local storage cache root using atomic temporary file staging, enforcing a 100 MB single-blob ceiling and 5 GB local cache quota returning `DomainResult.Failure` without process termination (realizes [`SYS-STREAM-AEAD-CHUNKED-TRANSFER`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants) and [`SYS-BOUNDED-RELAY-QUOTAS`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries)).
 
-8. **`DEP-INFRA-PORTABLE-FILE-STORAGE` (Canonical Root Containment & Staged Piece Assembly):** `[Verify: Unit]`
+7. **`DEP-INFRA-PORTABLE-FILE-STORAGE` (Canonical Root Containment & Staged Piece Assembly):** `[Verify: Unit]`
    The deployable implements desktop file transfer storage, verifying that all written and read chunk paths remain strictly under the canonical root directory to prevent directory traversal attacks, and staging in-flight piece downloads via `.percolator-part` extensions with atomic rename upon full verification (realizes [`SYS-PATH-TRAVERSAL-DEFENSE`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
-9. **`DEP-INFRA-MEDIA-METADATA-SANITIZATION` (Media Attachment EXIF and Geolocation Sanitization):** `[Verify: Unit]`
+8. **`DEP-INFRA-MEDIA-METADATA-SANITIZATION` (Media Attachment EXIF and Geolocation Sanitization):** `[Verify: Unit]`
    The deployable strips EXIF, IPTC, XMP metadata, GPS coordinates, camera serials, and device identifiers from outbound image and video streams prior to chunking and AEAD encryption, preventing geolocation and device fingerprint leakage (realizes [`SYS-MEDIA-METADATA-SANITIZATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
-10. **`DEP-INFRA-PREKEY-AVAILABILITY` (Pre-Key Availability Isolation, Atomic Consumption & Normalized Storage):** `[Verify: Integration]`
-    The deployable implements `IPreKeyAvailabilityPort` by verifying Signed PreKey presence without reading, popping, or modifying One-Time PreKeys from the relay's hosted pre-key ledger, and isolates One-Time PreKey retrieval and consumption exclusively to `IPreKeyBundleProvider` during explicit session establishment. Hosted One-Time PreKeys shall be persisted in normalized relational storage (prohibiting JSON blob columns) and dequeued atomically within a serialized database transaction so concurrent fetches never dispense the same One-Time PreKey twice (realizes [`SYS-DISCOVERY-PREKEY-ISOLATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants) and [`SYS-RATCHETED-CONFIDENTIALITY`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
+9. **`DEP-INFRA-PREKEY-AVAILABILITY` (Atomic One-Time Pre-Key Consumption & Normalized Storage):** `[Verify: Integration]`
+   The deployable implements `IPreKeyBundleProvider` to retrieve and consume hosted pre-key bundles exclusively during explicit session establishment, authenticating requests with the local caller's mailbox credentials while targeting the remote contact's routing token. Hosted One-Time PreKeys shall be persisted in normalized relational storage (prohibiting JSON blob columns) and dequeued atomically within a serialized database transaction so concurrent fetches never dispense the same One-Time PreKey twice (realizes [`SYS-ASYNC-SESSION-INIT`](../SystemRequirements.md#1-functional-system-capabilities), [`SYS-RATCHETED-CONFIDENTIALITY`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants), and [`SYS-PRE-CRYPTO-INGRESS-PROTECTION`](../SystemRequirements.md#3-external-interfaces-and-resource-boundaries)).
 
-11. **`DEP-INFRA-DURESS-DECOY-VAULT-LIFECYCLE` (Emergency Wipe & Decoy Vault Re-Initialization):** `[Verify: Integration]`
+10. **`DEP-INFRA-DURESS-DECOY-VAULT-LIFECYCLE` (Emergency Wipe & Decoy Vault Re-Initialization):** `[Verify: Integration]`
     The deployable implements `IDatabaseUnlockCoordinator` such that an emergency-credential match destroys the vault header and database ciphertext and immediately re-initializes an authentic empty vault whose header keys the emergency credential as its primary credential, then establishes a live authenticated session against it so decoy state persists identically to a genuine vault (realizes [`SYS-DECOY-VAULT-DENIABILITY`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
-12. **`DEP-INFRA-LOCAL-STORAGE-CONTAINMENT` (Machine-Local Application Data Roots):** `[Verify: Unit]`
+11. **`DEP-INFRA-LOCAL-STORAGE-CONTAINMENT` (Machine-Local Application Data Roots):** `[Verify: Unit]`
     The deployable resolves all default storage roots for the vault database, headers, blob caches, and file-transfer partials inside operating-system machine-local user storage scope, and never within OS roaming or directory-synced profile mechanisms (realizes [`SYS-LOCAL-STORAGE-CONTAINMENT`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
-13. **`DEP-INFRA-VAULT-SCHEMA-MIGRATION` (Versioned Vault Schema Evolution):** `[Verify: Integration]`
+12. **`DEP-INFRA-VAULT-SCHEMA-MIGRATION` (Versioned Vault Schema Evolution):** `[Verify: Integration]`
     The deployable establishes and upgrades the vault's persisted schema through versioned migrations executed against the authenticated key prior to authenticated-host composition, preserving all existing content across application version upgrades without destructive re-initialization (realizes [`SYS-VAULT-UPGRADE-DATA-PRESERVATION`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
-14. **`DEP-INFRA-MAILBOX-RETRIEVAL` (Acknowledged Stream Retrieval & Durable Pending Ingress):** `[Verify: Integration]`
+13. **`DEP-INFRA-MAILBOX-RETRIEVAL` (Acknowledged Stream Retrieval & Durable Pending Ingress):** `[Verify: Integration]`
     The deployable implements `IRelayMailboxClient` to retrieve sealed envelopes from untrusted relay mailboxes over an authenticated streaming session emitting per-envelope acknowledgements, and implements `IPendingIngressStore` to durably persist each received encrypted envelope inside the vault before its acknowledgement is emitted, retaining records for ordered replay until ingress processing reaches a terminal outcome (realizes [`SYS-ASYNC-STORE-AND-FORWARD`](../SystemRequirements.md#1-functional-system-capabilities) and [`SYS-ATOMIC-STATE-PERSISTENCE`](../SystemRequirements.md#2-security-privacy-and-risk-control-invariants)).
 
 ## 3. Public Contract Invariants

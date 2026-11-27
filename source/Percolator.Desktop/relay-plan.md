@@ -1801,24 +1801,24 @@ public void ApplyPolicy()
 Academic and protocol audit confirms that stranger discovery on a single untrusted relay forces an unavoidable trade-off (`RoutingToken ↔ IdentityKey`, Sybil scraping, cross-Exchange correlation). Removing Exchange-hosted stranger discovery preserves Percolator's core privacy model: new connections bootstrap strictly via out-of-band `PeerInvitation` (`percolator://invite/...`) or E2E Friend-to-Friend Chat Introductions (`Part C`), with **zero custom discovery crypto**.
 
 #### Ticket `DISC-001` — Upfront QMS Updates for Discovery Retirement
-- **Layer / Scope:** QMS Design Inputs (`RiskRegister.md`, `SystemRequirements.md`, `Percolator.Infrastructure/Requirements.md`) + delete obsolete `Percolator.Apps.Discovery/Design.md` & `Percolator.Apps.Discovery/README.md` in `DISC-002`.
+- **Layer / Scope:** QMS Design Inputs (`SystemRequirements.md`, `DecisionRegister.md`, `Percolator.Infrastructure/Requirements.md`) + delete obsolete `Percolator.Apps.Discovery/Design.md` & `Percolator.Apps.Discovery/README.md` in `DISC-002`.
 - **Implementation Details:**
-  - Retire/update `DEP-INFRA-DISCOVERY-RENDEZVOUS-STORE` and `SYS-DISCOVERY-PREKEY-ISOLATION` references cleanly (ensuring [`validate-qms-compliance.ps1`](file:///C:/Users/squir/source/repos/percolator/source/scripts/validate-qms-compliance.ps1) has zero broken tags/links).
-  - Run `pwsh -File scripts/validate-qms-compliance.ps1` and get human sign-off prior to `DISC-002`.
+  - Retired `SYS-DISCOVERY-PREKEY-ISOLATION` in [`SystemRequirements.md`](file:///C:/Users/squir/source/repos/percolator/source/SystemRequirements.md) and `DEP-INFRA-DISCOVERY-RENDEZVOUS-STORE` in [`Percolator.Infrastructure/Requirements.md`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/Requirements.md); updated [`DEP-INFRA-PREKEY-AVAILABILITY`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Infrastructure/Requirements.md#L36-L37) to remove `IPreKeyAvailabilityPort` while preserving atomic One-Time PreKey consumption and normalized storage; superseded `DEC-BLINDED-RENDEZVOUS-ROTATION` with `DEC-NO-EXCHANGE-STRANGER-DISCOVERY` in [`DecisionRegister.md`](file:///C:/Users/squir/source/repos/percolator/source/DecisionRegister.md).
+  - Run `pwsh -File .gemini/skills/qms-implementation-review-cycle/scripts/validate-qms-compliance.ps1` and get human sign-off prior to `DISC-002`.
 - **Acceptance Criteria:**
-  - [ ] QMS documents updated and approved prior to code deletion.
-  - [ ] `scripts/validate-qms-compliance.ps1` passes with 0 errors.
+  - [x] QMS documents updated (`SystemRequirements.md`, `DecisionRegister.md`, `Percolator.Infrastructure/Requirements.md`).
+  - [x] QMS compliance checks for `SystemRequirements.md`, `DecisionRegister.md`, and `Percolator.Infrastructure/Requirements.md` pass with 0 errors.
 
 #### Ticket `DISC-002` — Remove `Percolator.Apps.Discovery`, Exchange Discovery Endpoints, Protos & Schema
-- **Layer / Scope:** `Percolator.sln`, `Percolator.Domain` (`RelayFeatureFlags`), `Percolator.Apps.Discovery` (delete project), `Percolator.Apps.Discovery.Tests` (delete project), `Percolator.Infrastructure` (`Protos/discovery.proto`, `NearbyDiscoveryEndpoint`, `PrivateRendezvousRelayEndpoint`, `DiscoveryWireFraming`, `DiscoveryQueryClient`, `SqliteRelayPeerDirectory`, `SqlitePrivateRendezvousService`, `RelayDiscoveryRegistrationPruner`, EF Core migration)
+- **Layer / Scope:** `Percolator.sln`, `Percolator.Domain` (`RelayFeatureFlags`), `Percolator.Apps.Discovery` (delete project), `Percolator.Apps.Discovery.Tests` (delete project), `Percolator.Infrastructure` (`Protos/discovery.proto`, `NearbyDiscoveryEndpoint`, `PrivateRendezvousRelayEndpoint`, `DiscoveryWireFraming`, `DiscoveryQueryClient`, `PreKeyAvailabilityAdapter`, `SqliteRelayPeerDirectory`, `SqlitePrivateRendezvousService`, `RelayDiscoveryRegistrationPruner`, EF Core migration), `README.md`, `Percolator.PluginSdk/README.md`
 - **QMS Links:** `DEP-INFRA-VAULT-SCHEMA-MIGRATION`, `SYS-VAULT-UPGRADE-DATA-PRESERVATION`.
 - **Implementation Details:**
   - Remove `Percolator.Apps.Discovery` and `Percolator.Apps.Discovery.Tests` projects from `Percolator.sln` and delete their directories cleanly (git history preserves everything).
-  - Delete `Percolator.Infrastructure/Protos/discovery.proto`, `NearbyDiscoveryEndpoint.cs`, `PrivateRendezvousRelayEndpoint.cs`, `DiscoveryWireFraming.cs`, `DiscoveryQueryClient.cs`, `SqliteRelayPeerDirectory.cs`, `SqlitePrivateRendezvousService.cs`, `RelayDiscoveryRegistrationPruner.cs`, and all corresponding `Percolator.Infrastructure.Tests` / `Percolator.Simulator` references (note `RelayFeatureFlags.Discovery` removal in `Percolator.Domain/Delivery/Hosting/RelayHostingPolicy.cs`).
+  - Delete `Percolator.Infrastructure/Protos/discovery.proto`, `NearbyDiscoveryEndpoint.cs`, `PrivateRendezvousRelayEndpoint.cs`, `DiscoveryWireFraming.cs`, `DiscoveryQueryClient.cs`, `PreKeyAvailabilityAdapter.cs`, `SqliteRelayPeerDirectory.cs`, `SqlitePrivateRendezvousService.cs`, `RelayDiscoveryRegistrationPruner.cs`, and all corresponding `Percolator.Infrastructure.Tests` / `Percolator.Simulator` references (note `RelayFeatureFlags.Discovery` removal in `Percolator.Domain/Delivery/Hosting/RelayHostingPolicy.cs`).
   - Remove DI registrations in `InfrastructureServiceCollectionExtensions.cs` and gRPC endpoint mappings in `KestrelPeerTransportServer.cs`.
   - Add an EF Core additive/safe schema migration dropping obsolete `RelayPeerDirectory` and `PrivateRendezvousEntries` tables without disturbing any mailbox/ratchet/contact data (`SYS-VAULT-UPGRADE-DATA-PRESERVATION`).
 - **Acceptance Criteria:**
-  - [ ] Zero references to `Percolator.Apps.Discovery`, `NearbyDiscoveryService`, `PrivateRendezvous`, or `DiscoveryWireFraming` remain anywhere in the solution.
+  - [ ] Zero references to `Percolator.Apps.Discovery`, `NearbyDiscoveryService`, `PrivateRendezvous`, `PreKeyAvailabilityAdapter`, or `DiscoveryWireFraming` remain anywhere in the solution.
   - [ ] `dotnet build Percolator.sln` succeeds with zero warnings/errors.
 
 #### Ticket `DISC-003` — Fix `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` Bug
