@@ -81,6 +81,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         RootDirectoryPath localRootPath,
         StunEndpointDescriptor? exchangeStunEndpoint = null,
         bool exchangeSupportsTransferPipe = false,
+        RelayEndpoint? exchangeEndpoint = null,
         CancellationToken ct = default)
     {
         ThrowIfDisposed();
@@ -90,7 +91,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
         _sessions.AddOrUpdate(
             session.Id,
-            _ => CreateHandle(session, transportContext, localRootPath, exchangeStunEndpoint, exchangeSupportsTransferPipe),
+            _ => CreateHandle(session, transportContext, localRootPath, exchangeStunEndpoint, exchangeSupportsTransferPipe, exchangeEndpoint),
             (_, existing) =>
             {
                 lock (existing.SyncRoot)
@@ -105,6 +106,10 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                     if (exchangeSupportsTransferPipe)
                     {
                         existing.ExchangeSupportsTransferPipe = true;
+                    }
+                    if (exchangeEndpoint != null)
+                    {
+                        existing.ExchangeEndpoint = exchangeEndpoint;
                     }
                     if (session.State == TransferSessionState.Seeding && existing.SeedingStartedAtUtc == null)
                     {
@@ -177,17 +182,9 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             isAuthorized = handle.Session.Topology.ContainsParticipant(senderId);
         }
 
-        if (!isAuthorized || !handle.PinnedPeerCerts.TryGetValue(senderId, out CertSha256Fingerprint? pinnedCert))
+        if (!isAuthorized || !handle.PinnedPeerCerts.TryGetValue(senderId, out CertSha256Fingerprint? pinnedSessionCert))
         {
             return DomainResult.Failure(new DomainError("Transfer.UnauthorizedOrRevokedPeer", "Peer is not authorized or its certificate has been revoked."));
-        }
-
-        if (signal.DtlsFingerprintSha256 != null &&
-            !CryptographicOperations.FixedTimeEquals(signal.DtlsFingerprintSha256.Span, pinnedCert.Span))
-        {
-            return DomainResult.Failure(new DomainError(
-                TransferTransportErrorCodes.DtlsFingerprintMismatch,
-                "Inbound ICE signal DTLS fingerprint does not match the E2E-pinned peer certificate."));
         }
 
         switch (signal.Kind)
@@ -218,10 +215,30 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 handle.PeerConnections[senderId] = connection;
                 WireIceCandidateForwarder(handle, connection, sendSignalReplyAsync);
 
-                string answerSdp = await connection.AcceptOfferAndCreateAnswerAsync(
-                    signal.SdpOrCandidate,
-                    pinnedCert,
-                    ct).ConfigureAwait(false);
+                string answerSdp;
+                try
+                {
+                    // SdpOffer arrives E2E-encrypted inside Double Ratchet / Group V2 SenderKey.
+                    // Validate SDP media restrictions and constant-time DTLS fingerprint against signal.DtlsFingerprintSha256.
+                    answerSdp = await connection.AcceptOfferAndCreateAnswerAsync(
+                        signal.SdpOrCandidate,
+                        signal.DtlsFingerprintSha256,
+                        ct).ConfigureAwait(false);
+                }
+                catch (TransferTransportException ex)
+                {
+                    handle.PeerConnections.TryRemove(senderId, out _);
+                    await connection.DisposeAsync().ConfigureAwait(false);
+                    return DomainResult.Failure(new DomainError(ex.ErrorCode, ex.Message));
+                }
+
+                if (connection.RemoteDtlsFingerprint != null)
+                {
+                    handle.PinnedWebRtcDtlsFingerprints[senderId] = connection.RemoteDtlsFingerprint;
+                }
+
+                handle.RemoteDescriptionApplied[senderId] = true;
+                await FlushPendingRemoteCandidatesAsync(handle, senderId, connection, ct).ConfigureAwait(false);
 
                 var answerPayload = new FileTransferIceSignalPayload(
                     sessionId,
@@ -242,20 +259,63 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                     return DomainResult.Failure(new DomainError("Transfer.ConnectionNotFound", "No outbound peer connection awaits an SDP answer for this peer."));
                 }
 
-                await connection.ApplyRemoteAnswerAsync(signal.SdpOrCandidate, pinnedCert, ct).ConfigureAwait(false);
+                try
+                {
+                    await connection.ApplyRemoteAnswerAsync(
+                        signal.SdpOrCandidate,
+                        signal.DtlsFingerprintSha256,
+                        ct).ConfigureAwait(false);
+                }
+                catch (TransferTransportException ex)
+                {
+                    return DomainResult.Failure(new DomainError(ex.ErrorCode, ex.Message));
+                }
+
+                if (connection.RemoteDtlsFingerprint != null)
+                {
+                    handle.PinnedWebRtcDtlsFingerprints[senderId] = connection.RemoteDtlsFingerprint;
+                }
+
+                handle.RemoteDescriptionApplied[senderId] = true;
+                await FlushPendingRemoteCandidatesAsync(handle, senderId, connection, ct).ConfigureAwait(false);
                 return DomainResult.Success();
             }
 
             case IceSignalKind.IceCandidate:
             {
-                if (!handle.PeerConnections.TryGetValue(senderId, out ITransferPeerConnection? connection))
+                if (signal.DtlsFingerprintSha256 != null &&
+                    handle.PinnedWebRtcDtlsFingerprints.TryGetValue(senderId, out CertSha256Fingerprint? expectedWebRtcFp) &&
+                    !CryptographicOperations.FixedTimeEquals(signal.DtlsFingerprintSha256.Span, expectedWebRtcFp.Span))
                 {
-                    return DomainResult.Failure(new DomainError("Transfer.ConnectionNotFound", "No active peer connection exists to receive an ICE candidate."));
+                    return DomainResult.Failure(new DomainError(
+                        TransferTransportErrorCodes.DtlsFingerprintMismatch,
+                        "Inbound ICE candidate DTLS fingerprint does not match the E2E-authenticated WebRTC DTLS fingerprint."));
+                }
+
+                string mid = signal.CandidateMid ?? "0";
+                if (!handle.PeerConnections.TryGetValue(senderId, out ITransferPeerConnection? connection) ||
+                    !handle.RemoteDescriptionApplied.TryGetValue(senderId, out bool applied) ||
+                    !applied)
+                {
+                    ConcurrentQueue<(string Candidate, string Mid)> queue = handle.PendingRemoteCandidates.GetOrAdd(
+                        senderId,
+                        _ => new ConcurrentQueue<(string Candidate, string Mid)>());
+                    queue.Enqueue((signal.SdpOrCandidate, mid));
+
+                    // Re-check in case remote description finished concurrently while enqueueing
+                    if (handle.PeerConnections.TryGetValue(senderId, out ITransferPeerConnection? readyConn) &&
+                        handle.RemoteDescriptionApplied.TryGetValue(senderId, out bool ready) &&
+                        ready)
+                    {
+                        await FlushPendingRemoteCandidatesAsync(handle, senderId, readyConn, ct).ConfigureAwait(false);
+                    }
+
+                    return DomainResult.Success();
                 }
 
                 await connection.AddRemoteIceCandidateAsync(
                     signal.SdpOrCandidate,
-                    signal.CandidateMid ?? "0",
+                    mid,
                     ct).ConfigureAwait(false);
 
                 return DomainResult.Success();
@@ -263,6 +323,14 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
             case IceSignalKind.PipeRendezvous:
             {
+                if (signal.DtlsFingerprintSha256 != null &&
+                    !CryptographicOperations.FixedTimeEquals(signal.DtlsFingerprintSha256.Span, pinnedSessionCert.Span))
+                {
+                    return DomainResult.Failure(new DomainError(
+                        TransferTransportErrorCodes.DtlsFingerprintMismatch,
+                        "Inbound PipeRendezvous certificate fingerprint does not match the E2E-pinned peer certificate."));
+                }
+
                 if (signal.PipeToken == null || signal.PipeEndpointUri == null)
                 {
                     return DomainResult.Failure(new DomainError("Transfer.InvalidPipeRendezvous", "PipeRendezvous signal requires both PipeToken and PipeEndpointUri."));
@@ -309,26 +377,75 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             ExchangeStunEndpoint: handle.ExchangeStunEndpoint,
             MaxPeersPerSession: _options.MaxPeersPerSession);
 
-        ITransferPeerConnection connection = await _peerTransport.CreateDirectConnectionAsync(connOptions, ct).ConfigureAwait(false);
-        if (handle.PeerConnections.TryGetValue(remotePeerId, out ITransferPeerConnection? previous))
+        try
         {
-            await previous.DisposeAsync().ConfigureAwait(false);
+            ITransferPeerConnection connection = await _peerTransport.CreateDirectConnectionAsync(connOptions, ct).ConfigureAwait(false);
+            if (handle.PeerConnections.TryGetValue(remotePeerId, out ITransferPeerConnection? previous))
+            {
+                await previous.DisposeAsync().ConfigureAwait(false);
+            }
+
+            handle.RemoteDescriptionApplied[remotePeerId] = false;
+            handle.PeerConnections[remotePeerId] = connection;
+            WireIceCandidateForwarder(handle, connection, sendSignalAsync);
+
+            string offerSdp = await connection.CreateOfferAsync(ct).ConfigureAwait(false);
+            var offerPayload = new FileTransferIceSignalPayload(
+                sessionId,
+                IceSignalKind.SdpOffer,
+                offerSdp,
+                CandidateMid: null,
+                DtlsFingerprintSha256: connection.LocalDtlsFingerprint);
+
+            await sendSignalAsync(offerPayload, ct).ConfigureAwait(false);
+            SpawnChannelAttachTask(handle, remotePeerId, connection);
+            return DomainResult.Success();
         }
+        catch (TransferTransportException ex)
+        {
+            if (handle.ExchangeSupportsTransferPipe && handle.ExchangeEndpoint != null)
+            {
+                PipeRendezvousToken pipeToken = PipeRendezvousToken.Generate();
+                RelayEndpoint exchangeEndpoint = handle.ExchangeEndpoint;
+                var rendezvousPayload = new FileTransferIceSignalPayload(
+                    sessionId,
+                    IceSignalKind.PipeRendezvous,
+                    SdpOrCandidate: string.Empty,
+                    CandidateMid: null,
+                    DtlsFingerprintSha256: null,
+                    PipeToken: pipeToken,
+                    PipeEndpointUri: RelayPipeEndpointUri.Parse(exchangeEndpoint.ToUri().ToString()));
 
-        handle.PeerConnections[remotePeerId] = connection;
-        WireIceCandidateForwarder(handle, connection, sendSignalAsync);
+                await sendSignalAsync(rendezvousPayload, ct).ConfigureAwait(false);
 
-        string offerSdp = await connection.CreateOfferAsync(ct).ConfigureAwait(false);
-        var offerPayload = new FileTransferIceSignalPayload(
-            sessionId,
-            IceSignalKind.SdpOffer,
-            offerSdp,
-            CandidateMid: null,
-            DtlsFingerprintSha256: connection.LocalDtlsFingerprint);
+                Task pipeConnectTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await ConnectViaTransferPipeAsync(
+                            sessionId,
+                            remotePeerId,
+                            exchangeEndpoint,
+                            pipeToken,
+                            isTlsServer: true,
+                            handle.SessionCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
+                }, CancellationToken.None);
 
-        await sendSignalAsync(offerPayload, ct).ConfigureAwait(false);
-        SpawnChannelAttachTask(handle, remotePeerId, connection);
-        return DomainResult.Success();
+                handle.PeerPumpTasks[remotePeerId] = pipeConnectTask;
+                return DomainResult.Success();
+            }
+
+            return DomainResult.Failure(new DomainError(
+                TransferTransportErrorCodes.DirectNatTraversalFailed,
+                ex.Message));
+        }
     }
 
     public async ValueTask<DomainResult> ConnectViaTransferPipeAsync(
@@ -391,11 +508,17 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             return DomainResult.Failure(new DomainError("Transfer.SessionNotActive", "Transfer session is not active in the runtime."));
         }
 
-        if (!handle.PinnedPeerCerts.TryGetValue(remotePeerId, out CertSha256Fingerprint? expectedCert))
+        if (!handle.PinnedPeerCerts.TryGetValue(remotePeerId, out CertSha256Fingerprint? pinnedSessionCert))
         {
             await channel.DisposeAsync().ConfigureAwait(false);
             return DomainResult.Failure(new DomainError("Transfer.UnpinnedPeer", "Peer certificate is not pinned or has been revoked."));
         }
+
+        CertSha256Fingerprint expectedCert =
+            channel.TransportKind == TransferTransportKind.DirectWebRtcDtls &&
+            handle.PinnedWebRtcDtlsFingerprints.TryGetValue(remotePeerId, out CertSha256Fingerprint? webrtcDtlsFp)
+                ? webrtcDtlsFp
+                : pinnedSessionCert;
 
         if (!CryptographicOperations.FixedTimeEquals(channel.VerifiedRemoteCertSha256.Span, expectedCert.Span))
         {
@@ -450,7 +573,10 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             }
 
             handle.PinnedPeerCerts.TryRemove(evictedPeerId, out _);
+            handle.PinnedWebRtcDtlsFingerprints.TryRemove(evictedPeerId, out _);
             handle.PeerEphemeralIds.TryRemove(evictedPeerId, out _);
+            handle.RemoteDescriptionApplied.TryRemove(evictedPeerId, out _);
+            handle.PendingRemoteCandidates.TryRemove(evictedPeerId, out _);
 
             lock (handle.SyncRoot)
             {
@@ -564,7 +690,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             pumpTasks.AddRange(handle.PeerPumpTasks.Values);
 
             TransferSessionTransportContext ctx = handle.TransportContext;
-            unregisterTasks.Add(UnregisterBestEffortAsync(ctx.SwarmRendezvousId, ctx.EphemeralPeerId, boundedCt));
+            unregisterTasks.Add(UnregisterBestEffortAsync(ctx.SwarmRendezvousId, ctx.EphemeralPeerId, handle.ExchangeEndpoint, boundedCt));
 
             foreach (ITransferDataChannel channel in handle.PeerChannels.Values)
             {
@@ -638,7 +764,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         TransferSessionTransportContext transportContext,
         RootDirectoryPath localRootPath,
         StunEndpointDescriptor? exchangeStunEndpoint,
-        bool exchangeSupportsTransferPipe)
+        bool exchangeSupportsTransferPipe,
+        RelayEndpoint? exchangeEndpoint)
     {
         var scheduler = new ChunkPipelineScheduler();
         var assembler = new DiskChunkAssembler(_fileStorage);
@@ -653,6 +780,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             swarmCoordinator,
             exchangeStunEndpoint,
             exchangeSupportsTransferPipe,
+            exchangeEndpoint,
             session.State == TransferSessionState.Seeding ? _clock.UtcNow : null);
 
         if (transportContext.SenderCertSha256 != null &&
@@ -935,6 +1063,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                             await AnnounceSeederBestEffortAsync(
                                 handle.TransportContext.SwarmRendezvousId,
                                 handle.TransportContext.EphemeralPeerId,
+                                handle.ExchangeEndpoint,
                                 ct).ConfigureAwait(false);
                         }
                         break;
@@ -1078,6 +1207,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 await UnregisterBestEffortAsync(
                     handle.TransportContext.SwarmRendezvousId,
                     handle.TransportContext.EphemeralPeerId,
+                    handle.ExchangeEndpoint,
                     boundedCt).ConfigureAwait(false);
             }
 
@@ -1106,11 +1236,12 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
     private async Task UnregisterBestEffortAsync(
         SwarmRendezvousId rendezvousId,
         EphemeralSwarmPeerId ephemeralPeerId,
+        RelayEndpoint? exchangeEndpoint,
         CancellationToken ct)
     {
         try
         {
-            await _trackerPort.UnregisterAsync(rendezvousId, ephemeralPeerId, ct: ct).ConfigureAwait(false);
+            await _trackerPort.UnregisterAsync(rendezvousId, ephemeralPeerId, exchangeEndpoint, ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1124,11 +1255,12 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
     private async ValueTask AnnounceSeederBestEffortAsync(
         SwarmRendezvousId rendezvousId,
         EphemeralSwarmPeerId ephemeralPeerId,
+        RelayEndpoint? exchangeEndpoint,
         CancellationToken ct)
     {
         try
         {
-            await _trackerPort.AnnounceAsync(rendezvousId, ephemeralPeerId, SwarmPeerRole.Seeder, ct: ct).ConfigureAwait(false);
+            await _trackerPort.AnnounceAsync(rendezvousId, ephemeralPeerId, SwarmPeerRole.Seeder, exchangeEndpoint, ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1152,6 +1284,23 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         }
     }
 
+    private static async ValueTask FlushPendingRemoteCandidatesAsync(
+        ActiveTransferHandle handle,
+        PublicIdentityId senderId,
+        ITransferPeerConnection connection,
+        CancellationToken ct)
+    {
+        if (!handle.PendingRemoteCandidates.TryGetValue(senderId, out ConcurrentQueue<(string Candidate, string Mid)>? queue))
+        {
+            return;
+        }
+
+        while (queue.TryDequeue(out (string Candidate, string Mid) item))
+        {
+            await connection.AddRemoteIceCandidateAsync(item.Candidate, item.Mid, ct).ConfigureAwait(false);
+        }
+    }
+
     private void ThrowIfDisposed()
     {
         if (Volatile.Read(ref _disposed) != 0)
@@ -1171,11 +1320,15 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         public CancellationTokenSource SessionCts { get; } = new();
         public StunEndpointDescriptor? ExchangeStunEndpoint { get; set; }
         public bool ExchangeSupportsTransferPipe { get; set; }
+        public RelayEndpoint? ExchangeEndpoint { get; set; }
         public DateTimeOffset? SeedingStartedAtUtc { get; set; }
 
         public ConcurrentDictionary<PublicIdentityId, CertSha256Fingerprint> PinnedPeerCerts { get; } = new();
+        public ConcurrentDictionary<PublicIdentityId, CertSha256Fingerprint> PinnedWebRtcDtlsFingerprints { get; } = new();
         public ConcurrentDictionary<PublicIdentityId, EphemeralSwarmPeerId> PeerEphemeralIds { get; } = new();
         public ConcurrentDictionary<PublicIdentityId, ITransferPeerConnection> PeerConnections { get; } = new();
+        public ConcurrentDictionary<PublicIdentityId, bool> RemoteDescriptionApplied { get; } = new();
+        public ConcurrentDictionary<PublicIdentityId, ConcurrentQueue<(string Candidate, string Mid)>> PendingRemoteCandidates { get; } = new();
         public ConcurrentDictionary<PublicIdentityId, ITransferDataChannel> PeerChannels { get; } = new();
         public ConcurrentDictionary<PublicIdentityId, Task> PeerPumpTasks { get; } = new();
 
@@ -1187,6 +1340,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             SwarmCoordinator swarmCoordinator,
             StunEndpointDescriptor? exchangeStunEndpoint,
             bool exchangeSupportsTransferPipe,
+            RelayEndpoint? exchangeEndpoint,
             DateTimeOffset? seedingStartedAtUtc)
         {
             Session = session;
@@ -1196,6 +1350,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             SwarmCoordinator = swarmCoordinator;
             ExchangeStunEndpoint = exchangeStunEndpoint;
             ExchangeSupportsTransferPipe = exchangeSupportsTransferPipe;
+            ExchangeEndpoint = exchangeEndpoint;
             SeedingStartedAtUtc = seedingStartedAtUtc;
         }
     }

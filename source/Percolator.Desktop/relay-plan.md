@@ -1967,7 +1967,7 @@ Academic and protocol audit confirms that stranger discovery on a single untrust
   - **Vault Lock Teardown & Resume Test:** Trigger Persona lock mid-transfer and while seeding → verify ICE agents/sockets close within 1s and tracker unregisters; unlock and resume skips already-verified chunks via `ResumptionBitfield` using the vault-persisted session cert.
   - **Integrity & Security Tests:** Tampered chunk fails SHA-256 Merkle verification, chokes offending peer, writes 0 bytes to disk (`INV-VERIFY-BEFORE-WRITE`); spoofed/mismatched DTLS or TLS cert fingerprint fails handshake immediately; path traversal manifest (`../escape`) rejected (`SYS-PATH-TRAVERSAL-DEFENSE`).
 - **Acceptance Criteria:**
-  - [ ] All unit and real-transport integration tests pass 100% with zero cross-host peeking or fake listeners.
+  - [x] All unit and real-transport integration tests pass 100% with zero cross-host peeking or fake listeners.
 
 ---
 

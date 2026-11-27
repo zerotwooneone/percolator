@@ -99,4 +99,5 @@ message FileTransferIceSignalProto {
   bytes dtls_fingerprint_sha256 = 5; // 32-byte DTLS cert SHA-256 fingerprint
   bytes pipe_token = 6;            // 32-byte random one-time PipeRendezvousToken
   string pipe_endpoint_uri = 7;
+  bytes target_peer_id = 8;        // Optional 16-byte PublicIdentityId when routed over Group V2 SenderKey
 }

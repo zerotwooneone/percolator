@@ -40,7 +40,7 @@ public readonly struct PooledEncodedFrame : IDisposable
 public static class SwarmFrameCodec
 {
     public const int FrameHeaderSizeBytes = 5;
-    public const int MaxPayloadSizeBytes = 262_144; // 256 KB
+    public const int MaxPayloadSizeBytes = ChunkSizeBytes.MaxChunkSize + 64; // 4 MB max chunk + ChunkIndex/frame metadata headroom
     public const int MaxWireFrameSizeBytes = FrameHeaderSizeBytes + MaxPayloadSizeBytes;
     public const int HandshakePayloadSizeBytes = 68;
 
@@ -52,7 +52,7 @@ public static class SwarmFrameCodec
         int payloadLen = ComputePayloadLength(frame);
         if (payloadLen > MaxPayloadSizeBytes)
         {
-            throw new InvalidOperationException($"Encoded frame payload {payloadLen} exceeds 256 KB limit.");
+            throw new InvalidOperationException($"Encoded frame payload {payloadLen} exceeds {MaxPayloadSizeBytes}-byte limit.");
         }
 
         int totalLen = FrameHeaderSizeBytes + payloadLen;
@@ -82,7 +82,7 @@ public static class SwarmFrameCodec
         uint declaredLen = BinaryPrimitives.ReadUInt32BigEndian(wireFrame.Slice(1, 4));
         if (declaredLen > MaxPayloadSizeBytes)
         {
-            throw new InvalidDataException($"Frame payload length {declaredLen} exceeds maximum allowed 256 KB limit.");
+            throw new InvalidDataException($"Frame payload length {declaredLen} exceeds maximum allowed limit ({MaxPayloadSizeBytes} bytes).");
         }
 
         if (wireFrame.Length != FrameHeaderSizeBytes + (int)declaredLen)
@@ -109,7 +109,7 @@ public static class SwarmFrameCodec
             uint rawLen = BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(1, 4));
             if (rawLen > MaxPayloadSizeBytes)
             {
-                throw new InvalidDataException($"Frame payload length {rawLen} exceeds maximum allowed 256 KB limit.");
+                throw new InvalidDataException($"Frame payload length {rawLen} exceeds maximum allowed limit ({MaxPayloadSizeBytes} bytes).");
             }
             payloadLen = (int)rawLen;
         }
@@ -227,7 +227,7 @@ public static class SwarmFrameCodec
 
         if (payload.Length > MaxPayloadSizeBytes)
         {
-            throw new InvalidOperationException($"Encoded frame payload {payload.Length} exceeds 256 KB limit.");
+            throw new InvalidOperationException($"Encoded frame payload {payload.Length} exceeds limit ({MaxPayloadSizeBytes} bytes).");
         }
 
         return (opcode, payload);
@@ -237,7 +237,7 @@ public static class SwarmFrameCodec
     {
         if (payload.Length > MaxPayloadSizeBytes)
         {
-            throw new InvalidDataException($"Frame payload length {payload.Length} exceeds maximum allowed 256 KB limit.");
+            throw new InvalidDataException($"Frame payload length {payload.Length} exceeds maximum allowed limit ({MaxPayloadSizeBytes} bytes).");
         }
 
         var frameType = (StreamFrameType)opcode;

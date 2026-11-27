@@ -778,3 +778,13 @@ public sealed class FakeTransferPeerTransport : ITransferPeerTransport
 
     public ValueTask DisposeAsync() => CloseAllConnectionsAsync();
 }
+
+public sealed class DirectBackgroundPayloadDispatcher : IBackgroundPayloadDispatcher
+{
+    private readonly IPayloadSender _sender;
+
+    public DirectBackgroundPayloadDispatcher(IPayloadSender sender) => _sender = sender;
+
+    public ValueTask<DomainResult> DispatchAsync(OutboundPayloadContext context, CancellationToken ct = default) =>
+        _sender.SendPayloadAsync(context, ct);
+}

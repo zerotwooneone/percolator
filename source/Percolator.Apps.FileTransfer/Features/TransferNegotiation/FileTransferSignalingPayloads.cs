@@ -1,4 +1,5 @@
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
@@ -31,4 +32,5 @@ public sealed record FileTransferIceSignalPayload(
     string? CandidateMid,
     CertSha256Fingerprint? DtlsFingerprintSha256,
     PipeRendezvousToken? PipeToken = null,
-    RelayPipeEndpointUri? PipeEndpointUri = null);
+    RelayPipeEndpointUri? PipeEndpointUri = null,
+    PublicIdentityId? TargetPeerId = null);

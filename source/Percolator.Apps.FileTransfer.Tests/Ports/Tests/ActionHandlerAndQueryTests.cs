@@ -238,7 +238,8 @@ public sealed class ActionHandlerAndQueryTests
             _clock,
             _blobStorage,
             _runtime,
-            _payloadSender);
+            new DirectBackgroundPayloadDispatcher(_payloadSender),
+            _certStore);
 
         var inboundCtx = new InboundPayloadContext(
             channelId,
@@ -311,7 +312,8 @@ public sealed class ActionHandlerAndQueryTests
             _clock,
             _blobStorage,
             recipientRuntime,
-            recipientSender);
+            new DirectBackgroundPayloadDispatcher(recipientSender),
+            recipientCertStore);
 
         await payloadHandler.HandleInboundAsync(new InboundPayloadContext(
             channelId,

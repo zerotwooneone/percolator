@@ -79,12 +79,13 @@ public sealed class TransferSessionRuntimeTests
             groupChannelId, charlieId, aliceId, DeviceId.Primary, AppId.FileTransferControl, offerOutbound.Payload, clock.UtcNow)))
             .IsSuccess.Should().BeTrue();
 
-        // 3. Bob accepts -> emits 1:1 Accept to Alice + Group V2 PeerJoin broadcast
+        // 3. Bob accepts -> broadcasts Group V2 PeerJoin over SenderKey channel
         (await bob.ActionHandler.AcceptTransferAsync(sessionId, RootDirectoryPath.Parse(@"C:\BobDownloads")))
             .IsSuccess.Should().BeTrue();
 
-        bob.PayloadSender.SentPayloads.Should().HaveCount(2);
-        OutboundPayloadContext bobPeerJoin = bob.PayloadSender.SentPayloads.Single(p => p.Payload.Span[0] == (byte)FileTransferControlOpcode.PeerJoin);
+        bob.PayloadSender.SentPayloads.Should().ContainSingle();
+        OutboundPayloadContext bobPeerJoin = bob.PayloadSender.SentPayloads[0];
+        bobPeerJoin.Payload.Span[0].Should().Be((byte)FileTransferControlOpcode.PeerJoin);
         bobPeerJoin.RecipientIdentityId.Should().BeNull();
         bobPeerJoin.Route.Should().Be(DeliveryRoute.RelayedGroup);
 
@@ -214,7 +215,6 @@ public sealed class TransferSessionRuntimeTests
 
         // 2. Bob accepts and downloads all 3 chunks directly from Alice
         await bob.ActionHandler.AcceptTransferAsync(sessionId, bobRoot);
-        var bobAccept = bob.PayloadSender.SentPayloads.Single(p => p.Payload.Span[0] == (byte)FileTransferControlOpcode.Accept);
         var bobPeerJoin = bob.PayloadSender.SentPayloads.Single(p => p.Payload.Span[0] == (byte)FileTransferControlOpcode.PeerJoin);
 
         // Pin Bob on Alice
@@ -519,7 +519,8 @@ public sealed class TransferSessionRuntimeTests
             clock,
             blobStorage,
             runtime,
-            payloadSender);
+            new DirectBackgroundPayloadDispatcher(payloadSender),
+            certStore);
 
         return new TestTransferNode(
             sessionRepo,

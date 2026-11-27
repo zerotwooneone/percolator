@@ -103,10 +103,11 @@ public sealed class TcpMultiStreamPoolTests
     [Test]
     public async Task FrameValidation_OversizedPayload_ClosesStreamWithoutAllocation()
     {
-        // Construct 5-byte header with length 300,000 (> 262,144 limit)
+        // Construct 5-byte header with length exceeding MaxPayloadSizeBytes limit
+        uint oversizedLength = (uint)SwarmFrameCodec.MaxPayloadSizeBytes + 1000;
         byte[] header = new byte[5];
         header[0] = (byte)StreamFrameType.ChunkData;
-        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(1, 4), 300_000);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(1, 4), oversizedLength);
 
         using var memoryStream = new MemoryStream();
         await memoryStream.WriteAsync(header);
@@ -116,7 +117,7 @@ public sealed class TcpMultiStreamPoolTests
         var act = async () => await transferStream.ReceiveFrameAsync();
 
         await act.Should().ThrowAsync<InvalidDataException>()
-            .WithMessage("*256 KB*");
+            .WithMessage("*limit*");
 
         // Verify stream disposed
         var sendAct = async () => await transferStream.SendFrameAsync(new KeepAliveFrame());

@@ -407,6 +407,11 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             proto.PipeEndpointUri = signal.PipeEndpointUri.Value;
         }
 
+        if (signal.TargetPeerId.HasValue)
+        {
+            proto.TargetPeerId = ByteString.CopyFrom(signal.TargetPeerId.Value.ToByteArray());
+        }
+
         return proto;
     }
 
@@ -418,7 +423,8 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             string.IsNullOrEmpty(proto.CandidateMid) ? null : proto.CandidateMid,
             proto.DtlsFingerprintSha256.IsEmpty ? null : CertSha256Fingerprint.FromSpan(proto.DtlsFingerprintSha256.Span),
             proto.PipeToken.IsEmpty ? null : PipeRendezvousToken.FromSpan(proto.PipeToken.Span),
-            string.IsNullOrEmpty(proto.PipeEndpointUri) ? null : RelayPipeEndpointUri.Parse(proto.PipeEndpointUri));
+            string.IsNullOrEmpty(proto.PipeEndpointUri) ? null : RelayPipeEndpointUri.Parse(proto.PipeEndpointUri),
+            proto.TargetPeerId.IsEmpty ? null : PublicIdentityId.FromBytes(proto.TargetPeerId.Span));
 
     // Chat DTO Serialization
 

@@ -18,6 +18,7 @@ public static class ServiceCollectionExtensions
         collection.AddSingleton<FileTransferIngressFilter>();
         collection.AddSingleton<IAppIngressFilter>(sp => sp.GetRequiredService<FileTransferIngressFilter>());
         collection.AddSingleton<TransferSessionRuntimeOptions>(_ => new TransferSessionRuntimeOptions());
+        collection.AddSingleton<IBackgroundPayloadDispatcher, ScopedBackgroundPayloadDispatcher>();
         collection.AddSingleton<ITransferSessionRuntime, TransferSessionRuntime>();
         collection.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
         collection.AddScoped<IFileTransferActionHandler, FileTransferActionHandler>();

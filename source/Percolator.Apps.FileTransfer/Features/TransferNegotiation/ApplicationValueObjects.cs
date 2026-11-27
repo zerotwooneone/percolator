@@ -213,7 +213,8 @@ public sealed record StunEndpointDescriptor(
 public sealed record SwarmAnnounceResult(
     IReadOnlyList<EphemeralSwarmPeerId> ActivePeers,
     StunEndpointDescriptor? StunEndpoint,
-    bool SupportsTransferPipe);
+    bool SupportsTransferPipe,
+    Percolator.Domain.Delivery.ValueObjects.RelayEndpoint? ExchangeEndpoint = null);
 
 public readonly record struct StreamIndex(int Value)
 {

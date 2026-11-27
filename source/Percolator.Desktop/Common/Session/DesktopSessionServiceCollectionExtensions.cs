@@ -96,6 +96,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddChatApp();
         services.AddSingleton<IAppPlugin, FileTransferPlugin>();
         services.AddSingleton<TransferSessionRuntimeOptions>(_ => new TransferSessionRuntimeOptions());
+        services.AddSingleton<IBackgroundPayloadDispatcher, Percolator.Apps.FileTransfer.Features.Runtime.ScopedBackgroundPayloadDispatcher>();
         services.AddSingleton<ITransferSessionRuntime, Percolator.Apps.FileTransfer.Features.Runtime.TransferSessionRuntime>();
         services.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
 

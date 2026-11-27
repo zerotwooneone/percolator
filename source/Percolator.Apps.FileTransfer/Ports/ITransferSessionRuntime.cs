@@ -39,6 +39,7 @@ public interface ITransferSessionRuntime : IAsyncDisposable
         RootDirectoryPath localRootPath,
         StunEndpointDescriptor? exchangeStunEndpoint = null,
         bool exchangeSupportsTransferPipe = false,
+        RelayEndpoint? exchangeEndpoint = null,
         CancellationToken ct = default);
 
     ValueTask RegisterPinnedPeerCertificateAsync(

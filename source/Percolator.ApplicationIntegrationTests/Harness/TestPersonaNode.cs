@@ -28,6 +28,9 @@ using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Ingress;
+using Percolator.Apps.FileTransfer.DependencyInjection;
+using Percolator.Apps.FileTransfer.Features.IngressControl;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
@@ -58,12 +61,13 @@ using PluginDeliveryRoute = Percolator.PluginSdk.DeliveryRoute;
 
 public sealed class TestPersonaNode : IAsyncDisposable
 {
-    private readonly SqliteConnection _keeperConnection;
+    private readonly SqliteConnection? _keeperConnection;
     private readonly ServiceProvider _serviceProvider;
     private readonly List<IHostedService> _hostedServices = new();
     private readonly MasterKeyHandle _masterKeyHandle;
     private CancellationTokenSource _drainCts = new();
     private Task? _drainLoopTask;
+    private int _disposed;
 
     public PublicIdentityId IdentityId { get; }
     public DeviceId DeviceId { get; } = DeviceId.Primary;
@@ -71,7 +75,7 @@ public sealed class TestPersonaNode : IAsyncDisposable
     public IServiceProvider Services => _serviceProvider;
 
     private TestPersonaNode(
-        SqliteConnection keeperConnection,
+        SqliteConnection? keeperConnection,
         ServiceProvider serviceProvider,
         MasterKeyHandle masterKeyHandle,
         PublicIdentityId identityId,
@@ -84,32 +88,57 @@ public sealed class TestPersonaNode : IAsyncDisposable
         DisplayName = displayName;
     }
 
-    public static async Task<TestPersonaNode> CreateAsync(string displayName = "Persona")
+    public static Task<TestPersonaNode> CreateAsync(
+        string displayName = "Persona",
+        string? sqliteFilePath = null,
+        bool blockDirectIce = false) =>
+        CreateCoreAsync(PublicIdentityId.New(), displayName, sqliteFilePath, isUnlockExisting: false, blockDirectIce);
+
+    public static Task<TestPersonaNode> UnlockFromVaultFileAsync(
+        PublicIdentityId existingPersonaId,
+        string displayName,
+        string sqliteFilePath) =>
+        CreateCoreAsync(existingPersonaId, displayName, sqliteFilePath, isUnlockExisting: true, blockDirectIce: false);
+
+    private static async Task<TestPersonaNode> CreateCoreAsync(
+        PublicIdentityId personaId,
+        string displayName,
+        string? sqliteFilePath,
+        bool isUnlockExisting,
+        bool blockDirectIce)
     {
         SQLitePCL.Batteries_V2.Init();
 
-        var personaId = PublicIdentityId.New();
-        var connectionString = $"DataSource=file:persona_{personaId.Value:N}?mode=memory&cache=shared";
-        var keeperConnection = new SqliteConnection(connectionString);
-        await keeperConnection.OpenAsync().ConfigureAwait(false);
+        bool isFileBacked = !string.IsNullOrWhiteSpace(sqliteFilePath);
+        string connectionString = isFileBacked
+            ? $"Data Source={sqliteFilePath};Mode=ReadWriteCreate;Pooling=False"
+            : $"DataSource=file:persona_{personaId.Value:N}?mode=memory&cache=shared";
+
+        SqliteConnection? keeperConnection = null;
+        if (!isFileBacked)
+        {
+            keeperConnection = new SqliteConnection(connectionString);
+            await keeperConnection.OpenAsync().ConfigureAwait(false);
+        }
 
         var masterKey = MasterKeyHandle.GenerateRandom();
         var storageOptions = new VaultStorageOptions
         {
-            UseEncryption = false
+            UseEncryption = false,
+            BaseDirectory = isFileBacked ? Path.GetDirectoryName(sqliteFilePath)! : Path.GetTempPath()
         };
 
         var services = new ServiceCollection();
         services.AddLogging(lb =>
         {
             lb.AddConsole();
-            lb.SetMinimumLevel(LogLevel.Information);
+            lb.SetMinimumLevel(LogLevel.Warning);
         });
 
         services.AddSessionCoreInfrastructure(masterKey, storageOptions);
         services.AddVaultPersistenceInfrastructure();
 
-        // Direct in-memory SQLite keeper database override
+        // SQLite database override (in-memory shared or file-backed vault for lock/unlock testing)
         services.AddDbContextFactory<PercolatorDbContext>((sp, dbOptions) =>
         {
             dbOptions.UseSqlite(connectionString);
@@ -129,6 +158,14 @@ public sealed class TestPersonaNode : IAsyncDisposable
         services.AddChatInfrastructure();
         services.AddChatApp();
         services.AddFileTransferInfrastructure();
+        if (blockDirectIce)
+        {
+            services.AddSingleton<Percolator.Infrastructure.Plugins.FileTransfer.TransferPeerTransport>();
+            services.AddSingleton<ITransferPeerTransport>(sp =>
+                new DirectIceBlockingTransportDecorator(
+                    sp.GetRequiredService<Percolator.Infrastructure.Plugins.FileTransfer.TransferPeerTransport>()));
+        }
+        services.AddFileTransferApp();
 
         services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
         services.AddScoped<IInboundConnectionWorkflow, InboundConnectionWorkflow>();
@@ -143,27 +180,30 @@ public sealed class TestPersonaNode : IAsyncDisposable
 
         var serviceProvider = services.BuildServiceProvider();
 
-        // Ensure database schema is created
+        // Ensure database schema is created and persona identity is provisioned or re-activated
         using (var scope = serviceProvider.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PercolatorDbContext>();
             await db.Database.EnsureCreatedAsync().ConfigureAwait(false);
 
-            var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
-            var profileRepo = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
-            var profile = IdentityProfile.Create(personaId, displayName, IdentityRole.UserPersona, timeProvider).Value!;
-            await profileRepo.SaveAsync(profile).ConfigureAwait(false);
+            if (!isUnlockExisting)
+            {
+                var timeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+                var profileRepo = scope.ServiceProvider.GetRequiredService<IIdentityProfileRepository>();
+                var profile = IdentityProfile.Create(personaId, displayName, IdentityRole.UserPersona, timeProvider).Value!;
+                await profileRepo.SaveAsync(profile).ConfigureAwait(false);
 
-            var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
-            var (priv, pub) = cryptoEngine.GenerateEphemeralKeyPair();
-            using var profileKey = ProfileKey.Generate();
-            var idKeyStore = scope.ServiceProvider.GetRequiredService<ILocalIdentityKeyStore>();
-            await idKeyStore.SaveIdentityKeysAsync(personaId, priv, IdentityKey.FromSpan(pub.Span), profileKey).ConfigureAwait(false);
+                var cryptoEngine = scope.ServiceProvider.GetRequiredService<ICryptoEngine>();
+                var (priv, pub) = cryptoEngine.GenerateEphemeralKeyPair();
+                using var profileKey = ProfileKey.Generate();
+                var idKeyStore = scope.ServiceProvider.GetRequiredService<ILocalIdentityKeyStore>();
+                await idKeyStore.SaveIdentityKeysAsync(personaId, priv, IdentityKey.FromSpan(pub.Span), profileKey).ConfigureAwait(false);
 
-            var (spkPriv, spkPub) = cryptoEngine.GenerateEphemeralKeyPair();
-            var spkSig = cryptoEngine.SignEd25519(priv.Span, spkPub.Span);
-            var preKeyStore = scope.ServiceProvider.GetRequiredService<IPrivatePreKeyStore>();
-            await preKeyStore.StoreSignedPreKeyAsync(personaId, DeviceId.Primary, spkPriv, spkPub, DeviceLinkProof.FromSpan(spkSig)).ConfigureAwait(false);
+                var (spkPriv, spkPub) = cryptoEngine.GenerateEphemeralKeyPair();
+                var spkSig = cryptoEngine.SignEd25519(priv.Span, spkPub.Span);
+                var preKeyStore = scope.ServiceProvider.GetRequiredService<IPrivatePreKeyStore>();
+                await preKeyStore.StoreSignedPreKeyAsync(personaId, DeviceId.Primary, spkPriv, spkPub, DeviceLinkProof.FromSpan(spkSig)).ConfigureAwait(false);
+            }
 
             var activeSet = scope.ServiceProvider.GetRequiredService<IActiveIdentitySet>();
             await activeSet.AddAsync(personaId).ConfigureAwait(false);
@@ -187,6 +227,43 @@ public sealed class TestPersonaNode : IAsyncDisposable
         node._drainLoopTask = Task.Run(() => scheduler.RunAsync(node._drainCts.Token));
 
         return node;
+    }
+
+    public void EnableFileTransfers()
+    {
+        Services.GetRequiredService<FileTransferIngressFilter>().IsEnabled = true;
+    }
+
+    public async Task SendMemberLeftSystemNoticeAsync(ChannelId groupChannelId, PublicIdentityId evictedMemberId)
+    {
+        using var scope = Services.CreateScope();
+        var serializer = scope.ServiceProvider.GetRequiredService<IPayloadSerializer>();
+        var payloadSender = scope.ServiceProvider.GetRequiredService<IPayloadSender>();
+
+        var noticeDto = new SystemNoticeDto(
+            groupChannelId,
+            SystemNoticeType.MemberLeft,
+            evictedMemberId,
+            (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var envelope = new ChatPayloadEnvelopeDto(
+            ChatPayloadType.SystemNotice,
+            serializer.Serialize(noticeDto),
+            ReadOnlyMemory<byte>.Empty);
+        var wireBytes = serializer.Serialize(envelope);
+
+        var result = await payloadSender.SendPayloadAsync(new OutboundPayloadContext(
+            groupChannelId,
+            IdentityId,
+            RecipientIdentityId: null,
+            DeviceId.Primary,
+            AppId.Chat,
+            wireBytes,
+            PluginDeliveryRoute.RelayedGroup)).ConfigureAwait(false);
+
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException($"SendMemberLeftSystemNoticeAsync failed: {result.Error!.Code} {result.Error.Description}");
+        }
     }
 
     public async Task LinkRelayAsync(TestRelayServer relay)
@@ -773,7 +850,22 @@ public sealed class TestPersonaNode : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         await StopDrainAsync().ConfigureAwait(false);
+
+        var fileTransferRuntime = Services.GetService<ITransferSessionRuntime>();
+        if (fileTransferRuntime != null)
+        {
+            try
+            {
+                await fileTransferRuntime.DisposeAsync().ConfigureAwait(false);
+            }
+            catch { }
+        }
 
         foreach (var svc in _hostedServices)
         {
@@ -785,7 +877,10 @@ public sealed class TestPersonaNode : IAsyncDisposable
         }
 
         await _serviceProvider.DisposeAsync().ConfigureAwait(false);
-        await _keeperConnection.DisposeAsync().ConfigureAwait(false);
+        if (_keeperConnection != null)
+        {
+            await _keeperConnection.DisposeAsync().ConfigureAwait(false);
+        }
         _masterKeyHandle.Dispose();
     }
 
@@ -813,5 +908,40 @@ public sealed class TestPersonaNode : IAsyncDisposable
         public Task<IReadOnlyList<ChatMessage>> GetByChannelIdAsync(ChannelId channelId, CancellationToken ct = default) => _inner.GetByChannelIdAsync(channelId, ct);
         public Task UpdateAsync(ChatMessage record, CancellationToken ct = default) => _inner.UpdateAsync(record, ct);
         public Task<int> PurgeExpiredMessagesAsync(ulong currentTimestampUnixMs, CancellationToken ct = default) => _inner.PurgeExpiredMessagesAsync(currentTimestampUnixMs, ct);
+    }
+
+    private sealed class DirectIceBlockingTransportDecorator : ITransferPeerTransport
+    {
+        private readonly ITransferPeerTransport _inner;
+
+        public DirectIceBlockingTransportDecorator(ITransferPeerTransport inner)
+        {
+            _inner = inner;
+        }
+
+        public int ActiveConnectionCount => _inner.ActiveConnectionCount;
+
+        public ValueTask<ITransferPeerConnection> CreateDirectConnectionAsync(
+            DirectPeerConnectionOptions options,
+            CancellationToken ct = default) =>
+            ValueTask.FromException<ITransferPeerConnection>(
+                new TransferTransportException(
+                    TransferTransportErrorCodes.DirectNatTraversalFailed,
+                    "Simulated symmetric NAT / UDP-blocked direct ICE failure."));
+
+        public ValueTask<ITransferDataChannel> OpenRelayedPipeChannelAsync(
+            RelayedPipeConnectionOptions options,
+            CancellationToken ct = default) =>
+            _inner.OpenRelayedPipeChannelAsync(options, ct);
+
+        public ValueTask CloseSessionConnectionsAsync(
+            Percolator.Apps.FileTransfer.Domain.TransferNegotiation.TransferSessionId sessionId,
+            CancellationToken ct = default) =>
+            _inner.CloseSessionConnectionsAsync(sessionId, ct);
+
+        public ValueTask CloseAllConnectionsAsync(CancellationToken ct = default) =>
+            _inner.CloseAllConnectionsAsync(ct);
+
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 }

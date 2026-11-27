@@ -79,7 +79,8 @@ public sealed class GrpcSwarmTrackerClient : IDistributedTrackerPort
                 PortNumber.FromInt((int)response.StunPort));
         }
 
-        return new SwarmAnnounceResult(activePeers, stunEndpoint, response.SupportsTransferPipe);
+        RelayEndpoint resolvedEndpoint = relayEndpoint ?? RelayEndpoint.FromHostAndPort(exchangeUri.Host, exchangeUri.Port);
+        return new SwarmAnnounceResult(activePeers, stunEndpoint, response.SupportsTransferPipe, resolvedEndpoint);
     }
 
     public async ValueTask UnregisterAsync(

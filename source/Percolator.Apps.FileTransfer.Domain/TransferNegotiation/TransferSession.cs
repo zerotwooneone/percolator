@@ -585,6 +585,43 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return DomainResult.Success();
     }
 
+    public DomainResult ApplyResumptionBitfield(Bitfield scannedBitfield, IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(scannedBitfield);
+        ArgumentNullException.ThrowIfNull(clock);
+        if (IsTerminalState())
+            return DomainResult.Failure(new DomainError("Transfer.TerminalState", $"Cannot apply resumption bitfield in terminal state '{State}'."));
+
+        if (scannedBitfield.TotalChunks != Manifest.TotalChunks)
+            return DomainResult.Failure(new DomainError("Transfer.MismatchedBitfield", "Scanned bitfield total chunk count does not match manifest."));
+
+        for (int i = 0; i < Manifest.TotalChunks.Count; i++)
+        {
+            ChunkIndex idx = ChunkIndex.FromInt(i);
+            if (scannedBitfield.HasChunk(idx) && !LocalBitfield.HasChunk(idx))
+            {
+                LocalBitfield = LocalBitfield.WithChunk(idx);
+            }
+        }
+
+        if (Role == TransferRole.Recipient && IsDownloadComplete && State == TransferSessionState.InFlight)
+        {
+            DateTimeOffset now = clock.UtcNow;
+            if (TargetSeedRatio.IsZero)
+            {
+                State = TransferSessionState.Completed;
+                CompletedAtUtc = now;
+                AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+            }
+            else
+            {
+                State = TransferSessionState.Seeding;
+            }
+        }
+
+        return DomainResult.Success();
+    }
+
     public DomainResult Cancel(TransferTerminationReason reason, IDateTimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);

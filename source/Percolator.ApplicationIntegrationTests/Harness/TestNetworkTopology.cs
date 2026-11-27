@@ -25,12 +25,17 @@ public sealed class TestNetworkTopology : IAsyncDisposable
         return relay;
     }
 
-    public async Task<TestPersonaNode> CreatePersonaAsync(string displayName = "Persona")
+    public async Task<TestPersonaNode> CreatePersonaAsync(
+        string displayName = "Persona",
+        string? sqliteFilePath = null,
+        bool blockDirectIce = false)
     {
-        var persona = await TestPersonaNode.CreateAsync(displayName).ConfigureAwait(false);
+        var persona = await TestPersonaNode.CreateAsync(displayName, sqliteFilePath, blockDirectIce).ConfigureAwait(false);
         _personas.Add(persona);
         return persona;
     }
+
+    public void TrackPersona(TestPersonaNode persona) => _personas.Add(persona);
 
     public async Task PairPersonasAsync(TestPersonaNode inviter, TestPersonaNode invitee, TestRelayServer sharedRelay)
     {

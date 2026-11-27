@@ -84,7 +84,7 @@ public sealed class TcpTransferStream : ITransferStream
             if (payloadLength > SwarmFrameCodec.MaxPayloadSizeBytes)
             {
                 await DisposeAsync().ConfigureAwait(false);
-                throw new InvalidDataException($"Frame payload length {payloadLength} exceeds maximum allowed 256 KB limit.");
+                throw new InvalidDataException($"Frame payload length {payloadLength} exceeds maximum allowed limit ({SwarmFrameCodec.MaxPayloadSizeBytes} bytes).");
             }
 
             byte[] payload = new byte[payloadLength];
