@@ -8,6 +8,7 @@ using Percolator.Apps.FileTransfer.Features.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Apps.FileTransfer.Tests.TestDoubles;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
@@ -26,6 +27,7 @@ public sealed class TransferNegotiationTests
     private InMemoryFilterPolicyRepository _policyRepository = null!;
     private InMemoryTransferSessionCertificateStore _certStore = null!;
     private TransferSessionRuntime _runtime = null!;
+    private TestPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
 
     [SetUp]
@@ -38,6 +40,7 @@ public sealed class TransferNegotiationTests
         _trackerPort = new RecordingTrackerPort();
         _policyRepository = new InMemoryFilterPolicyRepository();
         _certStore = new InMemoryTransferSessionCertificateStore();
+        _serializer = new TestPayloadSerializer();
         _runtime = new TransferSessionRuntime(
             new FakeTransferPeerTransport(),
             _certStore,
@@ -53,7 +56,7 @@ public sealed class TransferNegotiationTests
             _sessionRepo,
             _fileStorage,
             _payloadSender,
-            new TestPayloadSerializer(),
+            _serializer,
             _trackerPort,
             _clock,
             defaultFilter,
@@ -93,6 +96,16 @@ public sealed class TransferNegotiationTests
 
         TransferSession session = TransferSession.CreateIncomingStaged(sessionId, senderId, manifest, SeedRatio.Zero, _clock);
         await _sessionRepo.SaveSessionAsync(session);
+        await _sessionRepo.SaveTransportContextAsync(new TransferSessionTransportContext(
+            sessionId,
+            ChannelId.New(),
+            PublicIdentityId.New(),
+            SwarmRendezvousId.Generate(),
+            EphemeralSwarmPeerId.Generate(),
+            StreamAuthToken.Generate(),
+            DirectWanPolicy.DisabledByDefault,
+            RelayRendezvous: null,
+            DirectCandidates: []));
 
         // Select files 0 and 2 (100 MB + 200 MB = 300 MB)
         SelectedFileIndices selected = SelectedFileIndices.FromIndices([FileIndex.FromInt(0), FileIndex.FromInt(2)], FileCount.FromInt(4));
@@ -165,6 +178,16 @@ public sealed class TransferNegotiationTests
 
         TransferSession session = TransferSession.CreateIncomingStaged(sessionId, senderId, manifest, SeedRatio.Zero, _clock);
         await _sessionRepo.SaveSessionAsync(session);
+        await _sessionRepo.SaveTransportContextAsync(new TransferSessionTransportContext(
+            sessionId,
+            ChannelId.New(),
+            PublicIdentityId.New(),
+            SwarmRendezvousId.Generate(),
+            EphemeralSwarmPeerId.Generate(),
+            StreamAuthToken.Generate(),
+            DirectWanPolicy.DisabledByDefault,
+            RelayRendezvous: null,
+            DirectCandidates: []));
 
         DomainResult result = await _handler.AcceptTransferAsync(sessionId, RootDirectoryPath.Parse(@"C:\Downloads"));
 
@@ -209,15 +232,62 @@ public sealed class TransferNegotiationTests
     }
 
     [Test]
-    public void UT_NEG_06_DialingPoolFaultToleranceOnPartialBatchFailure()
+    public async Task UT_NEG_06_InitiateTransfer_UnderDefaultWanPolicy_DropsPublicWanCandidatesFromOffer()
     {
-        FakeTransferStreamPool pool = new();
-        pool.Streams.Add(new FakeTransferStream { Index = StreamIndex.FromInt(0) });
-        pool.Streams.Add(new FakeTransferStream { Index = StreamIndex.FromInt(1) });
-        pool.Streams.Add(new FakeTransferStream { Index = StreamIndex.FromInt(2) });
+        ChannelId channelId = ChannelId.New();
+        PublicIdentityId initiatorId = PublicIdentityId.New();
+        PublicIdentityId recipientId = PublicIdentityId.New();
 
-        pool.ActiveStreams.Count.Should().Be(3);
-        pool.IsDisposed.Should().BeFalse();
+        RootDirectoryPath sourceRoot = RootDirectoryPath.Parse(@"C:\SourceCandidates");
+        SanitizedRelativePath relPath = SanitizedRelativePath.Parse("file.bin");
+        ResolvedFilePath fullPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
+        _fileStorage.FilesOnDisk[fullPath.AbsolutePath] = new byte[1024];
+
+        FakeNetworkEndpointDiscoveryPort discoveryPort = new();
+        discoveryPort.LocalCandidates.Clear();
+        discoveryPort.LocalCandidates.Add(new DirectEndpointCandidate(
+            EndpointHost.Parse("192.168.1.50"),
+            PortNumber.FromInt(5000),
+            DirectCandidateKind.DirectLan));
+        discoveryPort.LocalCandidates.Add(new DirectEndpointCandidate(
+            EndpointHost.Parse("203.0.113.10"),
+            PortNumber.FromInt(6000),
+            DirectCandidateKind.DirectWanUpnp));
+        discoveryPort.LocalCandidates.Add(new DirectEndpointCandidate(
+            EndpointHost.Parse("198.51.100.20"),
+            PortNumber.FromInt(7000),
+            DirectCandidateKind.DirectLan)); // Public IP mislabeled as DirectLan
+
+        FileTransferActionHandler handler = new(
+            _sessionRepo,
+            _fileStorage,
+            _payloadSender,
+            _serializer,
+            _trackerPort,
+            _clock,
+            new FileTransferIngressFilter(_policyRepository) { IsEnabled = true },
+            new InMemoryBlobStorageService(),
+            discoveryPort,
+            _runtime,
+            _certStore);
+
+        DomainResult<TransferSessionId> result = await handler.InitiateTransferAsync(
+            channelId,
+            initiatorId,
+            [recipientId],
+            sourceRoot,
+            [relPath],
+            DirectWanPolicy.DisabledByDefault);
+
+        result.IsSuccess.Should().BeTrue();
+        _payloadSender.SentPayloads.Should().ContainSingle();
+
+        var offer = _serializer.Deserialize<FileTransferOfferPayload>(
+            _payloadSender.SentPayloads[0].Payload.Slice(1)).Value;
+
+        // Must ONLY contain the private LAN candidate; public IPs (even misclassified ones) must be stripped!
+        offer.DirectCandidates.Should().ContainSingle();
+        offer.DirectCandidates[0].Host.Value.Should().Be("192.168.1.50");
     }
 
     [Test]
@@ -272,6 +342,8 @@ public sealed class TransferNegotiationTests
             _certStore);
 
         var initiateResult = await handler.InitiateTransferAsync(
+            ChannelId.New(),
+            PublicIdentityId.New(),
             [PublicIdentityId.New()],
             RootDirectoryPath.Parse(@"C:\Source"),
             [SanitizedRelativePath.Parse("test.bin")],
@@ -312,6 +384,8 @@ public sealed class TransferNegotiationTests
             _certStore);
 
         var initiateResult = await handler.InitiateTransferAsync(
+            ChannelId.New(),
+            PublicIdentityId.New(),
             [],
             RootDirectoryPath.Parse(@"C:\Source"),
             [SanitizedRelativePath.Parse("test.bin")],

@@ -56,36 +56,6 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         _certificateStore = certificateStore ?? throw new ArgumentNullException(nameof(certificateStore));
     }
 
-    public ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
-        IReadOnlyList<PublicIdentityId> recipients,
-        RootDirectoryPath sourceRoot,
-        IReadOnlyList<SanitizedRelativePath> filePaths,
-        DirectWanPolicy wanPolicy,
-        RootBundleName? customBundleName = null,
-        SeedRatio? targetSeedRatio = null,
-        CancellationToken ct = default)
-    {
-        if (!_ingressFilter.IsEnabled)
-        {
-            return ValueTask.FromResult(DomainResult<TransferSessionId>.Failure(
-                new DomainError(FileTransferIngressFilter.PolicyDisabledErrorCode, FileTransferIngressFilter.PrivacyNotice)));
-        }
-
-        PublicIdentityId defaultInitiator = CreateDistinctLocalInitiator(recipients);
-        ChannelId defaultChannelId = ChannelId.New();
-
-        return InitiateTransferAsync(
-            defaultChannelId,
-            defaultInitiator,
-            recipients,
-            sourceRoot,
-            filePaths,
-            wanPolicy,
-            customBundleName,
-            targetSeedRatio,
-            ct);
-    }
-
     public async ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
         ChannelId channelId,
         PublicIdentityId localInitiator,
@@ -370,47 +340,51 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         using TransferSessionCertificateMaterial certMaterial = await _certificateStore.GetOrCreateAsync(sessionId, ct);
 
         TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
-        DirectWanPolicy wanPolicy = transportContext?.WanPolicy ?? DirectWanPolicy.DisabledByDefault;
+        if (transportContext == null)
+        {
+            return DomainResult.Failure(new DomainError(
+                "Transfer.TransportContextNotFound",
+                $"Transport context for transfer session '{sessionId}' was not found."));
+        }
+
+        DirectWanPolicy wanPolicy = transportContext.WanPolicy;
 
         IReadOnlyList<DirectEndpointCandidate> rawReceiverCandidates = await _endpointDiscovery.DiscoverLocalCandidatesAsync(wanPolicy, ct);
         IReadOnlyList<DirectEndpointCandidate> receiverCandidates = PexRateLimiter.FilterAndDeduplicate(rawReceiverCandidates, wanPolicy);
 
-        ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
-        PublicIdentityId localSenderId = transportContext?.LocalIdentityId ?? CreateDistinctLocalInitiator([session.InitiatorId]);
+        ChannelId channelId = transportContext.ChannelId;
+        PublicIdentityId localSenderId = transportContext.LocalIdentityId;
 
-        if (transportContext != null)
+        TransferSessionTransportContext updatedContext = transportContext with { LocalRootPath = destinationFolder };
+        await _sessionRepository.SaveTransportContextAsync(updatedContext, ct);
+
+        // Announce to blinded Exchange swarm tracker (zero Persona IDs, zero IP candidates)
+        SwarmPeerRole role = session.IsDownloadComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
+        SwarmAnnounceResult announceResult = await _trackerPort.AnnounceAsync(
+            updatedContext.SwarmRendezvousId,
+            updatedContext.EphemeralPeerId,
+            role,
+            ct: ct);
+
+        await _runtime.StartOrUpdateSessionAsync(
+            session,
+            updatedContext,
+            destinationFolder,
+            announceResult.StunEndpoint,
+            announceResult.SupportsTransferPipe,
+            announceResult.ExchangeEndpoint,
+            ct);
+
+        if (updatedContext.SenderCertSha256 != null)
         {
-            TransferSessionTransportContext updatedContext = transportContext with { LocalRootPath = destinationFolder };
-            await _sessionRepository.SaveTransportContextAsync(updatedContext, ct);
-
-            // Announce to blinded Exchange swarm tracker (zero Persona IDs, zero IP candidates)
-            SwarmPeerRole role = session.IsDownloadComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
-            SwarmAnnounceResult announceResult = await _trackerPort.AnnounceAsync(
-                updatedContext.SwarmRendezvousId,
-                updatedContext.EphemeralPeerId,
-                role,
+            await _runtime.RegisterPinnedPeerCertificateAsync(
+                sessionId,
+                session.InitiatorId,
+                updatedContext.SenderCertSha256,
                 ct: ct);
-
-            await _runtime.StartOrUpdateSessionAsync(
-                session,
-                updatedContext,
-                destinationFolder,
-                announceResult.StunEndpoint,
-                announceResult.SupportsTransferPipe,
-                announceResult.ExchangeEndpoint,
-                ct);
-
-            if (updatedContext.SenderCertSha256 != null)
-            {
-                await _runtime.RegisterPinnedPeerCertificateAsync(
-                    sessionId,
-                    session.InitiatorId,
-                    updatedContext.SenderCertSha256,
-                    ct: ct);
-            }
         }
 
-        TransportRoutingPreference routingPref = (transportContext?.DirectCandidates.Count > 0 || receiverCandidates.Count > 0)
+        TransportRoutingPreference routingPref = (transportContext.DirectCandidates.Count > 0 || receiverCandidates.Count > 0)
             ? TransportRoutingPreference.DirectPreferred
             : TransportRoutingPreference.RelayOnly;
 
@@ -706,25 +680,6 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             TransferTopology.MultiPeer multiPeer when multiPeer.Recipients.Count > 0 => multiPeer.Recipients[0],
             _ => session.InitiatorId
         };
-    }
-
-    private static PublicIdentityId CreateDistinctLocalInitiator(IReadOnlyList<PublicIdentityId>? recipients)
-    {
-        byte[] bytes = new byte[16];
-        bytes[0] = 0xFE;
-        bytes[15] = 0x01;
-        PublicIdentityId candidate = PublicIdentityId.FromBytes(bytes);
-
-        if (recipients != null)
-        {
-            while (recipients.Contains(candidate))
-            {
-                bytes[1]++;
-                candidate = PublicIdentityId.FromBytes(bytes);
-            }
-        }
-
-        return candidate;
     }
 
     private static byte[] PrependOpcode(FileTransferControlOpcode opcode, ReadOnlySpan<byte> payload)

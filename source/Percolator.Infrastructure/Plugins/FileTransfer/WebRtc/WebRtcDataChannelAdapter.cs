@@ -2,12 +2,10 @@ namespace Percolator.Infrastructure.Plugins.FileTransfer.WebRtc;
 
 using System;
 using System.IO;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using DataChannelDotnet;
-using DataChannelDotnet.Bindings;
 using DataChannelDotnet.Events;
 using DataChannelDotnet.Impl;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
@@ -16,21 +14,16 @@ using Percolator.Apps.FileTransfer.Ports;
 
 /// <summary>
 /// Quarantined adapter wrapping a DataChannelDotnet IRtcDataChannel behind ITransferDataChannel.
-/// Mitigates native callback reentrancy (async off-thread teardown), delegate GC (strong
-/// handler references held until disposal), and unbounded SCTP send queues (high/low watermark
-/// backpressure + ArrayPool pooled framing).
+/// Mitigates native callback reentrancy (async off-thread teardown) and delegate GC (strong
+/// handler references held until disposal). Backpressure is enforced at the application protocol layer
+/// via request-driven chunk windowing (ChunkPipelineScheduler), eliminating unmanaged SCTP buffer polling
+/// and reflection into native channel handles.
 /// </summary>
 internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
 {
     private const int InboundChannelCapacity = 128;
 
-    private static readonly FieldInfo? NativeChannelIdField =
-        typeof(RtcDataChannel).GetField("_channelId", BindingFlags.Instance | BindingFlags.NonPublic);
-
     private readonly IRtcDataChannel _channel;
-    private readonly int _nativeChannelId;
-    private readonly int _highWatermarkBytes;
-    private readonly int _lowWatermarkBytes;
     private readonly Channel<byte[]> _inboundFrames;
     private readonly TaskCompletionSource<bool> _openTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -70,53 +63,25 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         }
     }
 
-    public long BufferedAmount
-    {
-        get
-        {
-            if (Volatile.Read(ref _disposed) != 0 || _nativeChannelId <= 0)
-            {
-                return 0;
-            }
-
-            try
-            {
-                int buffered = Rtc.rtcGetBufferedAmount(_nativeChannelId);
-                return buffered > 0 ? buffered : 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-    }
+    /// <summary>
+    /// Transport-level buffered amount. With application-level request windowing (ChunkPipelineScheduler),
+    /// outbound frames are throttled by peer requests rather than transport queue polling.
+    /// </summary>
+    public long BufferedAmount => 0;
 
     public Task OpenedTask => _openTcs.Task;
 
-    public WebRtcDataChannelAdapter(
-        IRtcDataChannel channel,
-        StreamIndex index,
-        int highWatermarkBytes,
-        int lowWatermarkBytes)
-        : this(channel, index, highWatermarkBytes, lowWatermarkBytes, onDisposed: null)
+    public WebRtcDataChannelAdapter(IRtcDataChannel channel, StreamIndex index)
+        : this(channel, index, onDisposed: null)
     {
     }
 
-    public WebRtcDataChannelAdapter(
-        IRtcDataChannel channel,
-        StreamIndex index,
-        int highWatermarkBytes,
-        int lowWatermarkBytes,
-        Action? onDisposed)
+    public WebRtcDataChannelAdapter(IRtcDataChannel channel, StreamIndex index, Action? onDisposed)
     {
         _channel = channel ?? throw new ArgumentNullException(nameof(channel));
         Index = index;
         Label = channel.Label ?? "percolator-ft-0";
-        _highWatermarkBytes = Math.Max(64 * 1024, highWatermarkBytes);
-        _lowWatermarkBytes = Math.Clamp(lowWatermarkBytes, 16 * 1024, _highWatermarkBytes);
         _onDisposed = onDisposed;
-
-        _nativeChannelId = ExtractNativeChannelId(channel);
 
         _inboundFrames = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(InboundChannelCapacity)
         {
@@ -146,6 +111,25 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         }
     }
 
+    public WebRtcDataChannelAdapter(
+        IRtcDataChannel channel,
+        StreamIndex index,
+        int highWatermarkBytes,
+        int lowWatermarkBytes)
+        : this(channel, index, onDisposed: null)
+    {
+    }
+
+    public WebRtcDataChannelAdapter(
+        IRtcDataChannel channel,
+        StreamIndex index,
+        int highWatermarkBytes,
+        int lowWatermarkBytes,
+        Action? onDisposed)
+        : this(channel, index, onDisposed)
+    {
+    }
+
     internal void MarkAuthenticated(CertSha256Fingerprint verifiedRemoteCertSha256)
     {
         _verifiedRemoteCertSha256 = verifiedRemoteCertSha256 ?? throw new ArgumentNullException(nameof(verifiedRemoteCertSha256));
@@ -161,8 +145,6 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            ThrowIfDisposed();
-            await WaitForSendBufferDrainAsync(ct).ConfigureAwait(false);
             ThrowIfDisposed();
 
             if (!IsOpen)
@@ -240,25 +222,6 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         _onDisposed?.Invoke();
     }
 
-    private async ValueTask WaitForSendBufferDrainAsync(CancellationToken ct)
-    {
-        if (BufferedAmount <= _highWatermarkBytes)
-        {
-            return;
-        }
-
-        while (BufferedAmount > _lowWatermarkBytes)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (Volatile.Read(ref _disposed) != 0 || !IsOpen)
-            {
-                throw new IOException("WebRTC DataChannel closed while waiting for SCTP send buffer to drain.");
-            }
-
-            await Task.Delay(5, ct).ConfigureAwait(false);
-        }
-    }
-
     private void OnChannelOpen(IRtcDataChannel _)
     {
         _openTcs.TrySetResult(true);
@@ -311,24 +274,5 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         {
             throw new ObjectDisposedException(nameof(WebRtcDataChannelAdapter));
         }
-    }
-
-    private static int ExtractNativeChannelId(IRtcDataChannel channel)
-    {
-        if (NativeChannelIdField != null && channel is RtcDataChannel concrete)
-        {
-            try
-            {
-                if (NativeChannelIdField.GetValue(concrete) is int id && id > 0)
-                {
-                    return id;
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        return 0;
     }
 }

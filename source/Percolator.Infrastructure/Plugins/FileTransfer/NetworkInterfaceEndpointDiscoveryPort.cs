@@ -68,10 +68,21 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
                 {
                     if (uni.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(uni.Address))
                     {
-                        candidates.Add(new DirectEndpointCandidate(
-                            EndpointHost.Parse(uni.Address.ToString()),
-                            boundPort,
-                            DirectCandidateKind.DirectLan));
+                        bool isPrivate = IsPrivateOrLinkLocal(uni.Address);
+                        if (isPrivate)
+                        {
+                            candidates.Add(new DirectEndpointCandidate(
+                                EndpointHost.Parse(uni.Address.ToString()),
+                                boundPort,
+                                DirectCandidateKind.DirectLan));
+                        }
+                        else if (wanPolicy == DirectWanPolicy.ExplicitlyAllowed)
+                        {
+                            candidates.Add(new DirectEndpointCandidate(
+                                EndpointHost.Parse(uni.Address.ToString()),
+                                boundPort,
+                                DirectCandidateKind.DirectWanStun));
+                        }
                     }
                 }
             }
@@ -109,5 +120,40 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
     {
         ct.ThrowIfCancellationRequested();
         return ValueTask.FromResult<RelayRendezvousDescriptor?>(null);
+    }
+
+    internal static bool IsPrivateOrLinkLocal(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address))
+        {
+            return true;
+        }
+
+        byte[] bytes = address.GetAddressBytes();
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            // 10.0.0.0/8 (RFC 1918)
+            if (bytes[0] == 10) return true;
+            // 172.16.0.0/12 (RFC 1918: 172.16.0.0 - 172.31.255.255)
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+            // 192.168.0.0/16 (RFC 1918)
+            if (bytes[0] == 192 && bytes[1] == 168) return true;
+            // 169.254.0.0/16 (RFC 3927 Link Local)
+            if (bytes[0] == 169 && bytes[1] == 254) return true;
+            // 100.64.0.0/10 (RFC 6598 Carrier-Grade NAT)
+            if (bytes[0] == 100 && (bytes[1] & 0xC0) == 64) return true;
+            return false;
+        }
+
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            // fe80::/10 (Link Local)
+            if (address.IsIPv6LinkLocal) return true;
+            // fc00::/7 (Unique Local Address, RFC 4193)
+            if ((bytes[0] & 0xFE) == 0xFC) return true;
+            return false;
+        }
+
+        return false;
     }
 }

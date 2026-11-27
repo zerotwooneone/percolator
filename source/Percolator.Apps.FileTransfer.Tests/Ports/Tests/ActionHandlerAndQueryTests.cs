@@ -89,9 +89,12 @@ public sealed class ActionHandlerAndQueryTests
             tooManyFiles.Add(SanitizedRelativePath.Parse($"f{i}.bin"));
         }
 
+        PublicIdentityId initiator = PublicIdentityId.New();
         PublicIdentityId recipient = PublicIdentityId.New();
 
         DomainResult<TransferSessionId> result = await _handler.InitiateTransferAsync(
+            ChannelId.New(),
+            initiator,
             [recipient],
             RootDirectoryPath.Parse(@"C:\Files"),
             tooManyFiles,

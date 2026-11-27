@@ -90,4 +90,27 @@ public sealed class NetworkInterfaceEndpointDiscoveryPortTests
         // Assert
         descriptor.Should().BeNull();
     }
+
+    [TestCase("127.0.0.1", true)]
+    [TestCase("10.0.1.25", true)]
+    [TestCase("172.16.0.1", true)]
+    [TestCase("172.31.255.254", true)]
+    [TestCase("192.168.1.100", true)]
+    [TestCase("169.254.1.1", true)]
+    [TestCase("100.64.0.1", true)]
+    [TestCase("100.127.255.255", true)]
+    [TestCase("8.8.8.8", false)]
+    [TestCase("142.250.190.46", false)]
+    [TestCase("172.32.0.1", false)]
+    [TestCase("100.128.0.1", false)]
+    [TestCase("::1", true)]
+    [TestCase("fe80::1", true)]
+    [TestCase("fc00::1", true)]
+    [TestCase("fd12:3456:789a::1", true)]
+    [TestCase("2001:4860:4860::8888", false)]
+    public void IsPrivateOrLinkLocal_ClassifiesCorrectly(string ipString, bool expectedPrivate)
+    {
+        var ip = System.Net.IPAddress.Parse(ipString);
+        NetworkInterfaceEndpointDiscoveryPort.IsPrivateOrLinkLocal(ip).Should().Be(expectedPrivate);
+    }
 }

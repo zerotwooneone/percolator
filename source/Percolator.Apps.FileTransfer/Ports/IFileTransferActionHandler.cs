@@ -22,15 +22,6 @@ public interface IFileTransferActionHandler
         SeedRatio? targetSeedRatio = null,
         CancellationToken ct = default);
 
-    ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
-        IReadOnlyList<PublicIdentityId> recipients,
-        RootDirectoryPath sourceRoot,
-        IReadOnlyList<SanitizedRelativePath> filePaths,
-        DirectWanPolicy wanPolicy,
-        RootBundleName? customBundleName = null,
-        SeedRatio? targetSeedRatio = null,
-        CancellationToken ct = default);
-
     ValueTask<DomainResult> AcceptTransferAsync(
         TransferSessionId sessionId,
         RootDirectoryPath destinationFolder,

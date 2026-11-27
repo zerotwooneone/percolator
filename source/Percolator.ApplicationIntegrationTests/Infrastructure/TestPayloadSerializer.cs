@@ -46,7 +46,9 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         if (typeof(T) == typeof(TransferManifest) ||
             typeof(T) == typeof(FileTransferOfferPayload) ||
             typeof(T) == typeof(FileTransferAcceptPayload) ||
-            typeof(T) == typeof(FileTransferCancelPayload))
+            typeof(T) == typeof(FileTransferCancelPayload) ||
+            typeof(T) == typeof(FileTransferPeerJoinPayload) ||
+            typeof(T) == typeof(FileTransferIceSignalPayload))
         {
             return _protobufSerializer.Serialize(payload);
         }
@@ -58,7 +60,9 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         if (typeof(T) == typeof(TransferManifest) ||
             typeof(T) == typeof(FileTransferOfferPayload) ||
             typeof(T) == typeof(FileTransferAcceptPayload) ||
-            typeof(T) == typeof(FileTransferCancelPayload))
+            typeof(T) == typeof(FileTransferCancelPayload) ||
+            typeof(T) == typeof(FileTransferPeerJoinPayload) ||
+            typeof(T) == typeof(FileTransferIceSignalPayload))
         {
             return _protobufSerializer.Deserialize<T>(data);
         }
