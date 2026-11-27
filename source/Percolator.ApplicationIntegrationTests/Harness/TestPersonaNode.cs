@@ -25,6 +25,7 @@ using Percolator.Application.Session.Events;
 using Percolator.Application.Session.Ports;
 using Percolator.Apps.Chat;
 using Percolator.Apps.Chat.DependencyInjection;
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Ingress;
@@ -834,6 +835,212 @@ public sealed class TestPersonaNode : IAsyncDisposable
         }
 
         return await tcs.Task.ConfigureAwait(false);
+    }
+
+    public async Task<string> RequestIntroductionConsentAsync(
+        ChannelId channelId,
+        PublicIdentityId candidatePeerId,
+        string candidateDisplayName,
+        ChannelId? forwardChannelId = null,
+        string? note = null)
+    {
+        using var scope = Services.CreateScope();
+        var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+        var cmd = new RequestIntroductionConsentCommand(
+            channelId,
+            IdentityId,
+            candidatePeerId,
+            candidateDisplayName,
+            forwardChannelId,
+            note);
+        var result = await chatService.RequestIntroductionConsentAsync(cmd).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            throw new InvalidOperationException($"RequestIntroductionConsent failed: {result.Error.Code} {result.Error.Description}");
+        }
+        return result.Value;
+    }
+
+    public async Task<IntroductionConsentRequestedApplicationEvent> WaitForInboundIntroductionConsentRequestAsync(
+        TimeSpan timeout,
+        PublicIdentityId? requesterId = null)
+    {
+        var tcs = new TaskCompletionSource<IntroductionConsentRequestedApplicationEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource(timeout);
+        cts.Token.Register(() => tcs.TrySetException(new TimeoutException($"Timed out waiting for inbound introduction consent request from {requesterId?.Value}.")));
+
+        var subscriber = Services.GetRequiredService<IEventSubscriber>();
+        using var sub = subscriber.Subscribe<IntroductionConsentRequestedApplicationEvent>((evt, _) =>
+        {
+            if (requesterId == null || evt.RequesterPeerId == requesterId)
+            {
+                tcs.TrySetResult(evt);
+            }
+            return ValueTask.CompletedTask;
+        });
+
+        using (var scope = Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<IPeerIntroductionConsentRepository>();
+            var pending = await repo.GetPendingInboundRequestsAsync(IdentityId).ConfigureAwait(false);
+            var match = pending.FirstOrDefault(p => requesterId == null || p.RemotePeerId == requesterId);
+            if (match != null)
+            {
+                return new IntroductionConsentRequestedApplicationEvent(
+                    match.RequestId,
+                    match.ChannelId,
+                    match.RemotePeerId,
+                    match.CandidatePeerId,
+                    match.CandidateDisplayName,
+                    match.Note,
+                    match.CreatedAtUtc);
+            }
+        }
+
+        return await tcs.Task.ConfigureAwait(false);
+    }
+
+    public async Task RespondToIntroductionConsentAsync(
+        string requestId,
+        bool allow,
+        string? declineReason = null)
+    {
+        using var scope = Services.CreateScope();
+        var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+        var cmd = new RespondToIntroductionConsentCommand(requestId, allow, declineReason);
+        var result = await chatService.RespondToIntroductionConsentAsync(cmd).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            throw new InvalidOperationException($"RespondToIntroductionConsent failed: {result.Error.Code} {result.Error.Description}");
+        }
+    }
+
+    public async Task<IntroductionConsentResolvedApplicationEvent> WaitForIntroductionConsentResponseAsync(
+        TimeSpan timeout,
+        string? requestId = null)
+    {
+        var tcs = new TaskCompletionSource<IntroductionConsentResolvedApplicationEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource(timeout);
+        cts.Token.Register(() => tcs.TrySetException(new TimeoutException($"Timed out waiting for introduction consent response for request {requestId}.")));
+
+        var subscriber = Services.GetRequiredService<IEventSubscriber>();
+        using var sub = subscriber.Subscribe<IntroductionConsentResolvedApplicationEvent>((evt, _) =>
+        {
+            if (requestId == null || evt.RequestId == requestId)
+            {
+                tcs.TrySetResult(evt);
+            }
+            return ValueTask.CompletedTask;
+        });
+
+        if (requestId != null)
+        {
+            using var scope = Services.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IPeerIntroductionConsentRepository>();
+            var existing = await repo.GetByIdAsync(requestId).ConfigureAwait(false);
+            if (existing != null && existing.Status != IntroductionStatus.Pending)
+            {
+                return new IntroductionConsentResolvedApplicationEvent(
+                    existing.RequestId,
+                    existing.ChannelId,
+                    existing.RemotePeerId,
+                    existing.Status == IntroductionStatus.Allowed || existing.Status == IntroductionStatus.Forwarded,
+                    existing.Note,
+                    existing.Invitation,
+                    existing.RespondedAtUtc ?? existing.CreatedAtUtc);
+            }
+        }
+
+        return await tcs.Task.ConfigureAwait(false);
+    }
+
+    public async Task<PeerIntroductionCardReceivedApplicationEvent> WaitForPeerIntroductionCardAsync(
+        TimeSpan timeout,
+        PublicIdentityId? introducerPeerId = null)
+    {
+        var tcs = new TaskCompletionSource<PeerIntroductionCardReceivedApplicationEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource(timeout);
+        cts.Token.Register(() => tcs.TrySetException(new TimeoutException($"Timed out waiting for peer introduction card from {introducerPeerId?.Value}.")));
+
+        var subscriber = Services.GetRequiredService<IEventSubscriber>();
+        using var sub = subscriber.Subscribe<PeerIntroductionCardReceivedApplicationEvent>((evt, _) =>
+        {
+            if (introducerPeerId == null || evt.IntroducerPeerId == introducerPeerId)
+            {
+                tcs.TrySetResult(evt);
+            }
+            return ValueTask.CompletedTask;
+        });
+
+        using (var scope = Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<IPeerIntroductionConsentRepository>();
+            var all = await repo.GetAllAsync(IdentityId).ConfigureAwait(false);
+            var match = all.FirstOrDefault(c => c.Direction == IntroductionDirection.InboundCard &&
+                                                (introducerPeerId == null || c.RemotePeerId == introducerPeerId) &&
+                                                c.Invitation != null);
+            if (match != null)
+            {
+                return new PeerIntroductionCardReceivedApplicationEvent(
+                    match.RequestId,
+                    match.ChannelId,
+                    match.RemotePeerId,
+                    match.CandidatePeerId,
+                    match.CandidateDisplayName,
+                    match.Invitation!,
+                    match.Note,
+                    match.CreatedAtUtc);
+            }
+        }
+
+        return await tcs.Task.ConfigureAwait(false);
+    }
+
+    public async Task ForwardIntroductionCardAsync(
+        string requestId,
+        ChannelId forwardChannelId,
+        string? note = null)
+    {
+        using var scope = Services.CreateScope();
+        var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+        var cmd = new ForwardIntroductionCardCommand(requestId, forwardChannelId, note);
+        var result = await chatService.ForwardIntroductionCardAsync(cmd).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            throw new InvalidOperationException($"ForwardIntroductionCard failed: {result.Error.Code} {result.Error.Description}");
+        }
+    }
+
+    public async Task AcceptPeerIntroductionCardAsync(string requestId)
+    {
+        using var scope = Services.CreateScope();
+        var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+        var cmd = new AcceptPeerIntroductionCardCommand(requestId, IdentityId);
+        var result = await chatService.AcceptPeerIntroductionCardAsync(cmd).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            throw new InvalidOperationException($"AcceptPeerIntroductionCard failed: {result.Error.Code} {result.Error.Description}");
+        }
+    }
+
+    public async Task<IReadOnlyList<PeerIntroductionConsent>> GetIntroductionConsentsAsync()
+    {
+        using var scope = Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IPeerIntroductionConsentRepository>();
+        return await repo.GetAllAsync(IdentityId).ConfigureAwait(false);
+    }
+
+    public async Task SetContactNicknameAsync(PublicIdentityId peerId, string nickname)
+    {
+        using var scope = Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IPeerContactRepository>();
+        var contact = await repo.GetByPeerIdAsync(IdentityId, peerId).ConfigureAwait(false);
+        if (contact != null)
+        {
+            var nick = ContactNickname.Create(nickname, peerId);
+            contact.SetNickname(nick);
+            await repo.SaveAsync(contact).ConfigureAwait(false);
+        }
     }
 
     public async Task StopDrainAsync()

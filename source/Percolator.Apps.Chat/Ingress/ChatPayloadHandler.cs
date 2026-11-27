@@ -1013,10 +1013,24 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
                     ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
+                    var introducedContact = await _contactRepo.GetByPeerIdAsync(consent.LocalIdentityId, consent.RemotePeerId, ct).ConfigureAwait(false);
+                    var profile = await _peerProfileRepo.GetByPeerIdAsync(consent.RemotePeerId, ct).ConfigureAwait(false);
+
+                    string displayName = consent.CandidateDisplayName;
+                    if (!string.IsNullOrWhiteSpace(introducedContact?.Nickname.Value) &&
+                        introducedContact.Nickname.Value != consent.RemotePeerId.ToString())
+                    {
+                        displayName = introducedContact.Nickname.Value;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(profile?.DisplayName))
+                    {
+                        displayName = profile.DisplayName;
+                    }
+
                     var cardDto = new PeerIntroductionCardDto(
                         dto.RequestId,
                         consent.RemotePeerId,
-                        consent.CandidateDisplayName,
+                        displayName,
                         dto.Invitation,
                         consent.Note,
                         nowMs);

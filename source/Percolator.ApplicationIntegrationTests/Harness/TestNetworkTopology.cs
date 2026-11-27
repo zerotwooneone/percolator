@@ -50,6 +50,8 @@ public sealed class TestNetworkTopology : IAsyncDisposable
 
         // 4. Inviter approves contact
         await inviter.ApproveContactAsync(invitee.IdentityId).ConfigureAwait(false);
+        await inviter.SetContactNicknameAsync(invitee.IdentityId, invitee.DisplayName).ConfigureAwait(false);
+        await invitee.SetContactNicknameAsync(inviter.IdentityId, inviter.DisplayName).ConfigureAwait(false);
 
         // 5. Inviter sends profile capability / initial reply to deliver Bob's DeliveryToken to Alice
         var inviterChannelId = ChannelId.DeterministicForDirect(inviter.IdentityId, invitee.IdentityId, sharedRelay.Endpoint);

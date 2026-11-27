@@ -1994,7 +1994,8 @@ Peer introductions live inside **`Percolator.Apps.Chat`** as a standard E2E Doub
   - Enforce same-Exchange scoping (`ChannelId.DeterministicForDirect`) or explicit Exchange endpoint matching on forwarded invitations, plus blocked/duplicate contact checks (`SYS-KEY-CHANGE-TRUST-HALT`).
   - Persist pending outbound/inbound introduction consent state in SQLite so consent requests survive app restart.
 
-#### Ticket `INTRO-003` — Multi-Node Chat Introduction Integration Tests
+#### Ticket `INTRO-003` — Multi-Node Chat Introduction Integration Tests `[COMPLETED]`
+- **Status:** Complete (Multi-node integration test scenarios in `ChatIntroductionIntegrationTests.cs` exercising real loopback Exchange, X3DH handshakes, and E2E Double Ratchet messaging: (a) Ask-Before-Introducing allowed flow with auto-forward and manual forward, (b) Declined consent with zero cards transmitted and zero connection attempts, and (c) SQLite persistence verification across all nodes).
 - **Layer / Scope:** `Percolator.Apps.Chat.Tests`, `Percolator.ApplicationIntegrationTests`
 - **Dependencies:** `INTRO-002`
 - **Test Plan:** Real loopback Exchange tests covering (a) Alice asks Bob to introduce Charlie → Bob Allows → Alice forwards → Charlie connects → bidirectional Double Ratchet chat succeeds with zero Exchange discovery endpoints; and (b) Bob Declines → zero contact card transmitted and zero connection attempt occurs.

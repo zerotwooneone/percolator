@@ -707,10 +707,16 @@ public sealed class ChatService : IChatService
 
         ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
 
+        var introducedContact = await _contactRepo.GetByPeerIdAsync(consent.LocalIdentityId, consent.RemotePeerId, ct).ConfigureAwait(false);
+        var displayName = !string.IsNullOrWhiteSpace(introducedContact?.Nickname.Value) &&
+                          introducedContact.Nickname.Value != consent.RemotePeerId.ToString()
+            ? introducedContact.Nickname.Value
+            : consent.CandidateDisplayName;
+
         var cardDto = new PeerIntroductionCardDto(
             command.RequestId,
             consent.RemotePeerId,
-            consent.CandidateDisplayName,
+            displayName,
             PeerInvitationWireDto.FromDomain(consent.Invitation),
             command.Note ?? consent.Note,
             nowMs);
