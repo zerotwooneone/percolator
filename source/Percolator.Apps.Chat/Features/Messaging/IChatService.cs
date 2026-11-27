@@ -1,3 +1,4 @@
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Features.Reactions;
 using Percolator.Domain.Channels.ValueObjects;
@@ -14,4 +15,9 @@ public interface IChatService
     ValueTask<DomainResult> RemoveReactionAsync(RemoveReactionCommand command, CancellationToken ct = default);
     ValueTask<DomainResult> MarkAsReadAsync(MarkAsReadCommand command, CancellationToken ct = default);
     ValueTask<DomainResult> ShareProfileCapabilityAsync(ShareProfileCapabilityCommand command, CancellationToken ct = default);
+    ValueTask<DomainResult<string>> RequestIntroductionConsentAsync(RequestIntroductionConsentCommand command, CancellationToken ct = default);
+    ValueTask<DomainResult> RespondToIntroductionConsentAsync(RespondToIntroductionConsentCommand command, CancellationToken ct = default);
+    ValueTask<DomainResult> ForwardIntroductionCardAsync(ForwardIntroductionCardCommand command, CancellationToken ct = default);
+    ValueTask<DomainResult> AcceptPeerIntroductionCardAsync(AcceptPeerIntroductionCardCommand command, CancellationToken ct = default);
 }
+

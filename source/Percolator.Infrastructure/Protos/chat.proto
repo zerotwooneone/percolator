@@ -132,3 +132,36 @@ message ProfileCapabilityProto {
   optional string source_endpoint = 9;
   int32 source_type = 10;
 }
+
+message PeerInvitationProto {
+  bytes inviter_identity_id = 1;
+  bytes inviter_identity_key = 2;
+  string relay_endpoint = 3;
+  bytes routing_token = 4;
+}
+
+message PeerIntroductionConsentRequestProto {
+  string request_id = 1;
+  bytes candidate_peer_id = 2;
+  string candidate_display_name = 3;
+  string note = 4;
+  uint64 timestamp_unix_ms = 5;
+}
+
+message PeerIntroductionConsentResponseProto {
+  string request_id = 1;
+  bool allowed = 2;
+  PeerInvitationProto invitation = 3;
+  string decline_reason = 4;
+  uint64 responded_at_unix_ms = 5;
+}
+
+message PeerIntroductionCardProto {
+  string request_id = 1;
+  bytes introduced_peer_id = 2;
+  string introduced_display_name = 3;
+  PeerInvitationProto invitation = 4;
+  string note = 5;
+  uint64 timestamp_unix_ms = 6;
+}
+

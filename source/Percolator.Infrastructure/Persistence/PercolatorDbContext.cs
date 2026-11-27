@@ -52,7 +52,9 @@ public class PercolatorDbContext : DbContext
     public DbSet<ChatAttachmentEntity> ChatAttachments => Set<ChatAttachmentEntity>();
     public DbSet<ChatGroupInvitationEntity> ChatGroupInvitations => Set<ChatGroupInvitationEntity>();
     public DbSet<ChatUnknownGroupMessageEntity> ChatUnknownGroupMessages => Set<ChatUnknownGroupMessageEntity>();
+    public DbSet<PeerIntroductionConsentEntity> PeerIntroductionConsents => Set<PeerIntroductionConsentEntity>();
     public DbSet<RelayRegistrationEntity> RelayRegistrations => Set<RelayRegistrationEntity>();
+
     public DbSet<RelayMailboxBindingEntity> RelayMailboxBindings => Set<RelayMailboxBindingEntity>();
     public DbSet<RelayMailboxCapabilityEntity> RelayMailboxCapabilities => Set<RelayMailboxCapabilityEntity>();
     public DbSet<RelayMailboxAuthorizedTokenEntity> RelayMailboxAuthorizedTokens => Set<RelayMailboxAuthorizedTokenEntity>();
@@ -440,7 +442,23 @@ public class PercolatorDbContext : DbContext
             entity.HasIndex(e => e.ReceivedAtUnixMs)
                 .HasDatabaseName("ix_unknown_group_received");
         });
+        // 31.1 Peer Introduction Consents
+        modelBuilder.Entity<PeerIntroductionConsentEntity>(entity =>
+        {
+            entity.ToTable("peer_introduction_consents");
+            entity.HasKey(e => e.RequestId);
+            entity.Property(e => e.LocalIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.RemotePeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.CandidatePeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.CandidateDisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.InvitationData).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.CreatedAtUnixMs).HasConversion<long>();
+            entity.Property(e => e.RespondedAtUnixMs).HasConversion<long>();
+            entity.HasIndex(e => new { e.LocalIdentityId, e.Status }).HasDatabaseName("ix_intro_consent_owner_status");
+            entity.HasIndex(e => e.ChannelId).HasDatabaseName("ix_intro_consent_channel");
+        });
         // 32. File Transfer Sessions (Chunk 4.4)
+
         modelBuilder.Entity<TransferSessionEntity>(entity =>
         {
             entity.ToTable("ft_transfer_sessions");

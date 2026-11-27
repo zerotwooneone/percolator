@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
@@ -8,6 +10,8 @@ using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Domain.Security.Ports;
 using Percolator.Domain.Security.ValueObjects;
@@ -37,6 +41,8 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
     private readonly ICryptoEngine _cryptoEngine;
     private readonly IPeerMailboxRoutingRepository _peerMailboxRoutingRepo;
     private readonly IEventPublisher _eventPublisher;
+    private readonly IPeerIntroductionConsentRepository _introConsentRepo;
+    private readonly IPeerContactRepository _contactRepo;
 
     public ChatPayloadHandler(
         IChatMessageRepository chatRepo,
@@ -52,7 +58,9 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         IProfileManager profileManager,
         ICryptoEngine cryptoEngine,
         IPeerMailboxRoutingRepository peerMailboxRoutingRepo,
-        IEventPublisher eventPublisher)
+        IEventPublisher eventPublisher,
+        IPeerIntroductionConsentRepository introConsentRepo,
+        IPeerContactRepository contactRepo)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -68,7 +76,10 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
         _cryptoEngine = cryptoEngine ?? throw new ArgumentNullException(nameof(cryptoEngine));
         _peerMailboxRoutingRepo = peerMailboxRoutingRepo ?? throw new ArgumentNullException(nameof(peerMailboxRoutingRepo));
         _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
+        _introConsentRepo = introConsentRepo ?? throw new ArgumentNullException(nameof(introConsentRepo));
+        _contactRepo = contactRepo ?? throw new ArgumentNullException(nameof(contactRepo));
     }
+
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
     {
@@ -97,7 +108,11 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
             ChatPayloadType.SystemNotice => await HandleSystemNoticeAsync(envelope.Data, context, ct).ConfigureAwait(false),
             ChatPayloadType.ProfileCapability => await HandleProfileCapabilityAsync(envelope.Data, context, ct).ConfigureAwait(false),
             ChatPayloadType.DeliveryReceipt => await HandleDeliveryReceiptAsync(envelope.Data, context, ct).ConfigureAwait(false),
+            ChatPayloadType.IntroductionConsentRequest => await HandleIntroductionConsentRequestAsync(envelope.Data, context, ct).ConfigureAwait(false),
+            ChatPayloadType.IntroductionConsentResponse => await HandleIntroductionConsentResponseAsync(envelope.Data, context, ct).ConfigureAwait(false),
+            ChatPayloadType.PeerIntroductionCard => await HandlePeerIntroductionCardAsync(envelope.Data, context, ct).ConfigureAwait(false),
             _ => DomainResult.Success() // Forward compatibility: ignore unknown types
+
         };
     }
 
@@ -867,4 +882,272 @@ public sealed class ChatPayloadHandler : IAppPayloadHandler
 
         return DomainResult.Success();
     }
+
+    private async ValueTask<DomainResult> HandleIntroductionConsentRequestAsync(
+        ReadOnlyMemory<byte> data,
+        InboundPayloadContext context,
+        CancellationToken ct)
+    {
+        var result = _serializer.Deserialize<IntroductionConsentRequestDto>(data);
+        if (result.IsFailure)
+        {
+            return DomainResult.Failure(result.Error);
+        }
+
+        var dto = result.Value;
+        var channel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
+        if (channel is null)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_NOT_FOUND", "Introduction consent request received on unknown or non-direct channel."));
+        }
+
+        // Verify sender is the other channel participant
+        if (context.SenderIdentityId != channel.OwnerIdentityId && context.SenderIdentityId != channel.RemotePeerId)
+        {
+            return DomainResult.Failure(new DomainError("UNAUTHORIZED_SENDER", "Introduction sender is not a channel participant."));
+        }
+
+
+        // Block checks
+        var senderContact = await _contactRepo.GetByPeerIdAsync(context.RecipientIdentityId, context.SenderIdentityId, ct).ConfigureAwait(false);
+        if (senderContact?.TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Sender is blocked."));
+        }
+
+        var candidateContact = await _contactRepo.GetByPeerIdAsync(context.RecipientIdentityId, dto.CandidatePeerId, ct).ConfigureAwait(false);
+        if (candidateContact?.TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CANDIDATE_BLOCKED", "Candidate peer is blocked."));
+        }
+
+        var consent = new PeerIntroductionConsent(
+            dto.RequestId,
+            context.ChannelId,
+            context.RecipientIdentityId,
+            context.SenderIdentityId,
+            dto.CandidatePeerId,
+            dto.CandidateDisplayName,
+            dto.Note,
+            IntroductionDirection.InboundRequest,
+            IntroductionStatus.Pending,
+            context.ReceivedAtUtc);
+
+        await _introConsentRepo.AddAsync(consent, ct).ConfigureAwait(false);
+
+        await _eventPublisher.PublishAsync(new IntroductionConsentRequestedApplicationEvent(
+            dto.RequestId,
+            context.ChannelId,
+            context.SenderIdentityId,
+            dto.CandidatePeerId,
+            dto.CandidateDisplayName,
+            dto.Note,
+            context.ReceivedAtUtc), ct).ConfigureAwait(false);
+
+        return DomainResult.Success();
+    }
+
+    private async ValueTask<DomainResult> HandleIntroductionConsentResponseAsync(
+        ReadOnlyMemory<byte> data,
+        InboundPayloadContext context,
+        CancellationToken ct)
+    {
+        var result = _serializer.Deserialize<IntroductionConsentResponseDto>(data);
+        if (result.IsFailure)
+        {
+            return DomainResult.Failure(result.Error);
+        }
+
+        var dto = result.Value;
+        var consent = await _introConsentRepo.GetByIdAsync(dto.RequestId, ct).ConfigureAwait(false);
+        if (consent is null)
+        {
+            return DomainResult.Failure(new DomainError("CONSENT_NOT_FOUND", $"Matching introduction consent '{dto.RequestId}' not found."));
+        }
+
+        if (consent.Direction != IntroductionDirection.OutboundRequest)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_DIRECTION", "Received introduction consent response for non-outbound request."));
+        }
+
+        if (context.SenderIdentityId != consent.RemotePeerId || context.ChannelId != consent.ChannelId)
+        {
+            return DomainResult.Failure(new DomainError("SENDER_MISMATCH", "Introduction consent responder does not match target contact or channel."));
+        }
+
+        if (dto.Allowed && dto.Invitation != null)
+        {
+            var invitationResult = dto.Invitation.ToDomain();
+            if (invitationResult.IsFailure)
+            {
+                return DomainResult.Failure(invitationResult.Error);
+            }
+
+            var invitation = invitationResult.Value;
+            var allowResult = consent.Allow(invitation, context.ReceivedAtUtc);
+            if (allowResult.IsFailure)
+            {
+                return allowResult;
+            }
+
+            await _introConsentRepo.UpdateAsync(consent, ct).ConfigureAwait(false);
+
+            await _eventPublisher.PublishAsync(new IntroductionConsentResolvedApplicationEvent(
+                dto.RequestId,
+                context.ChannelId,
+                context.SenderIdentityId,
+                Allowed: true,
+                DeclineReason: null,
+                invitation,
+                context.ReceivedAtUtc), ct).ConfigureAwait(false);
+
+            // Auto-forward if ForwardChannelId is specified and matching Exchange endpoint
+            if (consent.ForwardChannelId.HasValue)
+            {
+                var forwardChannel = await _channelRepo.GetDirectByIdAsync(consent.ForwardChannelId.Value, ct).ConfigureAwait(false);
+                if (forwardChannel != null && invitation.RelayEndpoint == forwardChannel.RelayEndpoint)
+                {
+                    var destinationPeerId = consent.LocalIdentityId == forwardChannel.OwnerIdentityId
+                        ? forwardChannel.RemotePeerId
+                        : forwardChannel.OwnerIdentityId;
+
+                    ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+                    var cardDto = new PeerIntroductionCardDto(
+                        dto.RequestId,
+                        consent.RemotePeerId,
+                        consent.CandidateDisplayName,
+                        dto.Invitation,
+                        consent.Note,
+                        nowMs);
+
+                    var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.PeerIntroductionCard, cardDto);
+                    var outboundContext = new OutboundPayloadContext(
+                        consent.ForwardChannelId.Value,
+                        consent.LocalIdentityId,
+                        destinationPeerId,
+                        DeviceId.Primary,
+                        AppId.Chat,
+                        envelopeBytes,
+                        DeliveryRoute.RelayedOneToOne);
+
+                    var forwardSendResult = await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+                    if (forwardSendResult.IsSuccess)
+                    {
+                        consent.MarkForwarded();
+                        await _introConsentRepo.UpdateAsync(consent, ct).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+        else
+        {
+            var declineResult = consent.Decline(dto.DeclineReason, context.ReceivedAtUtc);
+            if (declineResult.IsFailure)
+            {
+                return declineResult;
+            }
+
+            await _introConsentRepo.UpdateAsync(consent, ct).ConfigureAwait(false);
+
+            await _eventPublisher.PublishAsync(new IntroductionConsentResolvedApplicationEvent(
+                dto.RequestId,
+                context.ChannelId,
+                context.SenderIdentityId,
+                Allowed: false,
+                dto.DeclineReason,
+                Invitation: null,
+                context.ReceivedAtUtc), ct).ConfigureAwait(false);
+        }
+
+        return DomainResult.Success();
+    }
+
+    private async ValueTask<DomainResult> HandlePeerIntroductionCardAsync(
+        ReadOnlyMemory<byte> data,
+        InboundPayloadContext context,
+        CancellationToken ct)
+    {
+        var result = _serializer.Deserialize<PeerIntroductionCardDto>(data);
+        if (result.IsFailure)
+        {
+            return DomainResult.Failure(result.Error);
+        }
+
+        var dto = result.Value;
+        var channel = await _channelRepo.GetDirectByIdAsync(context.ChannelId, ct).ConfigureAwait(false);
+        if (channel is null)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_NOT_FOUND", "PeerIntroductionCard received on unknown or non-direct channel."));
+        }
+
+        var invitationResult = dto.Invitation.ToDomain();
+        if (invitationResult.IsFailure)
+        {
+            return DomainResult.Failure(invitationResult.Error);
+        }
+
+        var invitation = invitationResult.Value;
+
+        // Same-Exchange scoping: ensure invitation RelayEndpoint matches the channel RelayEndpoint
+        if (channel.RelayEndpoint is null || invitation.RelayEndpoint != channel.RelayEndpoint)
+        {
+            return DomainResult.Failure(new DomainError(
+                "EXCHANGE_MISMATCH",
+                $"PeerIntroductionCard invitation RelayEndpoint '{invitation.RelayEndpoint.Value}' does not match channel RelayEndpoint '{channel.RelayEndpoint?.Value}'."));
+        }
+
+
+        // Block and key-change checks (SYS-KEY-CHANGE-TRUST-HALT)
+        var senderContact = await _contactRepo.GetByPeerIdAsync(context.RecipientIdentityId, context.SenderIdentityId, ct).ConfigureAwait(false);
+        if (senderContact?.TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Sender is blocked."));
+        }
+
+        var introducedContact = await _contactRepo.GetByPeerIdAsync(context.RecipientIdentityId, dto.IntroducedPeerId, ct).ConfigureAwait(false);
+        if (introducedContact != null)
+        {
+            if (introducedContact.TrustLevel == PeerTrustLevel.Blocked)
+            {
+                return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", "Introduced peer is blocked."));
+            }
+
+            if (introducedContact.PrimaryPublicKey != null &&
+                !CryptographicOperations.FixedTimeEquals(introducedContact.PrimaryPublicKey.Span, invitation.InviterIdentityKey.Span))
+            {
+                return DomainResult.Failure(new DomainError(
+                    "IDENTITY_KEY_CHANGED",
+                    $"Introduced peer '{dto.IntroducedPeerId}' IdentityKey does not match previously pinned key."));
+            }
+        }
+
+        var cardConsent = new PeerIntroductionConsent(
+            dto.RequestId,
+            context.ChannelId,
+            context.RecipientIdentityId,
+            context.SenderIdentityId,
+            dto.IntroducedPeerId,
+            dto.IntroducedDisplayName,
+            dto.Note,
+            IntroductionDirection.InboundCard,
+            IntroductionStatus.Pending,
+            context.ReceivedAtUtc,
+            invitation: invitation);
+
+        await _introConsentRepo.AddAsync(cardConsent, ct).ConfigureAwait(false);
+
+        await _eventPublisher.PublishAsync(new PeerIntroductionCardReceivedApplicationEvent(
+            dto.RequestId,
+            context.ChannelId,
+            context.SenderIdentityId,
+            dto.IntroducedPeerId,
+            dto.IntroducedDisplayName,
+            invitation,
+            dto.Note,
+            context.ReceivedAtUtc), ct).ConfigureAwait(false);
+
+        return DomainResult.Success();
+    }
 }
+

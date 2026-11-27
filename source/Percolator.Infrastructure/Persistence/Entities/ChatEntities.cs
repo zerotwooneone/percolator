@@ -94,3 +94,22 @@ public sealed class ChatUnknownGroupMessageEntity
     public ulong ReceivedAtUnixMs { get; set; }
     public ulong ExpiresAtUnixMs { get; set; }
 }
+
+public sealed class PeerIntroductionConsentEntity
+{
+    public string RequestId { get; set; } = string.Empty;
+    public Guid ChannelId { get; set; }
+    public byte[] LocalIdentityId { get; set; } = Array.Empty<byte>();
+    public byte[] RemotePeerId { get; set; } = Array.Empty<byte>();
+    public byte[] CandidatePeerId { get; set; } = Array.Empty<byte>();
+    public string CandidateDisplayName { get; set; } = string.Empty;
+    public string? Note { get; set; }
+    public byte Direction { get; set; }
+    public byte Status { get; set; }
+    public Guid? ForwardChannelId { get; set; }
+    public byte[]? InvitationData { get; set; }
+    public string? DeclineReason { get; set; }
+    public ulong CreatedAtUnixMs { get; set; }
+    public ulong? RespondedAtUnixMs { get; set; }
+}
+

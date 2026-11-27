@@ -10,6 +10,7 @@ using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.PluginSdk;
 
 public sealed class PeerInvitationService : IPeerInvitationService
 {

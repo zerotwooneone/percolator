@@ -170,6 +170,18 @@ public sealed class TestPersonaNode : IAsyncDisposable
         services.AddScoped<IOutboundConnectionWorkflow, OutboundConnectionWorkflow>();
         services.AddScoped<IInboundConnectionWorkflow, InboundConnectionWorkflow>();
         services.AddScoped<IPeerInvitationService, PeerInvitationService>();
+        services.AddScoped<IPeerConnectionService>(sp => new Percolator.Application.Services.PeerConnectionService(
+            personaId,
+            DeviceId.Primary,
+            sp.GetRequiredService<IPreKeyBundleProvider>(),
+            sp.GetRequiredService<IHandshakeService>(),
+            sp.GetRequiredService<IChannelRepository>(),
+            sp.GetRequiredService<IDateTimeProvider>(),
+            sp.GetRequiredService<IPeerMailboxRoutingRepository>(),
+            sp.GetRequiredService<IPeerContactRepository>(),
+            sp.GetRequiredService<IEventPublisher>(),
+            sp.GetRequiredService<IInitialHandshakePayloadProvider>(),
+            sp.GetRequiredService<IOutboundConnectionWorkflow>()));
 
         // Decorate IChatMessageRepository to notify ChatMessageReceivedEvent
         services.AddScoped<SqlChatMessageRepository>();

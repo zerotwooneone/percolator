@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
@@ -6,6 +8,10 @@ using Percolator.Domain.Channels.Model;
 using Percolator.Domain.Channels.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.Model;
+using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
@@ -20,6 +26,10 @@ public sealed class ChatService : IChatService
     private readonly IPayloadSerializer _serializer;
     private readonly IDateTimeProvider _timeProvider;
     private readonly IBlobStorageService _blobStorage;
+    private readonly IPeerIntroductionConsentRepository _introConsentRepo;
+    private readonly IPeerInvitationService _invitationService;
+    private readonly IPeerContactRepository _contactRepo;
+    private readonly IPeerConnectionService _peerConnectionService;
 
     public ChatService(
         IChatMessageRepository chatRepo,
@@ -27,7 +37,11 @@ public sealed class ChatService : IChatService
         IPayloadSender payloadSender,
         IPayloadSerializer serializer,
         IDateTimeProvider timeProvider,
-        IBlobStorageService blobStorage)
+        IBlobStorageService blobStorage,
+        IPeerIntroductionConsentRepository introConsentRepo,
+        IPeerInvitationService invitationService,
+        IPeerContactRepository contactRepo,
+        IPeerConnectionService peerConnectionService)
     {
         _chatRepo = chatRepo ?? throw new ArgumentNullException(nameof(chatRepo));
         _channelRepo = channelRepo ?? throw new ArgumentNullException(nameof(channelRepo));
@@ -35,7 +49,12 @@ public sealed class ChatService : IChatService
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _blobStorage = blobStorage ?? throw new ArgumentNullException(nameof(blobStorage));
+        _introConsentRepo = introConsentRepo ?? throw new ArgumentNullException(nameof(introConsentRepo));
+        _invitationService = invitationService ?? throw new ArgumentNullException(nameof(invitationService));
+        _contactRepo = contactRepo ?? throw new ArgumentNullException(nameof(contactRepo));
+        _peerConnectionService = peerConnectionService ?? throw new ArgumentNullException(nameof(peerConnectionService));
     }
+
 
     public async ValueTask<DomainResult<PayloadId>> SendMessageAsync(SendMessageCommand command, CancellationToken ct = default)
     {
@@ -464,7 +483,321 @@ public sealed class ChatService : IChatService
         return await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
     }
 
+    public async ValueTask<DomainResult<string>> RequestIntroductionConsentAsync(
+        RequestIntroductionConsentCommand command,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        var channel = await _channelRepo.GetDirectByIdAsync(command.ChannelId, ct).ConfigureAwait(false);
+        if (channel is null)
+        {
+            return DomainResult<string>.Failure(new DomainError("CHANNEL_NOT_FOUND", $"Direct channel '{command.ChannelId.Value}' could not be found."));
+        }
+
+        if (command.CandidatePeerId == channel.OwnerIdentityId || command.CandidatePeerId == channel.RemotePeerId)
+        {
+            return DomainResult<string>.Failure(new DomainError(
+                "INVALID_CANDIDATE",
+                "Cannot introduce a peer to themselves or an existing channel participant."));
+        }
+
+        var remotePeerId = command.RequesterId == channel.OwnerIdentityId
+            ? channel.RemotePeerId
+            : channel.OwnerIdentityId;
+
+
+        // Block checks
+        var remoteContact = await _contactRepo.GetByPeerIdAsync(command.RequesterId, remotePeerId, ct).ConfigureAwait(false);
+        if (remoteContact?.TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult<string>.Failure(new DomainError("CONTACT_BLOCKED", $"Target contact '{remotePeerId}' is blocked."));
+        }
+
+        var candidateContact = await _contactRepo.GetByPeerIdAsync(command.RequesterId, command.CandidatePeerId, ct).ConfigureAwait(false);
+        if (candidateContact?.TrustLevel == PeerTrustLevel.Blocked)
+        {
+            return DomainResult<string>.Failure(new DomainError("CANDIDATE_BLOCKED", $"Candidate contact '{command.CandidatePeerId}' is blocked."));
+        }
+
+        var requestId = Guid.NewGuid().ToString("N");
+        ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+        var dto = new IntroductionConsentRequestDto(
+            requestId,
+            command.CandidatePeerId,
+            command.CandidateDisplayName,
+            command.Note,
+            nowMs);
+
+        var consent = new PeerIntroductionConsent(
+            requestId,
+            command.ChannelId,
+            command.RequesterId,
+            remotePeerId,
+            command.CandidatePeerId,
+            command.CandidateDisplayName,
+            command.Note,
+            IntroductionDirection.OutboundRequest,
+            IntroductionStatus.Pending,
+            _timeProvider.UtcNow,
+            command.ForwardChannelId);
+
+        await _introConsentRepo.AddAsync(consent, ct).ConfigureAwait(false);
+
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.IntroductionConsentRequest, dto);
+        var outboundContext = new OutboundPayloadContext(
+            command.ChannelId,
+            command.RequesterId,
+            remotePeerId,
+            DeviceId.Primary,
+            AppId.Chat,
+            envelopeBytes,
+            DeliveryRoute.RelayedOneToOne);
+
+        var sendResult = await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+        if (sendResult.IsFailure)
+        {
+            return DomainResult<string>.Failure(sendResult.Error);
+        }
+
+        return DomainResult<string>.Success(requestId);
+    }
+
+    public async ValueTask<DomainResult> RespondToIntroductionConsentAsync(
+        RespondToIntroductionConsentCommand command,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        var consent = await _introConsentRepo.GetByIdAsync(command.RequestId, ct).ConfigureAwait(false);
+        if (consent is null)
+        {
+            return DomainResult.Failure(new DomainError("CONSENT_NOT_FOUND", $"Introduction consent request '{command.RequestId}' not found."));
+        }
+
+        if (consent.Direction != IntroductionDirection.InboundRequest || consent.Status != IntroductionStatus.Pending)
+        {
+            return DomainResult.Failure(new DomainError(
+                "INVALID_STATE",
+                $"Introduction consent '{command.RequestId}' is in status '{consent.Status}' and direction '{consent.Direction}'."));
+        }
+
+        var channel = await _channelRepo.GetDirectByIdAsync(consent.ChannelId, ct).ConfigureAwait(false);
+        if (channel is null)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_NOT_FOUND", $"Channel '{consent.ChannelId.Value}' not found."));
+        }
+
+        ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+        if (command.Allowed)
+        {
+            if (channel.RelayEndpoint is null)
+            {
+                return DomainResult.Failure(new DomainError("MISSING_RELAY_ENDPOINT", "Direct channel has no configured RelayEndpoint."));
+            }
+
+            var invitationResult = await _invitationService.CreatePeerInvitationAsync(
+                consent.LocalIdentityId,
+                channel.RelayEndpoint,
+                ct).ConfigureAwait(false);
+
+
+            if (invitationResult.IsFailure)
+            {
+                return DomainResult.Failure(invitationResult.Error);
+            }
+
+            var invitation = invitationResult.Value;
+            var allowResult = consent.Allow(invitation, _timeProvider.UtcNow);
+            if (allowResult.IsFailure)
+            {
+                return allowResult;
+            }
+
+            await _introConsentRepo.UpdateAsync(consent, ct).ConfigureAwait(false);
+
+            var responseDto = new IntroductionConsentResponseDto(
+                command.RequestId,
+                Allowed: true,
+                PeerInvitationWireDto.FromDomain(invitation),
+                DeclineReason: null,
+                nowMs);
+
+            var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.IntroductionConsentResponse, responseDto);
+            var outboundContext = new OutboundPayloadContext(
+                consent.ChannelId,
+                consent.LocalIdentityId,
+                consent.RemotePeerId,
+                DeviceId.Primary,
+                AppId.Chat,
+                envelopeBytes,
+                DeliveryRoute.RelayedOneToOne);
+
+            return await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var declineResult = consent.Decline(command.DeclineReason, _timeProvider.UtcNow);
+            if (declineResult.IsFailure)
+            {
+                return declineResult;
+            }
+
+            await _introConsentRepo.UpdateAsync(consent, ct).ConfigureAwait(false);
+
+            var responseDto = new IntroductionConsentResponseDto(
+                command.RequestId,
+                Allowed: false,
+                Invitation: null,
+                DeclineReason: command.DeclineReason,
+                nowMs);
+
+            var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.IntroductionConsentResponse, responseDto);
+            var outboundContext = new OutboundPayloadContext(
+                consent.ChannelId,
+                consent.LocalIdentityId,
+                consent.RemotePeerId,
+                DeviceId.Primary,
+                AppId.Chat,
+                envelopeBytes,
+                DeliveryRoute.RelayedOneToOne);
+
+            return await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<DomainResult> ForwardIntroductionCardAsync(
+        ForwardIntroductionCardCommand command,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        var consent = await _introConsentRepo.GetByIdAsync(command.RequestId, ct).ConfigureAwait(false);
+        if (consent is null)
+        {
+            return DomainResult.Failure(new DomainError("CONSENT_NOT_FOUND", $"Introduction consent '{command.RequestId}' not found."));
+        }
+
+        if (consent.Status != IntroductionStatus.Allowed || consent.Invitation is null)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_STATE", $"Introduction consent '{command.RequestId}' is not in Allowed status or lacks an invitation."));
+        }
+
+        var forwardChannel = await _channelRepo.GetDirectByIdAsync(command.ForwardChannelId, ct).ConfigureAwait(false);
+        if (forwardChannel is null)
+        {
+            return DomainResult.Failure(new DomainError("CHANNEL_NOT_FOUND", $"Forward destination channel '{command.ForwardChannelId.Value}' not found."));
+        }
+
+        // Same-Exchange scoping / matching check
+        if (forwardChannel.RelayEndpoint is null || consent.Invitation.RelayEndpoint != forwardChannel.RelayEndpoint)
+        {
+            return DomainResult.Failure(new DomainError(
+                "EXCHANGE_MISMATCH",
+                $"Forwarded invitation RelayEndpoint '{consent.Invitation.RelayEndpoint.Value}' does not match destination channel RelayEndpoint '{forwardChannel.RelayEndpoint?.Value}'."));
+        }
+
+
+        var destinationPeerId = consent.LocalIdentityId == forwardChannel.OwnerIdentityId
+            ? forwardChannel.RemotePeerId
+            : forwardChannel.OwnerIdentityId;
+
+
+        ulong nowMs = (ulong)_timeProvider.UtcNow.ToUnixTimeMilliseconds();
+
+        var cardDto = new PeerIntroductionCardDto(
+            command.RequestId,
+            consent.RemotePeerId,
+            consent.CandidateDisplayName,
+            PeerInvitationWireDto.FromDomain(consent.Invitation),
+            command.Note ?? consent.Note,
+            nowMs);
+
+        var forwardResult = consent.MarkForwarded();
+        if (forwardResult.IsFailure)
+        {
+            return forwardResult;
+        }
+
+        await _introConsentRepo.UpdateAsync(consent, ct).ConfigureAwait(false);
+
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.PeerIntroductionCard, cardDto);
+        var outboundContext = new OutboundPayloadContext(
+            command.ForwardChannelId,
+            consent.LocalIdentityId,
+            destinationPeerId,
+            DeviceId.Primary,
+            AppId.Chat,
+            envelopeBytes,
+            DeliveryRoute.RelayedOneToOne);
+
+        return await _payloadSender.SendPayloadAsync(outboundContext, ct).ConfigureAwait(false);
+    }
+
+    public async ValueTask<DomainResult> AcceptPeerIntroductionCardAsync(
+        AcceptPeerIntroductionCardCommand command,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        var consent = await _introConsentRepo.GetByIdAsync(command.RequestId, ct).ConfigureAwait(false);
+        if (consent is null)
+        {
+            return DomainResult.Failure(new DomainError("CONSENT_NOT_FOUND", $"Introduction card '{command.RequestId}' not found."));
+        }
+
+        if (consent.Direction != IntroductionDirection.InboundCard)
+        {
+            return DomainResult.Failure(new DomainError("INVALID_DIRECTION", "Only received introduction cards can be accepted."));
+        }
+
+        if (consent.Invitation is null)
+        {
+            return DomainResult.Failure(new DomainError("MISSING_INVITATION", "Introduction card has no invitation material."));
+        }
+
+        // Block & Pinned Key Change Check (SYS-KEY-CHANGE-TRUST-HALT)
+        var existingContact = await _contactRepo.GetByPeerIdAsync(command.LocalIdentityId, consent.Invitation.InviterIdentityId, ct).ConfigureAwait(false);
+        if (existingContact != null)
+        {
+            if (existingContact.TrustLevel == PeerTrustLevel.Blocked)
+            {
+                return DomainResult.Failure(new DomainError("CONTACT_BLOCKED", $"Peer '{consent.Invitation.InviterIdentityId}' is blocked."));
+            }
+
+            if (existingContact.PrimaryPublicKey != null &&
+                !CryptographicOperations.FixedTimeEquals(existingContact.PrimaryPublicKey.Span, consent.Invitation.InviterIdentityKey.Span))
+            {
+                return DomainResult.Failure(new DomainError(
+                    "IDENTITY_KEY_CHANGED",
+                    $"Peer '{consent.Invitation.InviterIdentityId}' IdentityKey does not match previously pinned key."));
+            }
+        }
+
+        var connectResult = await _peerConnectionService.ConnectWithInvitationAsync(
+            command.LocalIdentityId,
+            consent.Invitation,
+            ct).ConfigureAwait(false);
+
+        if (connectResult.IsFailure)
+        {
+            return DomainResult.Failure(connectResult.Error);
+        }
+
+        var markResult = consent.MarkConnected();
+        if (markResult.IsFailure)
+        {
+            return markResult;
+        }
+
+        await _introConsentRepo.UpdateAsync(consent, ct).ConfigureAwait(false);
+        return DomainResult.Success();
+    }
+
     private static IReadOnlyList<MediaAttachmentDto> SanitizeAttachments(IReadOnlyList<MediaAttachmentDto>? attachments)
+
     {
         if (attachments is null || attachments.Count == 0)
         {

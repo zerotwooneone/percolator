@@ -127,4 +127,140 @@ public sealed class ProtobufChatSerializerTests
         deserialized.Value.UpToPayloadId.Should().Be(upToPayloadId);
         deserialized.Value.DeliveredAtUnixMs.Should().Be(deliveredAtMs);
     }
+
+    [Test]
+    public void IntroductionConsentRequestDto_RoundTrip_PreservesAllFields()
+    {
+        var requestId = Guid.NewGuid().ToString("N");
+        var candidateId = Domain.Identities.PublicIdentityId.New();
+        var dto = new Percolator.Apps.Chat.Features.Introductions.IntroductionConsentRequestDto(
+            requestId,
+            candidateId,
+            "Charlie",
+            "Hey Bob, you should talk to Charlie about security.",
+            1710000000000UL);
+
+        var serialized = _serializer.Serialize(dto);
+        var deserialized = _serializer.Deserialize<Percolator.Apps.Chat.Features.Introductions.IntroductionConsentRequestDto>(serialized);
+
+        deserialized.IsSuccess.Should().BeTrue();
+        deserialized.Value.Should().NotBeNull();
+        deserialized.Value!.RequestId.Should().Be(requestId);
+        deserialized.Value.CandidatePeerId.Should().Be(candidateId);
+        deserialized.Value.CandidateDisplayName.Should().Be("Charlie");
+        deserialized.Value.Note.Should().Be("Hey Bob, you should talk to Charlie about security.");
+        deserialized.Value.TimestampUnixMs.Should().Be(1710000000000UL);
+    }
+
+    [Test]
+    public void IntroductionConsentResponseDto_AllowedWithInvitation_RoundTrip_PreservesAllFields()
+    {
+        var requestId = Guid.NewGuid().ToString("N");
+        var inviterId = Domain.Identities.PublicIdentityId.New();
+        var identityKey = IdentityKey.FromBytes(new byte[32]);
+        var relayEndpoint = Domain.Delivery.ValueObjects.RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
+
+        var routingToken = Domain.Delivery.ValueObjects.BlindedRoutingToken.New();
+
+        var invitationWireDto = new Percolator.Apps.Chat.Features.Introductions.PeerInvitationWireDto(
+            inviterId,
+            identityKey,
+            relayEndpoint,
+            routingToken);
+
+        var responseDto = new Percolator.Apps.Chat.Features.Introductions.IntroductionConsentResponseDto(
+            requestId,
+            Allowed: true,
+            Invitation: invitationWireDto,
+            DeclineReason: null,
+            RespondedAtUnixMs: 1710000005000UL);
+
+        var serialized = _serializer.Serialize(responseDto);
+        var deserialized = _serializer.Deserialize<Percolator.Apps.Chat.Features.Introductions.IntroductionConsentResponseDto>(serialized);
+
+        deserialized.IsSuccess.Should().BeTrue();
+        deserialized.Value.Should().NotBeNull();
+        deserialized.Value!.RequestId.Should().Be(requestId);
+        deserialized.Value.Allowed.Should().BeTrue();
+        deserialized.Value.DeclineReason.Should().BeNull();
+        deserialized.Value.RespondedAtUnixMs.Should().Be(1710000005000UL);
+        deserialized.Value.Invitation.Should().NotBeNull();
+        deserialized.Value.Invitation!.InviterIdentityId.Should().Be(inviterId);
+        deserialized.Value.Invitation.InviterIdentityKey.Should().Be(identityKey);
+        deserialized.Value.Invitation.RelayEndpoint.Should().Be(relayEndpoint);
+        deserialized.Value.Invitation.RoutingToken.Should().Be(routingToken);
+    }
+
+    [Test]
+    public void IntroductionConsentResponseDto_Declined_RoundTrip_PreservesAllFields()
+    {
+        var requestId = Guid.NewGuid().ToString("N");
+        var responseDto = new Percolator.Apps.Chat.Features.Introductions.IntroductionConsentResponseDto(
+            requestId,
+            Allowed: false,
+            Invitation: null,
+            DeclineReason: "Not accepting introductions at this time.",
+            RespondedAtUnixMs: 1710000006000UL);
+
+        var serialized = _serializer.Serialize(responseDto);
+        var deserialized = _serializer.Deserialize<Percolator.Apps.Chat.Features.Introductions.IntroductionConsentResponseDto>(serialized);
+
+        deserialized.IsSuccess.Should().BeTrue();
+        deserialized.Value.Should().NotBeNull();
+        deserialized.Value!.RequestId.Should().Be(requestId);
+        deserialized.Value.Allowed.Should().BeFalse();
+        deserialized.Value.DeclineReason.Should().Be("Not accepting introductions at this time.");
+        deserialized.Value.Invitation.Should().BeNull();
+    }
+
+    [Test]
+    public void PeerIntroductionCardDto_RoundTrip_And_PaddedEnvelope_Succeeds()
+    {
+        var requestId = Guid.NewGuid().ToString("N");
+        var introducedPeerId = Domain.Identities.PublicIdentityId.New();
+        var identityKey = IdentityKey.FromBytes(new byte[32]);
+        var relayEndpoint = Domain.Delivery.ValueObjects.RelayEndpoint.Create("percolator://relay.example.com:443").Value!;
+
+        var routingToken = Domain.Delivery.ValueObjects.BlindedRoutingToken.New();
+
+        var invitationWireDto = new Percolator.Apps.Chat.Features.Introductions.PeerInvitationWireDto(
+            introducedPeerId,
+            identityKey,
+            relayEndpoint,
+            routingToken);
+
+        var cardDto = new Percolator.Apps.Chat.Features.Introductions.PeerIntroductionCardDto(
+            requestId,
+            introducedPeerId,
+            "Bob",
+            invitationWireDto,
+            "Here is Bob's contact introduction",
+            1710000010000UL);
+
+        // 1. Direct roundtrip
+        var serialized = _serializer.Serialize(cardDto);
+        var deserialized = _serializer.Deserialize<Percolator.Apps.Chat.Features.Introductions.PeerIntroductionCardDto>(serialized);
+
+        deserialized.IsSuccess.Should().BeTrue();
+        deserialized.Value.Should().NotBeNull();
+        deserialized.Value!.RequestId.Should().Be(requestId);
+        deserialized.Value.IntroducedPeerId.Should().Be(introducedPeerId);
+        deserialized.Value.IntroducedDisplayName.Should().Be("Bob");
+        deserialized.Value.Note.Should().Be("Here is Bob's contact introduction");
+        deserialized.Value.Invitation.InviterIdentityId.Should().Be(introducedPeerId);
+
+        // 2. Padded envelope roundtrip
+        var envelopeBytes = SteppedPadding.CreatePaddedEnvelopeBytes(_serializer, ChatPayloadType.PeerIntroductionCard, cardDto);
+        var envelopeResult = _serializer.Deserialize<ChatPayloadEnvelopeDto>(envelopeBytes);
+
+        envelopeResult.IsSuccess.Should().BeTrue();
+        envelopeResult.Value!.Type.Should().Be(ChatPayloadType.PeerIntroductionCard);
+        envelopeResult.Value.Padding.Length.Should().BeGreaterThan(0);
+
+        var innerCardResult = _serializer.Deserialize<Percolator.Apps.Chat.Features.Introductions.PeerIntroductionCardDto>(envelopeResult.Value.Data);
+        innerCardResult.IsSuccess.Should().BeTrue();
+        innerCardResult.Value!.RequestId.Should().Be(requestId);
+        innerCardResult.Value.IntroducedPeerId.Should().Be(introducedPeerId);
+    }
 }
+

@@ -24,6 +24,10 @@ public class ChatServiceTests
     private TestPayloadSerializer _serializer = null!;
     private FakeDateTimeProvider _timeProvider = null!;
     private FakeBlobStorageService _blobStorage = null!;
+    private InMemoryPeerIntroductionConsentRepository _introConsentRepo = null!;
+    private FakePeerInvitationService _invitationService = null!;
+    private InMemoryPeerContactRepository _contactRepo = null!;
+    private FakePeerConnectionService _peerConnectionService = null!;
     private ChatService _sut = null!;
 
     [SetUp]
@@ -35,9 +39,24 @@ public class ChatServiceTests
         _serializer = new TestPayloadSerializer();
         _timeProvider = new FakeDateTimeProvider(new DateTimeOffset(2026, 10, 10, 12, 0, 0, 123, TimeSpan.Zero)); // fractional ms
         _blobStorage = new FakeBlobStorageService();
+        _introConsentRepo = new InMemoryPeerIntroductionConsentRepository();
+        _invitationService = new FakePeerInvitationService();
+        _contactRepo = new InMemoryPeerContactRepository();
+        _peerConnectionService = new FakePeerConnectionService();
 
-        _sut = new ChatService(_chatRepo, _channelRepo, _payloadSender, _serializer, _timeProvider, _blobStorage);
+        _sut = new ChatService(
+            _chatRepo,
+            _channelRepo,
+            _payloadSender,
+            _serializer,
+            _timeProvider,
+            _blobStorage,
+            _introConsentRepo,
+            _invitationService,
+            _contactRepo,
+            _peerConnectionService);
     }
+
 
     [Test]
     public async Task SendMessageAsync_ValidText_AppendsChannelPayload_AndDispatchesPaddedEnvelope()

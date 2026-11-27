@@ -11,5 +11,9 @@ public enum ChatPayloadType : byte
     GroupInvitation = 7,
     GroupInvitationResponse = 8,
     ProfileCapability = 9, // Capability token distributing ProfileKey, locator, and mailbox token
-    DeliveryReceipt = 10
+    DeliveryReceipt = 10,
+    IntroductionConsentRequest = 11,
+    IntroductionConsentResponse = 12,
+    PeerIntroductionCard = 13
 }
+

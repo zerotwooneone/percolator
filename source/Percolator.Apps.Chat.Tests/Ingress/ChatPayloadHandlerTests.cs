@@ -36,6 +36,8 @@ public class ChatPayloadHandlerTests
     private TestPayloadSender _payloadSender = null!;
     private FakePeerMailboxRoutingRepository _peerMailboxRoutingRepo = null!;
     private RecordingEventPublisher _eventPublisher = null!;
+    private InMemoryPeerIntroductionConsentRepository _introConsentRepo = null!;
+    private InMemoryPeerContactRepository _contactRepo = null!;
     private ChatPayloadHandler _sut = null!;
 
     [SetUp]
@@ -54,6 +56,8 @@ public class ChatPayloadHandlerTests
         _payloadSender = new TestPayloadSender();
         _peerMailboxRoutingRepo = new FakePeerMailboxRoutingRepository();
         _eventPublisher = new RecordingEventPublisher();
+        _introConsentRepo = new InMemoryPeerIntroductionConsentRepository();
+        _contactRepo = new InMemoryPeerContactRepository();
 
         _sut = new ChatPayloadHandler(
             _chatRepo,
@@ -69,8 +73,11 @@ public class ChatPayloadHandlerTests
             _profileManager,
             _cryptoEngine,
             _peerMailboxRoutingRepo,
-            _eventPublisher);
+            _eventPublisher,
+            _introConsentRepo,
+            _contactRepo);
     }
+
 
     [Test]
     public async Task HandleInboundAsync_TextMessage_AppendsToChannel_AndPersistsToChatMessageRepository()
@@ -997,7 +1004,10 @@ public class ChatPayloadHandlerTests
             _profileManager,
             _cryptoEngine,
             new FakePeerMailboxRoutingRepository(),
-            _eventPublisher);
+            _eventPublisher,
+            _introConsentRepo,
+            _contactRepo);
+
 
         var msgId = PayloadId.New();
         var msgDto = new ChatMessageDto(
@@ -1347,52 +1357,4 @@ public class ChatPayloadHandlerTests
     }
 
     #endregion
-
-    private sealed class RecordingEventPublisher : IEventPublisher
-    {
-        public List<IApplicationEvent> PublishedEvents { get; } = [];
-
-        public ValueTask PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
-            where TEvent : IApplicationEvent
-        {
-            PublishedEvents.Add(@event);
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class InMemoryUnknownGroupCache : IUnknownGroupMessageCacheRepository
-    {
-        private readonly ConcurrentDictionary<PayloadId, UnknownGroupMessageRecord> _records = new();
-
-        public Task AddAsync(UnknownGroupMessageRecord record, CancellationToken ct = default)
-        {
-            _records[record.Id] = record;
-            return Task.CompletedTask;
-        }
-
-        public Task<IReadOnlyList<UnknownGroupMessageRecord>> GetByChannelIdAsync(ChannelId channelId, CancellationToken ct = default)
-        {
-            var list = _records.Values.Where(r => r.ChannelId == channelId).ToList();
-            return Task.FromResult<IReadOnlyList<UnknownGroupMessageRecord>>(list);
-        }
-
-        public Task RemoveAsync(PayloadId id, CancellationToken ct = default)
-        {
-            _records.TryRemove(id, out _);
-            return Task.CompletedTask;
-        }
-
-        public Task<int> PurgeExpiredAsync(ulong currentTimestampUnixMs, CancellationToken ct = default)
-        {
-            int count = 0;
-            foreach (var kvp in _records)
-            {
-                if (kvp.Value.ExpiresAtUnixMs <= currentTimestampUnixMs && _records.TryRemove(kvp.Key, out _))
-                {
-                    count++;
-                }
-            }
-            return Task.FromResult(count);
-        }
-    }
 }

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Percolator.Apps.Chat.Features.GroupInvitations;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.PluginSdk;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
@@ -23,7 +24,10 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         options.Converters.Add(new GuidIdJsonConverter<PublicIdentityId>());
         options.Converters.Add(new GuidIdJsonConverter<ChannelId>());
         options.Converters.Add(new GuidIdJsonConverter<PayloadId>());
+        options.Converters.Add(new GuidIdJsonConverter<BlindedRoutingToken>());
         options.Converters.Add(new InvitationIdJsonConverter());
+        options.Converters.Add(new IdentityKeyJsonConverter());
+        options.Converters.Add(new RelayEndpointJsonConverter());
         return options;
     }
 
@@ -119,6 +123,37 @@ public sealed class TestPayloadSerializer : IPayloadSerializer
         }
 
         public override void Write(Utf8JsonWriter writer, InvitationId value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.Value);
+        }
+    }
+
+    private sealed class IdentityKeyJsonConverter : JsonConverter<IdentityKey>
+    {
+        public override IdentityKey? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var base64 = reader.GetString();
+            if (base64 is null) return null;
+            var bytes = Convert.FromBase64String(base64);
+            return IdentityKey.FromBytes(bytes);
+        }
+
+        public override void Write(Utf8JsonWriter writer, IdentityKey value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(Convert.ToBase64String(value.ToArray()));
+        }
+    }
+
+    private sealed class RelayEndpointJsonConverter : JsonConverter<RelayEndpoint>
+    {
+        public override RelayEndpoint? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var str = reader.GetString();
+            if (str is null) return null;
+            return RelayEndpoint.Create(str).Value!;
+        }
+
+        public override void Write(Utf8JsonWriter writer, RelayEndpoint value, JsonSerializerOptions options)
         {
             writer.WriteStringValue(value.Value);
         }

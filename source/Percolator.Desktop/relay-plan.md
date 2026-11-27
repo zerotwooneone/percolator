@@ -1985,8 +1985,9 @@ Peer introductions live inside **`Percolator.Apps.Chat`** as a standard E2E Doub
 - **Dependencies:** `FT-005` (or runnable immediately after `DISC-003` if prioritized ahead of UI)
 - **Implementation Details:** Document `HAZ-INTRO-UNSOLICITED-FORWARD` mitigation (Option A Ask-Before-Introducing + `SYS-CONTACT-CONSENT-GATE`) and run `scripts/validate-qms-compliance.ps1`.
 
-#### Ticket `INTRO-002` — Chat E2E Introduction Payloads, Workflow & SQLite Persistence
-- **Layer / Scope:** `Percolator.Apps.Chat` (`Features/Introductions/*`, `ChatPayloadType`, `ChatPayloadHandler`, `IChatService`), `Percolator.Infrastructure` (`PeerIntroductionConsentEntity` + EF migration)
+#### Ticket `INTRO-002` — Chat E2E Introduction Payloads, Workflow & SQLite Persistence `[COMPLETED]`
+- **Status:** Complete (Protobuf wire payloads opcodes 11-13 with `SteppedPadding`, domain aggregate `PeerIntroductionConsent`, `IPeerIntroductionConsentRepository` with SQLite EF Core mapping, application services in `IChatService`/`ChatService`, ingress validation in `ChatPayloadHandler`, 137 unit tests passing, 337 infrastructure tests passing, 32 integration tests passing).
+- **Layer / Scope:** `Percolator.Apps.Chat` (`Features/Introductions/*`, `ChatPayloadType`, `ChatPayloadHandler`, `IChatService`), `Percolator.Infrastructure` (`PeerIntroductionConsentEntity` + EF mapping)
 - **Dependencies:** `INTRO-001`
 - **Implementation Details:**
   - Add pure Protobuf-serialized `ChatPayloadType` opcodes (`IntroductionConsentRequest`, `IntroductionConsentResponse`, `PeerIntroductionCard`) inside `Percolator.Apps.Chat` (zero JSON on wire, padded via `SteppedPadding`).

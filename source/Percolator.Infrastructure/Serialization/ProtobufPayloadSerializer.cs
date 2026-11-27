@@ -1,7 +1,9 @@
 using System.Buffers;
 using Google.Protobuf;
 using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Media;
+
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Profiles;
 using Percolator.Apps.Chat.Features.Reactions;
@@ -11,8 +13,11 @@ using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
+using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure2.Protos;
+
 using Percolator.PluginSdk;
 using Percolator.PluginSdk.Profiles;
 
@@ -63,7 +68,13 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
                 Type t when t == typeof(GroupInvitationDto) => FromInviteProto(GroupInvitationProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(GroupInvitationResponseDto) => FromInviteResponseProto(GroupInvitationResponseProto.Parser.ParseFrom(data.Span)),
                 Type t when t == typeof(ProfileCapabilityDto) => FromProfileCapabilityProto(ProfileCapabilityProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(IntroductionConsentRequestDto) => FromIntroductionConsentRequestProto(PeerIntroductionConsentRequestProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(IntroductionConsentResponseDto) => FromIntroductionConsentResponseProto(PeerIntroductionConsentResponseProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(PeerIntroductionCardDto) => FromPeerIntroductionCardProto(PeerIntroductionCardProto.Parser.ParseFrom(data.Span)),
+                Type t when t == typeof(PeerInvitationWireDto) => FromPeerInvitationProto(PeerInvitationProto.Parser.ParseFrom(data.Span)),
                 _ => throw new NotSupportedException($"Payload type '{typeof(T).FullName}' is not registered in ProtobufPayloadSerializer.")
+
+
             };
 
             return DomainResult<T>.Success((T)result);
@@ -97,7 +108,13 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             GroupInvitationDto invite => ToInviteProto(invite),
             GroupInvitationResponseDto inviteResp => ToInviteResponseProto(inviteResp),
             ProfileCapabilityDto profCap => ToProfileCapabilityProto(profCap),
+            IntroductionConsentRequestDto introReq => ToIntroductionConsentRequestProto(introReq),
+            IntroductionConsentResponseDto introResp => ToIntroductionConsentResponseProto(introResp),
+            PeerIntroductionCardDto introCard => ToPeerIntroductionCardProto(introCard),
+            PeerInvitationWireDto peerInv => ToPeerInvitationProto(peerInv),
             _ => throw new NotSupportedException($"Payload type '{typeof(T).FullName}' is not registered in ProtobufPayloadSerializer.")
+
+
         };
     }
 
@@ -877,4 +894,86 @@ public sealed class ProtobufPayloadSerializer : IPayloadSerializer
             Height = p.Height > 0 ? p.Height : null,
             DurationSeconds = p.DurationSeconds > 0 ? p.DurationSeconds : null
         };
+
+    private static PeerInvitationProto ToPeerInvitationProto(PeerInvitationWireDto dto) =>
+        new()
+        {
+            InviterIdentityId = ByteString.CopyFrom(dto.InviterIdentityId.ToByteArray()),
+            InviterIdentityKey = ByteString.CopyFrom(dto.InviterIdentityKey.ToArray()),
+            RelayEndpoint = dto.RelayEndpoint.Value,
+            RoutingToken = ByteString.CopyFrom(dto.RoutingToken.ToByteArray())
+        };
+
+    private static PeerInvitationWireDto FromPeerInvitationProto(PeerInvitationProto proto) =>
+        new(
+            Domain.Identities.PublicIdentityId.FromBytes(proto.InviterIdentityId.Span),
+            IdentityKey.FromSpan(proto.InviterIdentityKey.Span),
+            RelayEndpoint.Create(proto.RelayEndpoint).Value!,
+            BlindedRoutingToken.FromBytes(proto.RoutingToken.Span));
+
+
+    private static PeerIntroductionConsentRequestProto ToIntroductionConsentRequestProto(IntroductionConsentRequestDto dto) =>
+        new()
+        {
+            RequestId = dto.RequestId,
+            CandidatePeerId = ByteString.CopyFrom(dto.CandidatePeerId.ToByteArray()),
+            CandidateDisplayName = dto.CandidateDisplayName,
+            Note = dto.Note ?? string.Empty,
+            TimestampUnixMs = dto.TimestampUnixMs
+        };
+
+    private static IntroductionConsentRequestDto FromIntroductionConsentRequestProto(PeerIntroductionConsentRequestProto proto) =>
+        new(
+            proto.RequestId,
+            Domain.Identities.PublicIdentityId.FromBytes(proto.CandidatePeerId.Span),
+            proto.CandidateDisplayName,
+            string.IsNullOrEmpty(proto.Note) ? null : proto.Note,
+            proto.TimestampUnixMs);
+
+    private static PeerIntroductionConsentResponseProto ToIntroductionConsentResponseProto(IntroductionConsentResponseDto dto)
+    {
+        var proto = new PeerIntroductionConsentResponseProto
+        {
+            RequestId = dto.RequestId,
+            Allowed = dto.Allowed,
+            DeclineReason = dto.DeclineReason ?? string.Empty,
+            RespondedAtUnixMs = dto.RespondedAtUnixMs
+        };
+
+        if (dto.Invitation != null)
+        {
+            proto.Invitation = ToPeerInvitationProto(dto.Invitation);
+        }
+
+        return proto;
+    }
+
+    private static IntroductionConsentResponseDto FromIntroductionConsentResponseProto(PeerIntroductionConsentResponseProto proto) =>
+        new(
+            proto.RequestId,
+            proto.Allowed,
+            proto.Invitation != null ? FromPeerInvitationProto(proto.Invitation) : null,
+            string.IsNullOrEmpty(proto.DeclineReason) ? null : proto.DeclineReason,
+            proto.RespondedAtUnixMs);
+
+    private static PeerIntroductionCardProto ToPeerIntroductionCardProto(PeerIntroductionCardDto dto) =>
+        new()
+        {
+            RequestId = dto.RequestId,
+            IntroducedPeerId = ByteString.CopyFrom(dto.IntroducedPeerId.ToByteArray()),
+            IntroducedDisplayName = dto.IntroducedDisplayName,
+            Invitation = ToPeerInvitationProto(dto.Invitation),
+            Note = dto.Note ?? string.Empty,
+            TimestampUnixMs = dto.TimestampUnixMs
+        };
+
+    private static PeerIntroductionCardDto FromPeerIntroductionCardProto(PeerIntroductionCardProto proto) =>
+        new(
+            proto.RequestId,
+            Domain.Identities.PublicIdentityId.FromBytes(proto.IntroducedPeerId.Span),
+            proto.IntroducedDisplayName,
+            FromPeerInvitationProto(proto.Invitation),
+            string.IsNullOrEmpty(proto.Note) ? null : proto.Note,
+            proto.TimestampUnixMs);
 }
+

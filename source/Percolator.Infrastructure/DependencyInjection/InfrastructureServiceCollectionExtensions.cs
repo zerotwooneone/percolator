@@ -27,7 +27,9 @@ using Microsoft.Extensions.Hosting;
 using Percolator.Application.Ports;
 using Percolator.PluginSdk.Events;
 using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Messaging;
+
 using Percolator.Apps.Chat.Ingress;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
@@ -357,7 +359,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IConversationListQueryService, SqlConversationListQueryService>();
         services.AddScoped<IGroupInvitationRepository, SqlGroupInvitationRepository>();
         services.AddScoped<IGroupInvitationQueryService, SqlGroupInvitationQueryService>();
+        services.AddScoped<IPeerIntroductionConsentRepository, SqlPeerIntroductionConsentRepository>();
         services.AddScoped<IUnknownGroupMessageCacheRepository, SqlUnknownGroupMessageCacheRepository>();
+
 
         services.AddHostedService(sp => new DisappearingMessageEvictionWorker(
             sp.GetRequiredService<IServiceScopeFactory>(),
