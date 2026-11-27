@@ -1979,7 +1979,8 @@ Peer introductions live inside **`Percolator.Apps.Chat`** as a standard E2E Doub
 2. **Per-Introduction Consent (`Bob`):** Bob chooses **Allow** (generates/returns Bob's `PeerInvitation` payload over Double Ratchet to Alice) or **Decline** (Alice receives refusal; Charlie never sees Bob's contact card).
 3. **E2E Forward & TOFU Gate (`Alice → Charlie` → `Bob`):** Upon consent, Alice forwards the approved `PeerIntroductionCard` over her existing Double Ratchet channel with Charlie → Charlie clicks **Connect** → normal `OutboundConnectionWorkflow.ConnectAsync` → Bob receives inbound handshake in `PendingApproval` (`SYS-CONTACT-CONSENT-GATE`). **Zero Exchange visibility, zero scraping, zero changes to `ProfileMetadata`.**
 
-#### Ticket `INTRO-001` — QMS Updates for Chat Peer Introductions
+#### Ticket `INTRO-001` — QMS Updates for Chat Peer Introductions `[COMPLETED]`
+- **Status:** Complete (`RiskRegister.md`, `SystemRequirements.md`, `Percolator.Apps.Chat/Design.md` updated; `validate-qms-compliance.ps1` passing 100%)
 - **Layer / Scope:** `RiskRegister.md`, `Percolator.Apps.Chat/Design.md`
 - **Dependencies:** `FT-005` (or runnable immediately after `DISC-003` if prioritized ahead of UI)
 - **Implementation Details:** Document `HAZ-INTRO-UNSOLICITED-FORWARD` mitigation (Option A Ask-Before-Introducing + `SYS-CONTACT-CONSENT-GATE`) and run `scripts/validate-qms-compliance.ps1`.

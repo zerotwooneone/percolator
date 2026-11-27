@@ -117,7 +117,10 @@ foreach ($file in $reqFiles) {
 
 # 3. Global Semantic Identifier Uniqueness
 Write-Host "`n[3/3] Checking Semantic Identifier Uniqueness..." -ForegroundColor Yellow
-$allMdFiles = Get-ChildItem -Path $ResolvedRoot.Path -Filter "*.md" -Recurse | Where-Object { $_.FullName -notmatch '[\\/](bin|obj|\.git|\.agents|\.gemini)[\\/]' }
+$allMdFiles = Get-ChildItem -Path $ResolvedRoot.Path -Filter "*.md" -Recurse | Where-Object { 
+    $_.FullName -notmatch '[\\/](bin|obj|\.git|\.agents|\.gemini)[\\/]' -and
+    $_.Name -notmatch '-plan\.md$'
+}
 $idDefinitions = @{}
 
 foreach ($file in $allMdFiles) {
@@ -126,8 +129,8 @@ foreach ($file in $allMdFiles) {
 
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
-        # Match definition patterns like - `SYS-SLUG`: or ### `DEP-SLUG`
-        if ($line -match '(?<!\[)`([A-Z]{2,6}-[A-Z0-9-]+)`(?=:|\s|$)') {
+        # Match definition patterns like - `SYS-SLUG`: or ### `DEP-SLUG` or 1. **`SYS-SLUG`
+        if ($line -match '^\s*(?:[0-9]+\.|\*|-|#{1,6})\s+(?:\*\*)?`([A-Z]{2,6}-[A-Z0-9-]+)`') {
             $id = $matches[1]
             if ($id -match '^(SYS|DEP|HAZ|UN|IU|USR|ENV|CONTRA|FACT|DEC|INV|SOUP)-') {
                 if ($idDefinitions.ContainsKey($id)) {
