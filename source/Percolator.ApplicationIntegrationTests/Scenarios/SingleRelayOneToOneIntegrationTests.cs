@@ -131,4 +131,42 @@ public sealed class SingleRelayOneToOneIntegrationTests
         bobSession.ReceivingCounter.Should().BeGreaterThan(0);
         bobSession.RemoteEphemeralPublicKey.Should().NotBeNull();
     }
+
+    [Test]
+    public async Task FetchConsumableBundleAsync_AuthenticatesWithLocalRequesterMailbox_AndFetchesRemotePeerBundle()
+    {
+        // 1. Start real Exchange R1 and provision Alice and Bob on R1
+        var relay = await _topology.CreateRelayAsync().ConfigureAwait(false);
+        var alice = await _topology.CreatePersonaAsync("Alice").ConfigureAwait(false);
+        var bob = await _topology.CreatePersonaAsync("Bob").ConfigureAwait(false);
+
+        await alice.LinkRelayAsync(relay).ConfigureAwait(false);
+        await bob.LinkRelayAsync(relay).ConfigureAwait(false);
+
+        // 2. Obtain Bob's routing token and expected public IdentityKey from Bob's invitation
+        var bobInviteUri = await bob.CreateInvitationAsync(relay).ConfigureAwait(false);
+        var codec = bob.Services.GetRequiredService<Percolator.Application.Invitations.IPeerInvitationCodec>();
+        var bobPayload = codec.Decode(bobInviteUri).Value!;
+
+        // 3. Persist Bob's mailbox routing capability in Alice's routing repository (Alice has NO local mailbox for Bob)
+        var aliceRoutingRepo = alice.Services.GetRequiredService<IPeerMailboxRoutingRepository>();
+        await aliceRoutingRepo.SaveAsync(new PeerMailboxRoutingCapability(
+            bob.IdentityId,
+            bobPayload.RoutingToken,
+            Percolator.Domain.Delivery.ValueObjects.DeliveryToken.GenerateRandom(),
+            relay.Endpoint,
+            LastObservedAtUtc: DateTimeOffset.UtcNow)).ConfigureAwait(false);
+
+        // 4. Alice fetches Bob's consumable prekey bundle using Alice's local requesterId
+        var bundleProvider = alice.Services.GetRequiredService<IPreKeyBundleProvider>();
+        var result = await bundleProvider.FetchConsumableBundleAsync(
+            alice.IdentityId,
+            bob.IdentityId,
+            Percolator.Domain.Identities.ValueObjects.DeviceId.Primary,
+            relay.Endpoint).ConfigureAwait(false);
+
+        result.IsSuccess.Should().BeTrue($"expected authenticated fetch to succeed, got {result.Error.Code}: {result.Error.Description}");
+        result.Value!.IdentityKey.Should().Be(bobPayload.IdentityKey);
+        result.Value.DeviceId.Should().Be(Percolator.Domain.Identities.ValueObjects.DeviceId.Primary);
+    }
 }

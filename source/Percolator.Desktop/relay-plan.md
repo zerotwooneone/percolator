@@ -1829,8 +1829,8 @@ Academic and protocol audit confirms that stranger discovery on a single untrust
   - Add explicit `PublicIdentityId requesterId` parameter to `IPreKeyBundleProvider.FetchConsumableBundleAsync` and update [`PeerConnectionService.ConnectToPeerAsync`](file:///C:/Users/squir/source/repos/percolator/source/Percolator.Application/Services/PeerConnectionService.cs#L156) to pass `_localIdentityId` as `requesterId`.
   - Verify existing integration/unit tests cover `PeerConnectionService.ConnectToPeerAsync` authenticating with the local caller's mailbox tokens and targeting the remote peer's `RoutingToken`.
 - **Acceptance Criteria:**
-  - [ ] `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` uses local `requesterId` for `IRelayDirectory.GetMailboxTokensAsync` and remote `routingCapability.RoutingToken` as target.
-  - [ ] Full solution test suite passes.
+  - [x] `PreKeyBundleProviderAdapter.FetchConsumableBundleAsync` uses local `requesterId` for `IRelayDirectory.GetMailboxTokensAsync` and remote `routingCapability.RoutingToken` as target.
+  - [x] Full non-Desktop solution build and all 12 test suites pass 100% (1,093/1,093 tests; Desktop Step 15 refactor remains pending).
 
 ---
 

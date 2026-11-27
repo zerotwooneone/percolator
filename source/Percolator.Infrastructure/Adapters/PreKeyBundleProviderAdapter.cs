@@ -109,31 +109,49 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
     }
 
     public async Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
+        PublicIdentityId requesterId,
         PublicIdentityId peerId,
         DeviceId? deviceId = null,
         RelayEndpoint? relayEndpoint = null,
         CancellationToken ct = default)
     {
+        if (!requesterId.IsValid)
+        {
+            return DomainResult<PreKeyBundle>.Failure(new DomainError(
+                "INVALID_REQUESTER_ID",
+                "Requester identity is invalid."));
+        }
+
         var targetDevice = deviceId ?? DeviceId.Primary;
+
+        PeerMailboxRoutingCapability? routingCapability = null;
+        if (relayEndpoint != null)
+        {
+            var routes = await _routingRepository.GetRoutesForPeerAsync(peerId, ct).ConfigureAwait(false);
+            routingCapability = routes.FirstOrDefault(r => r.RelayEndpoint == relayEndpoint);
+        }
+
+        routingCapability ??= await _routingRepository.GetByPeerIdAsync(peerId, ct).ConfigureAwait(false);
+        if (routingCapability == null)
+        {
+            return DomainResult<PreKeyBundle>.Failure(new DomainError(
+                "PREKEY_BUNDLE_NOT_FOUND",
+                $"No prekey bundle hosted for peer '{peerId}'."));
+        }
 
         if (_preKeyRepository != null)
         {
-            var capability = await _routingRepository.GetByPeerIdAsync(peerId, ct).ConfigureAwait(false);
-            if (capability != null)
+            var consumed = await _preKeyRepository.ConsumePreKeyBundleAsync(routingCapability.RoutingToken, targetDevice, ct).ConfigureAwait(false);
+            if (consumed != null)
             {
-                var consumed = await _preKeyRepository.ConsumePreKeyBundleAsync(capability.RoutingToken, targetDevice, ct).ConfigureAwait(false);
-                if (consumed != null)
-                {
-                    return DomainResult<PreKeyBundle>.Success(consumed);
-                }
+                return DomainResult<PreKeyBundle>.Success(consumed);
             }
         }
 
-        var routingCapability = await _routingRepository.GetByPeerIdAsync(peerId, ct).ConfigureAwait(false);
-        var effectiveEndpoint = relayEndpoint ?? routingCapability?.RelayEndpoint;
-        if (routingCapability != null && effectiveEndpoint != null)
+        var effectiveEndpoint = relayEndpoint ?? routingCapability.RelayEndpoint;
+        if (effectiveEndpoint != null)
         {
-            return await FetchAuthenticatedAsync(peerId, effectiveEndpoint, routingCapability.RoutingToken, targetDevice, ct).ConfigureAwait(false);
+            return await FetchAuthenticatedAsync(requesterId, effectiveEndpoint, routingCapability.RoutingToken, targetDevice, ct).ConfigureAwait(false);
         }
 
         return DomainResult<PreKeyBundle>.Failure(new DomainError(

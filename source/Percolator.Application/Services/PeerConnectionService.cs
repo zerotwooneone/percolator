@@ -104,6 +104,7 @@ public sealed class PeerConnectionService : IPeerConnectionService
 
         // 1. Fetch consumable PreKeyBundle using the driven port
         var bundleResult = await _preKeyBundleProvider.FetchConsumableBundleAsync(
+            _localIdentityId,
             targetPeerId,
             targetDeviceId,
             relayEndpoint,

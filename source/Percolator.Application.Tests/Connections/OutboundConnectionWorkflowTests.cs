@@ -254,6 +254,7 @@ public sealed class OutboundConnectionWorkflowTests
         public DomainError? ErrorToReturn { get; set; }
 
         public Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
+            PublicIdentityId requesterId,
             PublicIdentityId peerId,
             DeviceId? deviceId = null,
             RelayEndpoint? relayEndpoint = null,

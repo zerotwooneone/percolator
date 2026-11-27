@@ -13,6 +13,7 @@ namespace Percolator.Application.Ports;
 public interface IPreKeyBundleProvider
 {
     Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
+        PublicIdentityId requesterId,
         PublicIdentityId peerId,
         DeviceId? deviceId = null,
         RelayEndpoint? relayEndpoint = null,

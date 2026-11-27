@@ -35,15 +35,18 @@ public sealed class PeerConnectionServiceTests
     {
         public PreKeyBundle? BundleToReturn { get; set; }
         public DomainError? ErrorToReturn { get; set; }
+        public PublicIdentityId LastRequesterId { get; private set; }
         public PublicIdentityId LastRequestedPeerId { get; private set; }
         public RelayEndpoint? LastRequestedEndpoint { get; private set; }
 
         public Task<DomainResult<PreKeyBundle>> FetchConsumableBundleAsync(
+            PublicIdentityId requesterId,
             PublicIdentityId peerId,
             DeviceId? deviceId = null,
             RelayEndpoint? relayEndpoint = null,
             CancellationToken ct = default)
         {
+            LastRequesterId = requesterId;
             LastRequestedPeerId = peerId;
             LastRequestedEndpoint = relayEndpoint;
 
@@ -330,6 +333,10 @@ public sealed class PeerConnectionServiceTests
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().NotBeNull();
         result.Value!.RemoteDeviceId.Should().Be(_dummyBundle.DeviceId);
+
+        _bundleProvider.LastRequesterId.Should().Be(_localId);
+        _bundleProvider.LastRequestedPeerId.Should().Be(targetPeerId);
+        _bundleProvider.LastRequestedEndpoint.Should().Be(relayEndpoint);
 
         var savedChannel = await _channelRepository.GetDirectByIdAsync(result.Value.ChannelId);
         savedChannel.Should().NotBeNull();
