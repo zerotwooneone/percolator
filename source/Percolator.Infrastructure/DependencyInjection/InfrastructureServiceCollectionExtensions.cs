@@ -392,7 +392,6 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IDesktopFileStorage, PortableDesktopFileStore>();
         services.AddSingleton(new CallbackEndpointValidatorOptions { AllowLan = true, AllowLoopback = true });
         services.AddSingleton<CallbackEndpointValidator>();
-        services.AddSingleton<ITransferStreamPoolFactory, TcpMultiStreamPoolFactory>();
         services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
         services.AddSingleton<ITransferSessionCertificateStore, SqliteTransferSessionCertificateStore>();
         services.AddSingleton<ITransferPeerTransport, TransferPeerTransport>();

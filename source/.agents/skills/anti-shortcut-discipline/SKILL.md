@@ -30,7 +30,7 @@ This skill enforces zero-tolerance standards against AI code shortcuts in Percol
 | **12** | **Semantic Test Assertions** | `services.Should().HaveCount(N)` | Assert specific capability containment (`Should().Contain(...)`) and execution contracts, never magic numbers. |
 | **13** | **Zero In-Process Transport Bypasses** | `relay.Services.CreateScope()` in client/coordinator | In simulated multi-node environments, client-to-relay operations (e.g. roster mutations) must call real gRPC services (`AnonymousGroupRelayService`), never mutate the relay DB via DI. |
 | **14** | **No Coordinator State Backdoors** | `_groupMembers` dictionary in coordinator | The coordinator/harness must not maintain side-channel state dictionaries to spoon-feed state out-of-band to nodes. Node state transitions must occur solely through protocol messages or local storage. |
-| **15** | **Deterministic Signal Awaiting** | `await Task.Delay(150)` in scenario steps | Prohibit arbitrary sleep delays as synchronization substitutes. Await explicit reactive signals (`_stateBus.Signals`), outbox job completions, or deterministic task tokens. |
+| **15** | **Deterministic Signal Awaiting** | `await Task.Delay(150)` in unit tests / scenario steps | Prohibit arbitrary sleep delays as synchronization substitutes in unit tests and simulated scenario steps. Await explicit reactive signals (`_stateBus.Signals`), outbox job completions, or deterministic task tokens. (Integration tests exercising real OS sockets, rate limiters, or real-wire transport are excluded when awaiting physical events or timeouts). |
 | **16** | **Zero Captive Scope Facades (`IDbContextFactory` Standard)** | `Desktop*QueryService` creating `scope.ServiceProvider.GetService<Sql*>() ?? GetServices<I*>()` | Prohibit captive-dependency facade wrappers that create scopes and perform fallback resolution gymnastics. In desktop/client applications, inject `IDbContextFactory<TDbContext>` directly into query services/repositories so they can be registered as thread-safe Singletons without intermediate facades. |
 
 ---
@@ -173,7 +173,7 @@ var invite = new GroupInvitationDto(..., initialMembers);
 
 ### 15. Deterministic Signal Awaiting (Zero Magic Sleeps)
 ```csharp
-// BAD: Arbitrary sleep delays hoping async work finished
+// BAD: Arbitrary sleep delays hoping async work finished in unit tests or simulated scenarios
 await Task.Delay(200, ct);
 
 // GOOD: Await deterministic signal on state bus with timeout
@@ -181,6 +181,7 @@ await _stateBus.Signals
     .Where(s => s.NodeId == recipient.Id && s.Category == SignalCategory.ChatTranscriptChanged)
     .FirstAsync(cancellationToken: ct);
 ```
+> **Note on Integration Tests:** Real-transport integration tests (exercising physical network sockets, OS loopback, SCTP/TCP buffer drains, rate limiters, or external timeouts) sometimes legitimately need bounded delays or timeouts to wait for physical events or quota exhaustion to take effect. Such tests are excluded from this rule provided delays are reasonably bounded.
 
 ### 16. Zero Captive Scope Facades (IDbContextFactory Standard)
 ```csharp

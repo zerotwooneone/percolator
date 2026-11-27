@@ -1,6 +1,7 @@
 namespace Percolator.Infrastructure.Tests.Plugins.FileTransfer;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -14,11 +15,13 @@ using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities;
+using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Common;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.FileTransfer;
 using Percolator.Infrastructure.Plugins.FileTransfer.WebRtc;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
+using Percolator.Infrastructure.Transport;
 
 [TestFixture]
 public sealed class SdpSecurityValidatorAndCertStoreTests
@@ -157,6 +160,102 @@ public sealed class SdpSecurityValidatorAndCertStoreTests
         using var badStream = new MemoryStream(badHeader);
         var actStream = async () => await SwarmFrameCodec.ReadFramePooledAsync(badStream);
         await actStream.Should().ThrowAsync<InvalidDataException>();
+    }
+
+    [Test]
+    public void FrameSerialization_All12Frames_RoundtripsSuccessfully()
+    {
+        // 1. Handshake
+        var handshake = new HandshakeFrame(
+            StreamAuthToken.Generate(),
+            TransferSessionId.New(),
+            StreamIndex.FromInt(2),
+            Domain.Identities.PublicIdentityId.New());
+        var decodedHandshake = (HandshakeFrame)RoundtripFrame(handshake);
+        decodedHandshake.AuthToken.Span.SequenceEqual(handshake.AuthToken.Span).Should().BeTrue();
+        decodedHandshake.SessionId.Should().Be(handshake.SessionId);
+        decodedHandshake.StreamIndex.Should().Be(handshake.StreamIndex);
+        decodedHandshake.SenderPeerId.Should().Be(handshake.SenderPeerId);
+
+        // 2. Bitfield
+        var bitfield = Bitfield.Full(ChunkCount.FromInt(10));
+        var bitfieldFrame = new BitfieldFrame(bitfield);
+        var decodedBitfield = (BitfieldFrame)RoundtripFrame(bitfieldFrame);
+        decodedBitfield.Bitfield.PopCount.Should().Be(bitfield.PopCount);
+        decodedBitfield.Bitfield.TotalChunks.Should().Be(bitfield.TotalChunks);
+
+        // 3. Have
+        var have = new HaveFrame(ChunkIndex.FromInt(42));
+        var decodedHave = (HaveFrame)RoundtripFrame(have);
+        decodedHave.ChunkIndex.Should().Be(have.ChunkIndex);
+
+        // 4. RequestChunk
+        var request = new RequestChunkFrame(ChunkIndex.FromInt(7));
+        var decodedRequest = (RequestChunkFrame)RoundtripFrame(request);
+        decodedRequest.ChunkIndex.Should().Be(request.ChunkIndex);
+
+        // 5. ChunkData
+        byte[] payload = new byte[100];
+        RandomNumberGenerator.Fill(payload);
+        var chunkData = new ChunkDataFrame(ChunkIndex.FromInt(12), PlaintextChunkData.FromBytes(payload));
+        var decodedChunk = (ChunkDataFrame)RoundtripFrame(chunkData);
+        decodedChunk.ChunkIndex.Should().Be(chunkData.ChunkIndex);
+        decodedChunk.Data.Span.SequenceEqual(payload).Should().BeTrue();
+
+        // 6. CancelChunk
+        var cancel = new CancelChunkFrame(ChunkIndex.FromInt(99));
+        var decodedCancel = (CancelChunkFrame)RoundtripFrame(cancel);
+        decodedCancel.ChunkIndex.Should().Be(cancel.ChunkIndex);
+
+        // 7. Choke
+        var choke = new ChokeFrame();
+        RoundtripFrame(choke).Should().BeOfType<ChokeFrame>();
+
+        // 8. Unchoke
+        var unchoke = new UnchokeFrame();
+        RoundtripFrame(unchoke).Should().BeOfType<UnchokeFrame>();
+
+        // 9. Interested
+        var interested = new InterestedFrame();
+        RoundtripFrame(interested).Should().BeOfType<InterestedFrame>();
+
+        // 10. NotInterested
+        var notInterested = new NotInterestedFrame();
+        RoundtripFrame(notInterested).Should().BeOfType<NotInterestedFrame>();
+
+        // 11. KeepAlive
+        var keepAlive = new KeepAliveFrame();
+        RoundtripFrame(keepAlive).Should().BeOfType<KeepAliveFrame>();
+
+        // 12. PexPeers
+        var candidates = new List<DirectEndpointCandidate>
+        {
+            new(EndpointHost.Parse("192.168.1.10"), PortNumber.FromInt(49200), DirectCandidateKind.DirectLan),
+            new(EndpointHost.Parse("203.0.113.50"), PortNumber.FromInt(49201), DirectCandidateKind.DirectWanUpnp)
+        };
+        var pex = new PexPeersFrame(candidates);
+        var decodedPex = (PexPeersFrame)RoundtripFrame(pex);
+        decodedPex.Candidates.Should().HaveCount(2);
+        decodedPex.Candidates[0].Host.Value.Should().Be("192.168.1.10");
+        decodedPex.Candidates[0].Port.Value.Should().Be(49200);
+        decodedPex.Candidates[0].Kind.Should().Be(DirectCandidateKind.DirectLan);
+        decodedPex.Candidates[1].Host.Value.Should().Be("203.0.113.50");
+        decodedPex.Candidates[1].Port.Value.Should().Be(49201);
+        decodedPex.Candidates[1].Kind.Should().Be(DirectCandidateKind.DirectWanUpnp);
+    }
+
+    [Test]
+    public void FrameValidation_MalformedPayloadLength_ThrowsInvalidDataException()
+    {
+        byte[] truncated = new byte[10];
+        var act = () => SwarmFrameCodec.Decode((byte)StreamFrameType.Handshake, truncated);
+        act.Should().Throw<InvalidDataException>();
+    }
+
+    private static IStreamFramePayload RoundtripFrame(IStreamFramePayload frame)
+    {
+        (byte opcode, byte[] payload) = SwarmFrameCodec.Encode(frame);
+        return SwarmFrameCodec.Decode(opcode, payload);
     }
 
     private static string BuildValidSdp(CertSha256Fingerprint fingerprint) =>

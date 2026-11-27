@@ -97,8 +97,17 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         IRtcDataChannel channel,
         StreamIndex index,
         int highWatermarkBytes,
+        int lowWatermarkBytes)
+        : this(channel, index, highWatermarkBytes, lowWatermarkBytes, onDisposed: null)
+    {
+    }
+
+    public WebRtcDataChannelAdapter(
+        IRtcDataChannel channel,
+        StreamIndex index,
+        int highWatermarkBytes,
         int lowWatermarkBytes,
-        Action? onDisposed = null)
+        Action? onDisposed)
     {
         _channel = channel ?? throw new ArgumentNullException(nameof(channel));
         Index = index;

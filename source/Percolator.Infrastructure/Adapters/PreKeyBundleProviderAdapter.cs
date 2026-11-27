@@ -27,8 +27,16 @@ public sealed class PreKeyBundleProviderAdapter : IPreKeyBundleProvider
     public PreKeyBundleProviderAdapter(
         IPeerMailboxRoutingRepository routingRepository,
         IPeerGrpcChannelFactory channelFactory,
+        IRelayDirectory relayDirectory)
+        : this(routingRepository, channelFactory, relayDirectory, preKeyRepository: null)
+    {
+    }
+
+    public PreKeyBundleProviderAdapter(
+        IPeerMailboxRoutingRepository routingRepository,
+        IPeerGrpcChannelFactory channelFactory,
         IRelayDirectory relayDirectory,
-        IRelayPreKeyRepository? preKeyRepository = null)
+        IRelayPreKeyRepository? preKeyRepository)
     {
         _routingRepository = routingRepository ?? throw new ArgumentNullException(nameof(routingRepository));
         _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
