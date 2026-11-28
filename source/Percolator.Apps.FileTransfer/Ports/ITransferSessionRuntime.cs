@@ -53,13 +53,11 @@ public interface ITransferSessionRuntime : IAsyncDisposable
         TransferSessionId sessionId,
         PublicIdentityId senderId,
         FileTransferIceSignalPayload signal,
-        Func<FileTransferIceSignalPayload, CancellationToken, ValueTask> sendSignalReplyAsync,
         CancellationToken ct = default);
 
     ValueTask<DomainResult> InitiateDirectConnectionAsync(
         TransferSessionId sessionId,
         PublicIdentityId remotePeerId,
-        Func<FileTransferIceSignalPayload, CancellationToken, ValueTask> sendSignalAsync,
         CancellationToken ct = default);
 
     ValueTask<DomainResult> ConnectViaTransferPipeAsync(

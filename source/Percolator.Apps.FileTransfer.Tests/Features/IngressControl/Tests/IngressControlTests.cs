@@ -42,6 +42,8 @@ public sealed class IngressControlTests
             new RecordingTransferRateLimiter(),
             _clock,
             new InMemoryEventBusForTests(),
+            _serializer,
+            new DirectBackgroundPayloadDispatcher(_payloadSender),
             new TransferSessionRuntimeOptions());
     }
 

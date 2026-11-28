@@ -361,8 +361,7 @@ public sealed class FileTransferEndToEndIntegrationTests
         DomainResult rejected = await bobRuntime.HandleInboundIceSignalAsync(
             sessionId,
             charlie.IdentityId,
-            forgedSignal,
-            (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            forgedSignal).ConfigureAwait(false);
 
         rejected.IsFailure.Should().BeTrue();
         rejected.Error.Code.Should().Be("Transfer.UnauthorizedOrRevokedPeer");
@@ -516,8 +515,7 @@ public sealed class FileTransferEndToEndIntegrationTests
 
         DomainResult directFailure = await aliceNoPipeRuntime.InitiateDirectConnectionAsync(
             noPipeSessionId,
-            bobNoPipe.IdentityId,
-            (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            bobNoPipe.IdentityId).ConfigureAwait(false);
 
         directFailure.IsFailure.Should().BeTrue();
         directFailure.Error.Code.Should().Be(TransferTransportErrorCodes.DirectNatTraversalFailed);

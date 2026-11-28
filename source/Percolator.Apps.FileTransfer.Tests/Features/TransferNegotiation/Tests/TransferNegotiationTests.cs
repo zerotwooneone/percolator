@@ -51,6 +51,8 @@ public sealed class TransferNegotiationTests
             new RecordingTransferRateLimiter(),
             _clock,
             new InMemoryEventBusForTests(),
+            _serializer,
+            new DirectBackgroundPayloadDispatcher(_payloadSender),
             new TransferSessionRuntimeOptions());
         var defaultFilter = new FileTransferIngressFilter(_policyRepository) { IsEnabled = true };
 

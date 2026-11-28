@@ -16,7 +16,9 @@ using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Identities;
+using Microsoft.Extensions.Logging.Abstractions;
 using Percolator.Infrastructure.Common;
+using Percolator.Infrastructure.Events;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.FileTransfer;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
@@ -28,6 +30,8 @@ public sealed class WebRtcPeerTransportTests
     private SqliteTestDb _dbA = null!;
     private SqliteTestDb _dbB = null!;
     private PeerGrpcChannelFactory _channelFactory = null!;
+    private InMemoryEventBus _eventBusA = null!;
+    private InMemoryEventBus _eventBusB = null!;
     private TransferPeerTransport _transportA = null!;
     private TransferPeerTransport _transportB = null!;
     private UdpStunResponderService _stunService = null!;
@@ -43,8 +47,11 @@ public sealed class WebRtcPeerTransportTests
         var certStoreA = new SqliteTransferSessionCertificateStore(_dbA.ContextFactory, clock);
         var certStoreB = new SqliteTransferSessionCertificateStore(_dbB.ContextFactory, clock);
 
-        _transportA = new TransferPeerTransport(_channelFactory, certStoreA);
-        _transportB = new TransferPeerTransport(_channelFactory, certStoreB);
+        _eventBusA = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+        _eventBusB = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+
+        _transportA = new TransferPeerTransport(_channelFactory, certStoreA, _eventBusA, clock);
+        _transportB = new TransferPeerTransport(_channelFactory, certStoreB, _eventBusB, clock);
 
         var policyHolder = new RelayHostingPolicyHolder(RelayHostingPolicy.Default with
         {
@@ -66,6 +73,8 @@ public sealed class WebRtcPeerTransportTests
     {
         await _transportA.DisposeAsync();
         await _transportB.DisposeAsync();
+        _eventBusA.Dispose();
+        _eventBusB.Dispose();
         await _stunService.StopAsync(CancellationToken.None);
         await _stunService.DisposeAsync();
         _channelFactory.Dispose();
@@ -99,27 +108,21 @@ public sealed class WebRtcPeerTransportTests
         _transportB.ActiveConnectionCount.Should().Be(1);
 
         // Wire trickle ICE candidate relay between peer A and peer B (simulating E2E signaling channel)
-        connA.SignalProduced += evt =>
+        using IDisposable subA = _eventBusA.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.Kind == IceSignalKind.IceCandidate)
+            if (evt.SessionId == sessionId)
             {
-                _ = Task.Run(async () =>
-                {
-                    try { await connB.AddRemoteIceCandidateAsync(evt.SdpOrCandidate, evt.CandidateMid ?? string.Empty); } catch { }
-                });
+                try { await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
             }
-        };
+        });
 
-        connB.SignalProduced += evt =>
+        using IDisposable subB = _eventBusB.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.Kind == IceSignalKind.IceCandidate)
+            if (evt.SessionId == sessionId)
             {
-                _ = Task.Run(async () =>
-                {
-                    try { await connA.AddRemoteIceCandidateAsync(evt.SdpOrCandidate, evt.CandidateMid ?? string.Empty); } catch { }
-                });
+                try { await connA.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
             }
-        };
+        });
 
         // 1. Exchange SDP Offer & Answer with E2E-pinned DTLS SHA-256 fingerprints
         string offerSdp = await connA.CreateOfferAsync();
@@ -250,20 +253,20 @@ public sealed class WebRtcPeerTransportTests
         ITransferPeerConnection connB = await _transportB.CreateDirectConnectionAsync(
             new DirectPeerConnectionOptions(sessionId, peerAId, IsInitiator: false, HandshakeTimeout: TimeSpan.FromSeconds(10)));
 
-        connA.SignalProduced += evt =>
+        using IDisposable subA = _eventBusA.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.Kind == IceSignalKind.IceCandidate)
+            if (evt.SessionId == sessionId)
             {
-                _ = Task.Run(async () => { try { await connB.AddRemoteIceCandidateAsync(evt.SdpOrCandidate, evt.CandidateMid ?? string.Empty); } catch { } });
+                try { await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
             }
-        };
-        connB.SignalProduced += evt =>
+        });
+        using IDisposable subB = _eventBusB.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.Kind == IceSignalKind.IceCandidate)
+            if (evt.SessionId == sessionId)
             {
-                _ = Task.Run(async () => { try { await connA.AddRemoteIceCandidateAsync(evt.SdpOrCandidate, evt.CandidateMid ?? string.Empty); } catch { } });
+                try { await connA.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
             }
-        };
+        });
 
         string offer = await connA.CreateOfferAsync();
         string answer = await connB.AcceptOfferAndCreateAnswerAsync(offer, connA.LocalDtlsFingerprint);

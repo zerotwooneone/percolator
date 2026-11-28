@@ -35,13 +35,6 @@ public sealed class TransferTransportException : Exception
     }
 }
 
-public sealed record IceSignalOutboundEvent(
-    TransferSessionId SessionId,
-    PublicIdentityId RemotePeerId,
-    IceSignalKind Kind,
-    string SdpOrCandidate,
-    string? CandidateMid,
-    CertSha256Fingerprint? LocalDtlsFingerprint);
 
 public sealed record DirectPeerConnectionOptions(
     TransferSessionId SessionId,
@@ -83,7 +76,6 @@ public interface ITransferPeerConnection : IAsyncDisposable
     CertSha256Fingerprint? LocalDtlsFingerprint { get; }
     CertSha256Fingerprint? RemoteDtlsFingerprint { get; }
 
-    event Action<IceSignalOutboundEvent>? SignalProduced;
 
     ValueTask<string> CreateOfferAsync(CancellationToken ct = default);
 

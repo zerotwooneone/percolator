@@ -9,6 +9,7 @@ using Percolator.Application.Ports;
 using Percolator.Apps.Chat.DependencyInjection;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.FileTransfer;
+using Percolator.Apps.FileTransfer.DependencyInjection;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Desktop.Common.Navigation;
@@ -54,7 +55,13 @@ internal static class DesktopSessionServiceCollectionExtensions
         // are instantiated on-demand inside scoped dialog lifetimes via IWindowManager (ActivatorUtilities + IDialogContext).
         services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
         services.AddSingleton<ICurrentPersonaService, CurrentPersonaService>();
-        services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, DesktopNetworkEndpointDiscoveryPort>();
+        services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>(sp =>
+        {
+            var currentPersona = sp.GetRequiredService<ICurrentPersonaService>();
+            return new Percolator.Infrastructure.Plugins.FileTransfer.NetworkInterfaceEndpointDiscoveryPort(
+                () => currentPersona.CurrentPersona?.BoundPort,
+                allowLoopback: true);
+        });
 
         // Navigation and Left Rail state services (DESK-05)
         services.AddSingleton<IShellNavigationStateService, ShellNavigationStateService>();
@@ -89,28 +96,9 @@ internal static class DesktopSessionServiceCollectionExtensions
 
         // App-payload dispatch surface for the mailbox drain (DRAIN-06): without these,
         // the shared IAppRouter registers no handlers and drained payloads die as
-        // unhandled terminal rejections. AddChatApp is verbatim-safe (all lifetimes
-        // consistent); file transfer registers the session-scoped TransferSessionRuntime
-        // (disposed on vault lock) and scoped FileTransferPayloadHandler while omitting
-        // FileTransferIngressFilter whose IsEnabled default of false would discard ingress.
+        // unhandled terminal rejections.
         services.AddChatApp();
-        services.AddSingleton<IAppPlugin, FileTransferPlugin>();
-        services.AddSingleton<TransferSessionRuntimeOptions>(_ => new TransferSessionRuntimeOptions());
-        services.AddSingleton<IBackgroundPayloadDispatcher, Percolator.Apps.FileTransfer.Features.Runtime.ScopedBackgroundPayloadDispatcher>();
-        services.AddSingleton<ITransferSessionRuntime, Percolator.Apps.FileTransfer.Features.Runtime.TransferSessionRuntime>();
-        services.AddSingleton<FileTransferIngressFilter>(sp =>
-        {
-            var repo = sp.GetRequiredService<IFileTransferFilterPolicyRepository>();
-            return new FileTransferIngressFilter(repo) { IsEnabled = true };
-        });
-        services.AddSingleton<IAppIngressFilter>(sp => sp.GetRequiredService<FileTransferIngressFilter>());
-        services.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
-        services.AddScoped<IFileTransferActionHandler, Percolator.Apps.FileTransfer.Features.TransferNegotiation.FileTransferActionHandler>();
-        services.AddScoped<Percolator.Apps.FileTransfer.Features.MultiStreamEngine.TransferSessionCoordinator>();
-        services.AddScoped<Percolator.Apps.FileTransfer.Features.Storage.DiskChunkAssembler>();
-        services.AddScoped<Percolator.Apps.FileTransfer.Features.MultiStreamEngine.ChunkPipelineScheduler>();
-        services.AddScoped<Percolator.Apps.FileTransfer.Features.SwarmCoordination.SwarmCoordinator>();
-        services.AddScoped<Percolator.Apps.FileTransfer.Features.SwarmCoordination.EndgameCoordinator>();
+        services.AddFileTransferApp(enableIngressByDefault: true);
 
         // Session-bound window manager: window scopes come off the SESSION root — no
         // provider parameter on Show/ShowDialogAsync and zero call-site changes (the

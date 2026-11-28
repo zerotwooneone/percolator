@@ -45,6 +45,7 @@ public sealed class ActionHandlerAndQueryTests
         _blobStorage = new InMemoryBlobStorageService();
         _endpointDiscovery = new FakeNetworkEndpointDiscoveryPort();
         _certStore = new InMemoryTransferSessionCertificateStore();
+        _serializer = new TestPayloadSerializer();
         _runtime = new TransferSessionRuntime(
             new FakeTransferPeerTransport(),
             _certStore,
@@ -53,8 +54,9 @@ public sealed class ActionHandlerAndQueryTests
             new RecordingTransferRateLimiter(),
             _clock,
             new InMemoryEventBusForTests(),
+            _serializer,
+            new DirectBackgroundPayloadDispatcher(_payloadSender),
             new TransferSessionRuntimeOptions());
-        _serializer = new TestPayloadSerializer();
         _ingressFilter = new FileTransferIngressFilter(new InMemoryFilterPolicyRepository()) { IsEnabled = true };
 
         _handler = new FileTransferActionHandler(
@@ -309,6 +311,8 @@ public sealed class ActionHandlerAndQueryTests
             new RecordingTransferRateLimiter(),
             _clock,
             new InMemoryEventBusForTests(),
+            _serializer,
+            new DirectBackgroundPayloadDispatcher(recipientSender),
             new TransferSessionRuntimeOptions());
 
         InMemoryTransferSessionTransportStore recipientTransportStore = new();
@@ -414,5 +418,33 @@ public sealed class ActionHandlerAndQueryTests
         expired.Should().Be(1);
         staleSession.State.Should().Be(TransferSessionState.Cancelled);
         recentSession.State.Should().Be(TransferSessionState.PendingConsent);
+    }
+
+    [Test]
+    public async Task UT_CMD_07_CancelTransferWithoutTransportContextTransitionsToCancelledAndSendsZeroPayloads()
+    {
+        TransferSessionId sessionId = TransferSessionId.New();
+        PublicIdentityId initiator = PublicIdentityId.New();
+        PublicIdentityId recipient = PublicIdentityId.New();
+
+        TransferManifest manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("NoTransportCancelTest"),
+            ChunkSizeBytes.Default,
+            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32])]),
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("test.bin"), FileSizeBytes.FromBytes(100), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
+
+        TransferSession session = TransferSession.CreateOutgoing1to1(sessionId, initiator, recipient, manifest, SeedRatio.Zero, _clock);
+        await _sessionRepo.SaveSessionAsync(session);
+
+        // Ensure NO transport context exists in _transportStore for this sessionId
+        TransferSessionTransportContext? ctx = await _transportStore.GetTransportContextAsync(sessionId);
+        ctx.Should().BeNull();
+
+        DomainResult cancelResult = await _handler.CancelTransferAsync(sessionId, TransferTerminationReason.SenderCancelled);
+
+        cancelResult.IsSuccess.Should().BeTrue();
+        session.State.Should().Be(TransferSessionState.Cancelled);
+        _payloadSender.SentPayloads.Should().BeEmpty("No wire payload or synthetic ChannelId must be sent when transport context is missing");
     }
 }

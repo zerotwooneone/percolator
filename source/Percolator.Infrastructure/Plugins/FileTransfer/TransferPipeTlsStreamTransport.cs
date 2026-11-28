@@ -15,9 +15,11 @@ using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Domain.Common;
 using Percolator.Infrastructure.Plugins.FileTransfer.WebRtc;
 using Percolator.Infrastructure.Protos;
 using Percolator.Infrastructure.Transport;
+using Percolator.PluginSdk.Events;
 
 /// <summary>
 /// Full-duplex .NET Stream over the Exchange's zero-disk bidirectional TransferPipeService.OpenPipe gRPC call.
@@ -617,6 +619,8 @@ public sealed class TransferPeerTransport : ITransferPeerTransport
 {
     private readonly IPeerGrpcChannelFactory _channelFactory;
     private readonly ITransferSessionCertificateStore _certificateStore;
+    private readonly IEventPublisher _eventPublisher;
+    private readonly IDateTimeProvider _clock;
     private readonly object _sync = new();
     private readonly Dictionary<TransferSessionId, HashSet<IAsyncDisposable>> _activeBySession = new();
     private readonly Dictionary<TransferSessionId, int> _pendingBySession = new();
@@ -627,10 +631,14 @@ public sealed class TransferPeerTransport : ITransferPeerTransport
 
     public TransferPeerTransport(
         IPeerGrpcChannelFactory channelFactory,
-        ITransferSessionCertificateStore certificateStore)
+        ITransferSessionCertificateStore certificateStore,
+        IEventPublisher eventPublisher,
+        IDateTimeProvider clock)
     {
         _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
         _certificateStore = certificateStore ?? throw new ArgumentNullException(nameof(certificateStore));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
     public ValueTask<ITransferPeerConnection> CreateDirectConnectionAsync(
@@ -648,6 +656,8 @@ public sealed class TransferPeerTransport : ITransferPeerTransport
         {
             adapter = new WebRtcPeerConnectionAdapter(
                 options,
+                _eventPublisher,
+                _clock,
                 () => UnregisterConnection(options.SessionId, adapter!));
 
             CommitReservedConnection(options.SessionId, adapter);

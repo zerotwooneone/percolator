@@ -406,7 +406,6 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ITransferSessionRepository, SqliteTransferSessionRepository>();
         services.AddSingleton<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
         services.AddSingleton<IFileTransferQueryService, SqlFileTransferQueryService>();
-        services.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
 
         services.AddHostedService<TransferOfferReaperWorker>();
 

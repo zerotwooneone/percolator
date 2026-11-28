@@ -167,8 +167,7 @@ public sealed class TransferSessionRuntimeTests
         DomainResult signalResult = await bob.Runtime.HandleInboundIceSignalAsync(
             sessionId,
             charlieId,
-            sneakySignal,
-            (_, _) => ValueTask.CompletedTask);
+            sneakySignal);
 
         signalResult.IsFailure.Should().BeTrue();
         signalResult.Error.Code.Should().Be("Transfer.UnauthorizedOrRevokedPeer");
@@ -327,7 +326,7 @@ public sealed class TransferSessionRuntimeTests
         PublicIdentityId peerId = PublicIdentityId.New();
 
         var node = CreateNode(localId, clock, serializer, blobStorage, endpointDiscovery);
-        node.EventBus.SubscriptionCount.Should().Be(1);
+        node.EventBus.SubscriptionCount.Should().Be(2, "Subscribes to PeerLeftSessionEvent and TransferIceCandidateDiscoveredEvent");
 
         List<InMemoryPairedTransferDataChannel> activeChannels = [];
         List<SwarmRendezvousId> rendezvousIds = [];
@@ -437,7 +436,6 @@ public sealed class TransferSessionRuntimeTests
 
         // Verify NullTransferStreamPool / ITransferStreamPool is NOT registered in production DI
         services.Any(d => d.ServiceType == typeof(ITransferStreamPool)).Should().BeFalse();
-        services.Any(d => d.ImplementationInstance?.GetType().Name == "NullTransferStreamPool").Should().BeFalse();
 
         // Supply Infrastructure port stubs with matching production lifetimes (Singleton / Scoped)
         services.AddSingleton<IDateTimeProvider>(new FakeDateTimeProvider());
@@ -472,6 +470,84 @@ public sealed class TransferSessionRuntimeTests
         payloadHandler.Should().BeOfType<FileTransferPayloadHandler>();
     }
 
+    [Test]
+    public async Task EventBusTrickleIceCandidates_DispatchesOutboundPayloadContextCorrectly()
+    {
+        var clock = new FakeDateTimeProvider();
+        var serializer = new TestPayloadSerializer();
+        var blobStorage = new InMemoryBlobStorageService();
+        var endpointDiscovery = new FakeNetworkEndpointDiscoveryPort();
+
+        var aliceId = PublicIdentityId.New();
+        var bobId = PublicIdentityId.New();
+        var channelId = ChannelId.New();
+        var sessionId = TransferSessionId.New();
+
+        await using var alice = CreateNode(aliceId, clock, serializer, blobStorage, endpointDiscovery);
+
+        var manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("Bundle"),
+            ChunkSizeBytes.Default,
+            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32])]),
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("f0.dat"), FileSizeBytes.FromBytes(100), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(clock.UtcNow))]);
+
+        // 1. OneToOne Session Setup
+        var session1to1 = TransferSession.CreateOutgoing1to1(sessionId, aliceId, bobId, manifest, SeedRatio.Zero, clock);
+        var transport1to1 = new TransferSessionTransportContext(
+            sessionId,
+            channelId,
+            aliceId,
+            SwarmRendezvousId.Generate(),
+            EphemeralSwarmPeerId.Generate(),
+            StreamAuthToken.Generate(),
+            DirectWanPolicy.DisabledByDefault,
+            RelayRendezvous: null,
+            DirectCandidates: [],
+            LocalRootPath: RootDirectoryPath.Parse(@"C:\Alice"),
+            IsGroupTransfer: false);
+
+        CertSha256Fingerprint bobCertFp = CertSha256Fingerprint.FromBytes(RandomNumberGenerator.GetBytes(32));
+
+        await alice.Runtime.StartOrUpdateSessionAsync(session1to1, transport1to1, RootDirectoryPath.Parse(@"C:\Alice"));
+        await alice.Runtime.RegisterPinnedPeerCertificateAsync(sessionId, bobId, bobCertFp);
+
+        await alice.Runtime.InitiateDirectConnectionAsync(sessionId, bobId);
+        var fakeConn = alice.PeerTransport.CreatedConnections.Single(c => c.SessionId == sessionId);
+
+        alice.PayloadSender.SentPayloads.Clear();
+
+        var candidateEvent = new TransferIceCandidateDiscoveredEvent(
+            Guid.NewGuid(),
+            clock.UtcNow,
+            sessionId,
+            bobId,
+            "candidate:1 1 UDP 2122260223 192.168.1.100 50000 typ host",
+            "0",
+            fakeConn.LocalDtlsFingerprint);
+
+        await alice.EventBus.PublishAsync(candidateEvent);
+
+        alice.PayloadSender.SentPayloads.Should().ContainSingle();
+        var sent1to1 = alice.PayloadSender.SentPayloads[0];
+        sent1to1.Route.Should().Be(DeliveryRoute.RelayedOneToOne);
+        sent1to1.RecipientIdentityId.Should().Be(bobId);
+        sent1to1.ChannelId.Should().Be(channelId);
+        sent1to1.Payload.Span[0].Should().Be((byte)FileTransferControlOpcode.IceSignal);
+
+        var signalPayload = serializer.Deserialize<FileTransferIceSignalPayload>(sent1to1.Payload.Slice(1)).Value;
+        signalPayload.Kind.Should().Be(IceSignalKind.IceCandidate);
+        signalPayload.SdpOrCandidate.Should().Be(candidateEvent.Candidate);
+        signalPayload.TargetPeerId.Should().BeNull("1:1 transfer should not populate TargetPeerId");
+
+        // 2. Stop session and verify candidate is ignored
+        alice.PayloadSender.SentPayloads.Clear();
+        await alice.Runtime.StopSessionAsync(sessionId);
+
+        await alice.EventBus.PublishAsync(candidateEvent);
+        alice.PayloadSender.SentPayloads.Should().BeEmpty("Candidate published after session stop must be ignored");
+    }
+
     private static TestTransferNode CreateNode(
         PublicIdentityId localId,
         FakeDateTimeProvider clock,
@@ -499,6 +575,8 @@ public sealed class TransferSessionRuntimeTests
             new RecordingTransferRateLimiter(),
             clock,
             eventBus,
+            serializer,
+            new DirectBackgroundPayloadDispatcher(payloadSender),
             new TransferSessionRuntimeOptions(SeedingTtl: seedingTtl));
 
         FileTransferActionHandler actionHandler = new(

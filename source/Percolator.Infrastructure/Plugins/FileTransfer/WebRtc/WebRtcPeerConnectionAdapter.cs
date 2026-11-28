@@ -14,6 +14,8 @@ using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.MultiStreamEngine;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Domain.Common;
+using Percolator.PluginSdk.Events;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 /// <summary>
@@ -31,14 +33,17 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
     private static int _nativePreloaded;
 
     private readonly DirectPeerConnectionOptions _options;
+    private readonly IEventPublisher _eventPublisher;
+    private readonly IDateTimeProvider _clock;
     private readonly Action _onDisposed;
     private readonly RtcPeerConnection _peerConnection;
     private readonly TimeSpan _handshakeTimeout;
 
     private readonly TaskCompletionSource<string> _localDescriptionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<WebRtcDataChannelAdapter> _channelAvailableTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Channel<IceSignalOutboundEvent> _signalQueue;
-    private readonly Task _signalPumpTask;
+    private readonly Channel<TransferIceCandidateDiscoveredEvent> _candidateQueue;
+    private readonly CancellationTokenSource _disposeCts = new();
+    private readonly Task _candidatePumpTask;
 
     // Strong delegate references retained for the full lifetime of the native handle.
     private readonly Action<IRtcPeerConnection, RtcDescription> _onLocalDescriptionHandler;
@@ -56,13 +61,15 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
     public CertSha256Fingerprint? LocalDtlsFingerprint { get; private set; }
     public CertSha256Fingerprint? RemoteDtlsFingerprint { get; private set; }
 
-    public event Action<IceSignalOutboundEvent>? SignalProduced;
-
     public WebRtcPeerConnectionAdapter(
         DirectPeerConnectionOptions options,
+        IEventPublisher eventPublisher,
+        IDateTimeProvider clock,
         Action onDisposed)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _onDisposed = onDisposed ?? throw new ArgumentNullException(nameof(onDisposed));
         _handshakeTimeout = options.HandshakeTimeout ?? DefaultHandshakeTimeout;
 
@@ -86,12 +93,12 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
             MaxMessageSize = SwarmFrameCodec.MaxWireFrameSizeBytes + 64
         };
 
-        _signalQueue = Channel.CreateUnbounded<IceSignalOutboundEvent>(new UnboundedChannelOptions
+        _candidateQueue = Channel.CreateUnbounded<TransferIceCandidateDiscoveredEvent>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = false
         });
-        _signalPumpTask = Task.Run(PumpOutboundSignalsAsync);
+        _candidatePumpTask = Task.Run(PumpOutboundCandidatesAsync);
 
         _peerConnection = new RtcPeerConnection(config);
 
@@ -297,7 +304,22 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
 
         _localDescriptionTcs.TrySetCanceled();
         _channelAvailableTcs.TrySetCanceled();
-        _signalQueue.Writer.TryComplete();
+
+        _disposeCts.Cancel();
+        _candidateQueue.Writer.TryComplete();
+
+        try
+        {
+            await _candidatePumpTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+        }
+
+        _disposeCts.Dispose();
 
         try
         {
@@ -333,14 +355,6 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
             {
             }
         }).ConfigureAwait(false);
-
-        try
-        {
-            await _signalPumpTask.ConfigureAwait(false);
-        }
-        catch
-        {
-        }
 
         _onDisposed();
     }
@@ -385,18 +399,6 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
 
         LocalDtlsFingerprint = validation.Value;
         _localDescriptionTcs.TrySetResult(sdp);
-
-        IceSignalKind kind = description.Type == RtcDescriptionType.Answer
-            ? IceSignalKind.SdpAnswer
-            : IceSignalKind.SdpOffer;
-
-        _signalQueue.Writer.TryWrite(new IceSignalOutboundEvent(
-            SessionId,
-            RemotePeerId,
-            kind,
-            sdp,
-            null,
-            LocalDtlsFingerprint));
     }
 
     private void OnLocalCandidate(IRtcPeerConnection _, RtcCandidate candidate)
@@ -406,10 +408,11 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
             return;
         }
 
-        _signalQueue.Writer.TryWrite(new IceSignalOutboundEvent(
+        _candidateQueue.Writer.TryWrite(new TransferIceCandidateDiscoveredEvent(
+            Guid.NewGuid(),
+            _clock.UtcNow,
             SessionId,
             RemotePeerId,
-            IceSignalKind.IceCandidate,
             candidate.Content,
             candidate.Mid,
             LocalDtlsFingerprint));
@@ -453,23 +456,34 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
         }
     }
 
-    private async Task PumpOutboundSignalsAsync()
+    private async Task PumpOutboundCandidatesAsync()
     {
-        await foreach (IceSignalOutboundEvent evt in _signalQueue.Reader.ReadAllAsync().ConfigureAwait(false))
+        try
         {
-            if (Volatile.Read(ref _disposed) != 0)
+            await foreach (TransferIceCandidateDiscoveredEvent evt in _candidateQueue.Reader.ReadAllAsync(_disposeCts.Token).ConfigureAwait(false))
             {
-                break;
-            }
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    break;
+                }
 
-            try
-            {
-                SignalProduced?.Invoke(evt);
+                try
+                {
+                    await _eventPublisher.PublishAsync(evt, _disposeCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch
+                {
+                    // Subscriber exceptions must never crash the candidate dispatch pump.
+                }
             }
-            catch
-            {
-                // Subscriber exceptions must never crash the signal dispatch pump.
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown via _disposeCts.
         }
     }
 

@@ -11,6 +11,7 @@ using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
+using Percolator.PluginSdk;
 using Percolator.PluginSdk.Events;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -24,8 +25,11 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
     private readonly IDesktopFileStorage _fileStorage;
     private readonly ITransferRateLimiter _rateLimiter;
     private readonly IDateTimeProvider _clock;
+    private readonly IPayloadSerializer _serializer;
+    private readonly IBackgroundPayloadDispatcher _payloadDispatcher;
     private readonly TransferSessionRuntimeOptions _options;
     private readonly IDisposable _memberRemovedSubscription;
+    private readonly IDisposable _iceCandidateSubscription;
 
     private readonly ConcurrentDictionary<TransferSessionId, ActiveTransferHandle> _sessions = new();
     private int _disposed;
@@ -40,6 +44,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         ITransferRateLimiter rateLimiter,
         IDateTimeProvider clock,
         IEventSubscriber eventSubscriber,
+        IPayloadSerializer serializer,
+        IBackgroundPayloadDispatcher payloadDispatcher,
         TransferSessionRuntimeOptions options)
     {
         _peerTransport = peerTransport ?? throw new ArgumentNullException(nameof(peerTransport));
@@ -49,9 +55,12 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         ArgumentNullException.ThrowIfNull(eventSubscriber);
+        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        _payloadDispatcher = payloadDispatcher ?? throw new ArgumentNullException(nameof(payloadDispatcher));
         _options = options ?? throw new ArgumentNullException(nameof(options));
 
         _memberRemovedSubscription = eventSubscriber.Subscribe<GroupMemberRemovedApplicationEvent>(OnGroupMemberRemovedAsync);
+        _iceCandidateSubscription = eventSubscriber.Subscribe<TransferIceCandidateDiscoveredEvent>(OnLocalIceCandidateDiscoveredAsync);
     }
 
     public bool HasActiveSession(TransferSessionId sessionId) => _sessions.ContainsKey(sessionId);
@@ -164,12 +173,10 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         TransferSessionId sessionId,
         PublicIdentityId senderId,
         FileTransferIceSignalPayload signal,
-        Func<FileTransferIceSignalPayload, CancellationToken, ValueTask> sendSignalReplyAsync,
         CancellationToken ct = default)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(signal);
-        ArgumentNullException.ThrowIfNull(sendSignalReplyAsync);
 
         if (!_sessions.TryGetValue(sessionId, out ActiveTransferHandle? handle))
         {
@@ -213,7 +220,6 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 }
 
                 handle.PeerConnections[senderId] = connection;
-                WireIceCandidateForwarder(handle, connection, sendSignalReplyAsync);
 
                 string answerSdp;
                 try
@@ -247,7 +253,14 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                     CandidateMid: null,
                     DtlsFingerprintSha256: connection.LocalDtlsFingerprint);
 
-                await sendSignalReplyAsync(answerPayload, ct).ConfigureAwait(false);
+                DomainResult sendResult = await DispatchIceSignalAsync(handle, senderId, answerPayload, ct).ConfigureAwait(false);
+                if (sendResult.IsFailure)
+                {
+                    handle.PeerConnections.TryRemove(senderId, out _);
+                    await connection.DisposeAsync().ConfigureAwait(false);
+                    return sendResult;
+                }
+
                 SpawnChannelAttachTask(handle, senderId, connection);
                 return DomainResult.Success();
             }
@@ -354,11 +367,9 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
     public async ValueTask<DomainResult> InitiateDirectConnectionAsync(
         TransferSessionId sessionId,
         PublicIdentityId remotePeerId,
-        Func<FileTransferIceSignalPayload, CancellationToken, ValueTask> sendSignalAsync,
         CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        ArgumentNullException.ThrowIfNull(sendSignalAsync);
 
         if (!_sessions.TryGetValue(sessionId, out ActiveTransferHandle? handle))
         {
@@ -387,7 +398,6 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
             handle.RemoteDescriptionApplied[remotePeerId] = false;
             handle.PeerConnections[remotePeerId] = connection;
-            WireIceCandidateForwarder(handle, connection, sendSignalAsync);
 
             string offerSdp = await connection.CreateOfferAsync(ct).ConfigureAwait(false);
             var offerPayload = new FileTransferIceSignalPayload(
@@ -397,7 +407,14 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 CandidateMid: null,
                 DtlsFingerprintSha256: connection.LocalDtlsFingerprint);
 
-            await sendSignalAsync(offerPayload, ct).ConfigureAwait(false);
+            DomainResult sendResult = await DispatchIceSignalAsync(handle, remotePeerId, offerPayload, ct).ConfigureAwait(false);
+            if (sendResult.IsFailure)
+            {
+                handle.PeerConnections.TryRemove(remotePeerId, out _);
+                await connection.DisposeAsync().ConfigureAwait(false);
+                return sendResult;
+            }
+
             SpawnChannelAttachTask(handle, remotePeerId, connection);
             return DomainResult.Success();
         }
@@ -416,7 +433,11 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                     PipeToken: pipeToken,
                     PipeEndpointUri: RelayPipeEndpointUri.Parse(exchangeEndpoint.ToUri().ToString()));
 
-                await sendSignalAsync(rendezvousPayload, ct).ConfigureAwait(false);
+                DomainResult rendezvousSendResult = await DispatchIceSignalAsync(handle, remotePeerId, rendezvousPayload, ct).ConfigureAwait(false);
+                if (rendezvousSendResult.IsFailure)
+                {
+                    return rendezvousSendResult;
+                }
 
                 Task pipeConnectTask = Task.Run(async () =>
                 {
@@ -746,6 +767,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         }
 
         _memberRemovedSubscription.Dispose();
+        _iceCandidateSubscription.Dispose();
         await StopAllSessionsAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
@@ -792,36 +814,68 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         return handle;
     }
 
-    private void WireIceCandidateForwarder(
-        ActiveTransferHandle handle,
-        ITransferPeerConnection connection,
-        Func<FileTransferIceSignalPayload, CancellationToken, ValueTask> sendSignalAsync)
+    private async ValueTask OnLocalIceCandidateDiscoveredAsync(TransferIceCandidateDiscoveredEvent ev, CancellationToken ct)
     {
-        connection.SignalProduced += evt =>
+        if (Volatile.Read(ref _disposed) != 0)
         {
-            if (handle.SessionCts.IsCancellationRequested || evt.Kind != IceSignalKind.IceCandidate)
-            {
-                return;
-            }
+            return;
+        }
 
-            var payload = new FileTransferIceSignalPayload(
-                evt.SessionId,
-                evt.Kind,
-                evt.SdpOrCandidate,
-                evt.CandidateMid,
-                evt.LocalDtlsFingerprint);
+        if (!_sessions.TryGetValue(ev.SessionId, out ActiveTransferHandle? handle))
+        {
+            return;
+        }
 
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await sendSignalAsync(payload, handle.SessionCts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                }
-            }, CancellationToken.None);
-        };
+        if (handle.SessionCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (!handle.PeerConnections.ContainsKey(ev.RemotePeerId) || !handle.PinnedPeerCerts.ContainsKey(ev.RemotePeerId))
+        {
+            return;
+        }
+
+        var payload = new FileTransferIceSignalPayload(
+            ev.SessionId,
+            IceSignalKind.IceCandidate,
+            ev.Candidate,
+            ev.CandidateMid,
+            ev.LocalDtlsFingerprint);
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, handle.SessionCts.Token);
+        try
+        {
+            await DispatchIceSignalAsync(handle, ev.RemotePeerId, payload, linkedCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async ValueTask<DomainResult> DispatchIceSignalAsync(
+        ActiveTransferHandle handle,
+        PublicIdentityId remotePeerId,
+        FileTransferIceSignalPayload signalPayload,
+        CancellationToken ct)
+    {
+        TransferSessionTransportContext ctx = handle.TransportContext;
+        FileTransferIceSignalPayload wirePayload = ctx.IsGroupTransfer
+            ? signalPayload with { TargetPeerId = remotePeerId }
+            : signalPayload;
+
+        byte[] framed = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.IceSignal, wirePayload);
+        OutboundPayloadContext outbound = FileTransferControlFraming.BuildOutboundContext(
+            ctx.ChannelId,
+            ctx.LocalIdentityId,
+            ctx.IsGroupTransfer ? null : remotePeerId,
+            ctx.IsGroupTransfer,
+            framed);
+
+        return await _payloadDispatcher.DispatchAsync(outbound, ct).ConfigureAwait(false);
     }
 
     private void SpawnChannelAttachTask(

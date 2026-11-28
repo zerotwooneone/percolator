@@ -626,8 +626,6 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             await _sessionRepository.SaveSessionAsync(session, ct);
 
             TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(sessionId, ct);
-            PublicIdentityId localIdentity = transportContext?.LocalIdentityId ?? session.InitiatorId;
-            ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
 
             bool wasActiveInRuntime = _runtime.HasActiveSession(sessionId);
             await _runtime.StopSessionAsync(sessionId, deleteCertificate: true, ct);
@@ -637,34 +635,19 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
             }
 
-            // Send in-band cancel payload
-            FileTransferCancelPayload cancelPayload = new(sessionId, reason);
-            byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Cancel, _serializer.Serialize(cancelPayload).Span);
-
-            if (transportContext is { IsGroupTransfer: true })
+            // Send in-band cancel payload only if a real persisted ChannelId exists
+            if (transportContext != null && transportContext.ChannelId.IsValid)
             {
-                var groupCancel = new OutboundPayloadContext(
-                    channelId,
-                    localIdentity,
-                    RecipientIdentityId: null,
-                    DeviceId.Primary,
-                    AppId.FileTransferControl,
-                    inBandBytes,
-                    DeliveryRoute.RelayedGroup);
+                FileTransferCancelPayload cancelPayload = new(sessionId, reason);
+                byte[] inBandBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Cancel, cancelPayload);
 
-                await _payloadSender.SendPayloadAsync(groupCancel, ct);
-            }
-            else
-            {
-                PublicIdentityId targetRecipient = DetermineCancelTarget(session, localIdentity);
-                var outboundContext = new OutboundPayloadContext(
-                    channelId,
+                PublicIdentityId localIdentity = transportContext.LocalIdentityId;
+                OutboundPayloadContext outboundContext = FileTransferControlFraming.BuildOutboundContext(
+                    transportContext.ChannelId,
                     localIdentity,
-                    targetRecipient,
-                    DeviceId.Primary,
-                    AppId.FileTransferControl,
-                    inBandBytes,
-                    DeliveryRoute.RelayedOneToOne);
+                    transportContext.IsGroupTransfer ? null : DetermineCancelTarget(session, localIdentity),
+                    transportContext.IsGroupTransfer,
+                    inBandBytes);
 
                 await _payloadSender.SendPayloadAsync(outboundContext, ct);
             }

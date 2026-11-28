@@ -16,7 +16,9 @@ using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Identities;
+using Microsoft.Extensions.Logging.Abstractions;
 using Percolator.Infrastructure.Common;
+using Percolator.Infrastructure.Events;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.FileTransfer;
@@ -27,6 +29,8 @@ public sealed class TransferPipeTls13FallbackIntegrationTests
 {
     private TestRelayServer _exchange = null!;
     private PeerGrpcChannelFactory _channelFactory = null!;
+    private InMemoryEventBus _eventBusA = null!;
+    private InMemoryEventBus _eventBusB = null!;
     private VaultCertHarness _peerAVault = null!;
     private VaultCertHarness _peerBVault = null!;
     private TransferPeerTransport _transportA = null!;
@@ -45,15 +49,19 @@ public sealed class TransferPipeTls13FallbackIntegrationTests
         };
 
         _exchange = await TestRelayServer.StartAsync(policy);
+        var clock = new SystemDateTimeProvider();
         _channelFactory = new PeerGrpcChannelFactory(
             new PeerGrpcChannelFactoryOptions(),
-            new SystemDateTimeProvider());
+            clock);
 
         _peerAVault = await VaultCertHarness.CreateAsync();
         _peerBVault = await VaultCertHarness.CreateAsync();
 
-        _transportA = new TransferPeerTransport(_channelFactory, _peerAVault.CertStore);
-        _transportB = new TransferPeerTransport(_channelFactory, _peerBVault.CertStore);
+        _eventBusA = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+        _eventBusB = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+
+        _transportA = new TransferPeerTransport(_channelFactory, _peerAVault.CertStore, _eventBusA, clock);
+        _transportB = new TransferPeerTransport(_channelFactory, _peerBVault.CertStore, _eventBusB, clock);
     }
 
     [TearDown]
@@ -61,6 +69,8 @@ public sealed class TransferPipeTls13FallbackIntegrationTests
     {
         await _transportA.DisposeAsync();
         await _transportB.DisposeAsync();
+        _eventBusA.Dispose();
+        _eventBusB.Dispose();
         _channelFactory.Dispose();
         await _peerAVault.DisposeAsync();
         await _peerBVault.DisposeAsync();

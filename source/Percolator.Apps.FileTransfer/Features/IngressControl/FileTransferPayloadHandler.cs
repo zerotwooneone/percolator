@@ -66,7 +66,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
             (byte)FileTransferControlOpcode.Accept => await HandleAcceptAsync(context.ChannelId, context.SenderIdentityId, body, ct),
             (byte)FileTransferControlOpcode.Cancel => await HandleCancelAsync(context.SenderIdentityId, body, ct),
             (byte)FileTransferControlOpcode.PeerJoin => await HandlePeerJoinAsync(context.SenderIdentityId, body, ct),
-            (byte)FileTransferControlOpcode.IceSignal => await HandleIceSignalAsync(context.ChannelId, context.RecipientIdentityId, context.SenderIdentityId, body, ct),
+            (byte)FileTransferControlOpcode.IceSignal => await HandleIceSignalAsync(context.RecipientIdentityId, context.SenderIdentityId, body, ct),
             _ => DomainResult.Failure(new DomainError("Payload.UnknownOpcode", $"Unknown control opcode 0x{opcodeByte:X2}."))
         };
     }
@@ -228,13 +228,6 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
                     await _runtime.InitiateDirectConnectionAsync(
                         accept.TransferSessionId,
                         senderId,
-                        CreateIceSignalDispatcher(
-                            _serializer,
-                            _payloadDispatcher,
-                            transportContext.ChannelId,
-                            transportContext.LocalIdentityId,
-                            senderId,
-                            transportContext.IsGroupTransfer),
                         ct);
                 }
             }
@@ -303,21 +296,15 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
                     transportContext.EphemeralPeerId,
                     localCert.Fingerprint);
 
-                ReadOnlyMemory<byte> replySerialized = _serializer.Serialize(replyJoin);
-                byte[] replyFramed = new byte[1 + replySerialized.Length];
-                replyFramed[0] = (byte)FileTransferControlOpcode.PeerJoin;
-                replySerialized.Span.CopyTo(replyFramed.AsSpan(1));
+                byte[] replyFramed = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.PeerJoin, replyJoin);
+                OutboundPayloadContext outboundContext = FileTransferControlFraming.BuildOutboundContext(
+                    transportContext.ChannelId,
+                    transportContext.LocalIdentityId,
+                    directRecipientId: null,
+                    isGroupTransfer: true,
+                    replyFramed);
 
-                await _payloadDispatcher.DispatchAsync(
-                    new OutboundPayloadContext(
-                        transportContext.ChannelId,
-                        transportContext.LocalIdentityId,
-                        RecipientIdentityId: null,
-                        DeviceId.Primary,
-                        AppId.FileTransferControl,
-                        replyFramed,
-                        DeliveryRoute.RelayedGroup),
-                    ct);
+                await _payloadDispatcher.DispatchAsync(outboundContext, ct);
             }
 
             // If we have verified chunks (initial author or unlocked seeder), initiate WebRTC directly to the joining peer.
@@ -326,13 +313,6 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
                 await _runtime.InitiateDirectConnectionAsync(
                     join.TransferSessionId,
                     senderId,
-                    CreateIceSignalDispatcher(
-                        _serializer,
-                        _payloadDispatcher,
-                        transportContext.ChannelId,
-                        transportContext.LocalIdentityId,
-                        senderId,
-                        isGroupTransfer: true),
                     ct);
             }
         }
@@ -341,7 +321,6 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     }
 
     private async ValueTask<DomainResult> HandleIceSignalAsync(
-        ChannelId channelId,
         PublicIdentityId localIdentityId,
         PublicIdentityId senderId,
         ReadOnlyMemory<byte> body,
@@ -360,22 +339,10 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         if (senderId == localIdentityId)
             return DomainResult.Success();
 
-        TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(signal.TransferSessionId, ct);
-        ChannelId replyChannelId = transportContext?.ChannelId ?? channelId;
-        PublicIdentityId replyLocalId = transportContext?.LocalIdentityId ?? localIdentityId;
-        bool isGroupTransfer = transportContext?.IsGroupTransfer ?? false;
-
         return await _runtime.HandleInboundIceSignalAsync(
             signal.TransferSessionId,
             senderId,
             signal,
-            CreateIceSignalDispatcher(
-                _serializer,
-                _payloadDispatcher,
-                replyChannelId,
-                replyLocalId,
-                senderId,
-                isGroupTransfer),
             ct);
     }
 
@@ -403,48 +370,5 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         }
 
         return DomainResult.Success();
-    }
-
-    private static Func<FileTransferIceSignalPayload, CancellationToken, ValueTask> CreateIceSignalDispatcher(
-        IPayloadSerializer serializer,
-        IBackgroundPayloadDispatcher dispatcher,
-        ChannelId channelId,
-        PublicIdentityId localIdentityId,
-        PublicIdentityId remotePeerId,
-        bool isGroupTransfer)
-    {
-        // Capture ONLY singleton dependencies + value types (never the scoped FileTransferPayloadHandler)
-        // so background trickle ICE candidates remain valid after the inbound DI scope closes.
-        return async (signalPayload, signalCt) =>
-        {
-            FileTransferIceSignalPayload wirePayload = isGroupTransfer
-                ? signalPayload with { TargetPeerId = remotePeerId }
-                : signalPayload;
-
-            ReadOnlyMemory<byte> serialized = serializer.Serialize(wirePayload);
-            byte[] framed = new byte[1 + serialized.Length];
-            framed[0] = (byte)FileTransferControlOpcode.IceSignal;
-            serialized.Span.CopyTo(framed.AsSpan(1));
-
-            var outboundContext = isGroupTransfer
-                ? new OutboundPayloadContext(
-                    channelId,
-                    localIdentityId,
-                    RecipientIdentityId: null,
-                    DeviceId.Primary,
-                    AppId.FileTransferControl,
-                    framed,
-                    DeliveryRoute.RelayedGroup)
-                : new OutboundPayloadContext(
-                    channelId,
-                    localIdentityId,
-                    remotePeerId,
-                    DeviceId.Primary,
-                    AppId.FileTransferControl,
-                    framed,
-                    DeliveryRoute.RelayedOneToOne);
-
-            await dispatcher.DispatchAsync(outboundContext, signalCt).ConfigureAwait(false);
-        };
     }
 }

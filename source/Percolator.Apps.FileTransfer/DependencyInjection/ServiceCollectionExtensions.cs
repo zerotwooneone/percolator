@@ -12,21 +12,20 @@ namespace Percolator.Apps.FileTransfer.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddFileTransferApp(this IServiceCollection collection)
+    public static IServiceCollection AddFileTransferApp(this IServiceCollection collection, bool enableIngressByDefault = false)
     {
         collection.AddSingleton<IAppPlugin, FileTransferPlugin>();
-        collection.AddSingleton<FileTransferIngressFilter>();
+        collection.AddSingleton<FileTransferIngressFilter>(sp =>
+            new FileTransferIngressFilter(sp.GetRequiredService<IFileTransferFilterPolicyRepository>())
+            {
+                IsEnabled = enableIngressByDefault
+            });
         collection.AddSingleton<IAppIngressFilter>(sp => sp.GetRequiredService<FileTransferIngressFilter>());
         collection.AddSingleton<TransferSessionRuntimeOptions>(_ => new TransferSessionRuntimeOptions());
         collection.AddSingleton<IBackgroundPayloadDispatcher, ScopedBackgroundPayloadDispatcher>();
         collection.AddSingleton<ITransferSessionRuntime, TransferSessionRuntime>();
         collection.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
         collection.AddScoped<IFileTransferActionHandler, FileTransferActionHandler>();
-        collection.AddScoped<TransferSessionCoordinator>();
-        collection.AddScoped<DiskChunkAssembler>();
-        collection.AddScoped<ChunkPipelineScheduler>();
-        collection.AddScoped<SwarmCoordinator>();
-        collection.AddScoped<EndgameCoordinator>();
         collection.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
 
         return collection;

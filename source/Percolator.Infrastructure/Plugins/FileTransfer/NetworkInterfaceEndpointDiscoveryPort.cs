@@ -14,23 +14,27 @@ using Percolator.Apps.FileTransfer.Ports;
 
 public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDiscoveryPort
 {
-    private readonly PortNumber? _listenPort;
+    private readonly Func<int?> _listenPortProvider;
     private readonly bool _allowLoopback;
 
     public NetworkInterfaceEndpointDiscoveryPort(
         int? listenPort = null,
         bool allowLoopback = false)
     {
-        if (listenPort.HasValue)
+        if (listenPort.HasValue && listenPort.Value is < 1 or > 65535)
         {
-            if (listenPort.Value is < 1 or > 65535)
-            {
-                throw new ArgumentOutOfRangeException(nameof(listenPort), listenPort, "Port must be between 1 and 65535.");
-            }
-
-            _listenPort = PortNumber.FromInt(listenPort.Value);
+            throw new ArgumentOutOfRangeException(nameof(listenPort), listenPort, "Port must be between 1 and 65535.");
         }
 
+        _listenPortProvider = () => listenPort;
+        _allowLoopback = allowLoopback;
+    }
+
+    public NetworkInterfaceEndpointDiscoveryPort(
+        Func<int?> listenPortProvider,
+        bool allowLoopback = false)
+    {
+        _listenPortProvider = listenPortProvider ?? throw new ArgumentNullException(nameof(listenPortProvider));
         _allowLoopback = allowLoopback;
     }
 
@@ -40,13 +44,14 @@ public sealed class NetworkInterfaceEndpointDiscoveryPort : INetworkEndpointDisc
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!_listenPort.HasValue)
+        int? currentPort = _listenPortProvider();
+        if (!currentPort.HasValue || currentPort.Value is < 1 or > 65535)
         {
             // Ephemeral ICE candidates are gathered dynamically per active transfer session.
             return ValueTask.FromResult<IReadOnlyList<DirectEndpointCandidate>>(Array.Empty<DirectEndpointCandidate>());
         }
 
-        PortNumber boundPort = _listenPort.Value;
+        PortNumber boundPort = PortNumber.FromInt(currentPort.Value);
         var candidates = new List<DirectEndpointCandidate>();
 
         try

@@ -672,8 +672,6 @@ public sealed class FakeTransferPeerConnection : ITransferPeerConnection
 
     private readonly TaskCompletionSource<ITransferDataChannel> _channelTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public event Action<IceSignalOutboundEvent>? SignalProduced;
-
     public FakeTransferPeerConnection(
         TransferSessionId sessionId,
         PublicIdentityId remotePeerId,
@@ -683,9 +681,6 @@ public sealed class FakeTransferPeerConnection : ITransferPeerConnection
         RemotePeerId = remotePeerId;
         LocalDtlsFingerprint = localFingerprint;
     }
-
-    public void EmitIceCandidate(string candidate, string mid = "0") =>
-        SignalProduced?.Invoke(new IceSignalOutboundEvent(SessionId, RemotePeerId, IceSignalKind.IceCandidate, candidate, mid, LocalDtlsFingerprint));
 
     public void CompleteChannel(ITransferDataChannel channel) => _channelTcs.TrySetResult(channel);
 
