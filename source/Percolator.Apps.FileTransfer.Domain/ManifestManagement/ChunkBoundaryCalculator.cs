@@ -39,6 +39,12 @@ public static class ChunkBoundaryCalculator
             FileByteOffset offsetInFile = currentOffset.SubtractToFileOffset(file.StartOffset);
             TransferByteLength bytesForThisFile = file.FileSize.RemainingSlice(offsetInFile, remainingChunkBytes);
 
+            if (bytesForThisFile.Bytes <= 0)
+            {
+                fileIdx++;
+                continue;
+            }
+
             slices.Add(new FileChunkSlice(
                 file.Index,
                 file.RelativePath,

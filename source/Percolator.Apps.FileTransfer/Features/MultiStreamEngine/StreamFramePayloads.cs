@@ -40,9 +40,11 @@ public sealed record ChunkDataFrame(
     PlaintextChunkData Data,
     IDisposable? BufferOwner = null) : IStreamFramePayload
 {
+    private IDisposable? _bufferOwner = BufferOwner;
+
     public StreamFrameType FrameType => StreamFrameType.ChunkData;
 
-    public void ReleaseBuffer() => BufferOwner?.Dispose();
+    public void ReleaseBuffer() => Interlocked.Exchange(ref _bufferOwner, null)?.Dispose();
 
     public bool Equals(ChunkDataFrame? other)
     {

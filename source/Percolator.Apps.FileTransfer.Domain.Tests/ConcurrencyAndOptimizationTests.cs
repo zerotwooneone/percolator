@@ -110,6 +110,20 @@ public sealed class ConcurrencyAndOptimizationTests
             enumeratedCount++;
         }
         enumeratedCount.Should().Be(count);
+
+        // Canonical normalization: FromIndices with all elements must produce IsAll = true and equal HashCode
+        FileCount smallTotal = FileCount.FromInt(3);
+        SelectedFileIndices fromAll = SelectedFileIndices.All(smallTotal);
+        SelectedFileIndices fromExplicit = SelectedFileIndices.FromIndices(
+            [FileIndex.FromInt(0), FileIndex.FromInt(1), FileIndex.FromInt(2)], smallTotal);
+        SelectedFileIndices partial = SelectedFileIndices.FromIndices(
+            [FileIndex.FromInt(0), FileIndex.FromInt(1)], smallTotal);
+
+        fromExplicit.IsAll.Should().BeTrue();
+        fromExplicit.Should().Be(fromAll);
+        fromExplicit.GetHashCode().Should().Be(fromAll.GetHashCode());
+        partial.IsAll.Should().BeFalse();
+        partial.Should().NotBe(fromAll);
     }
 
     [Test]

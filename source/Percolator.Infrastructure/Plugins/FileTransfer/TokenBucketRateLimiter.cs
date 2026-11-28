@@ -191,7 +191,15 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
         CancellationToken ct)
     {
         TimeSpan delay = TimeSpan.Zero;
-        await bucket.Lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await bucket.Lock.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
         try
         {
             long now = _timeProvider.GetTimestamp();
@@ -213,7 +221,13 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
         }
         finally
         {
-            bucket.Lock.Release();
+            try
+            {
+                bucket.Lock.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
 
         if (delay > TimeSpan.Zero)

@@ -64,6 +64,11 @@ public sealed record SelectedFileIndices
             throw new DomainValidationException("Selected file set must contain at least one file entry.");
         }
 
+        if (set.Count == fileCount.Count)
+        {
+            return new SelectedFileIndices(fileCount.Count);
+        }
+
         return new SelectedFileIndices(set);
     }
 
@@ -71,9 +76,8 @@ public sealed record SelectedFileIndices
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        if (IsAll && other.IsAll) return _totalFileCount == other._totalFileCount;
-        if (IsAll) return other.SelectedCount == _totalFileCount && other.Indices.All(Contains);
-        if (other.IsAll) return SelectedCount == other._totalFileCount && Indices.All(other.Contains);
+        if (IsAll != other.IsAll) return false;
+        if (IsAll) return _totalFileCount == other._totalFileCount;
         return _indices!.SetEquals(other._indices!);
     }
 
@@ -85,7 +89,7 @@ public sealed record SelectedFileIndices
         {
             hash ^= index.GetHashCode();
         }
-        return HashCode.Combine(false, _indices.Count, hash);
+        return HashCode.Combine(false, _indices!.Count, hash);
     }
 
     private sealed class AllFileIndicesReadOnlySet : IReadOnlySet<FileIndex>

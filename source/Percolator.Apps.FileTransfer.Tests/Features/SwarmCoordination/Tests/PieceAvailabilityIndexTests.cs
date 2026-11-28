@@ -139,4 +139,34 @@ public sealed class PieceAvailabilityIndexTests
 
         scheduled.Should().BeFalse();
     }
+
+    [Test]
+    public void UT_PAI_04_DuplicateHave_DoesNotIncrementAvailabilityTwice()
+    {
+        ChunkCount total = ChunkCount.FromInt(5);
+        PieceAvailabilityIndex index = new(total);
+
+        index.RecordPeerHave(_peer1, ChunkIndex.FromInt(2));
+        index.GetAvailability(ChunkIndex.FromInt(2)).Should().Be(1);
+
+        // Duplicate Have for the same peer must be idempotent
+        index.RecordPeerHave(_peer1, ChunkIndex.FromInt(2));
+        index.GetAvailability(ChunkIndex.FromInt(2)).Should().Be(1);
+    }
+
+    [Test]
+    public void UT_PAI_05_OutOfBoundsChunk_IgnoredSafely()
+    {
+        ChunkCount total = ChunkCount.FromInt(5);
+        PieceAvailabilityIndex index = new(total);
+
+        // Chunk indices >= totalChunks are safely ignored
+        Action actOver5 = () => index.RecordPeerHave(_peer1, ChunkIndex.FromInt(5));
+        Action actOver10 = () => index.RecordPeerHave(_peer1, ChunkIndex.FromInt(10));
+
+        actOver5.Should().NotThrow();
+        actOver10.Should().NotThrow();
+        index.GetAvailability(ChunkIndex.FromInt(0)).Should().Be(0);
+        index.GetAvailability(ChunkIndex.FromInt(10)).Should().Be(0);
+    }
 }
