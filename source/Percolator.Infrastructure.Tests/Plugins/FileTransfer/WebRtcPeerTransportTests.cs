@@ -110,17 +110,29 @@ public sealed class WebRtcPeerTransportTests
         // Wire trickle ICE candidate relay between peer A and peer B (simulating E2E signaling channel)
         using IDisposable subA = _eventBusA.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.SessionId == sessionId)
+            if (evt.SessionId == sessionId && evt.RemotePeerId == peerBId)
             {
-                try { await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
+                try
+                {
+                    await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct);
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException or TransferTransportException)
+                {
+                }
             }
         });
 
         using IDisposable subB = _eventBusB.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.SessionId == sessionId)
+            if (evt.SessionId == sessionId && evt.RemotePeerId == peerAId)
             {
-                try { await connA.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
+                try
+                {
+                    await connA.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct);
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException or TransferTransportException)
+                {
+                }
             }
         });
 
@@ -255,16 +267,28 @@ public sealed class WebRtcPeerTransportTests
 
         using IDisposable subA = _eventBusA.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.SessionId == sessionId)
+            if (evt.SessionId == sessionId && evt.RemotePeerId == peerBId)
             {
-                try { await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
+                try
+                {
+                    await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct);
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException or TransferTransportException)
+                {
+                }
             }
         });
         using IDisposable subB = _eventBusB.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
         {
-            if (evt.SessionId == sessionId)
+            if (evt.SessionId == sessionId && evt.RemotePeerId == peerAId)
             {
-                try { await connA.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { }
+                try
+                {
+                    await connA.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct);
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException or TransferTransportException)
+                {
+                }
             }
         });
 

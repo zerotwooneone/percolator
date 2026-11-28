@@ -469,7 +469,12 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
 
                 try
                 {
-                    await _eventPublisher.PublishAsync(evt, _disposeCts.Token).ConfigureAwait(false);
+                    TransferIceCandidateDiscoveredEvent eventToPublish =
+                        evt.LocalDtlsFingerprint == null && LocalDtlsFingerprint != null
+                            ? evt with { LocalDtlsFingerprint = LocalDtlsFingerprint }
+                            : evt;
+
+                    await _eventPublisher.PublishAsync(eventToPublish, _disposeCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {

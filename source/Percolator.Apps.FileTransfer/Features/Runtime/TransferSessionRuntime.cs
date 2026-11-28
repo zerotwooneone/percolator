@@ -904,6 +904,19 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             catch (ObjectDisposedException)
             {
             }
+            catch (Exception)
+            {
+                // Handshake authentication timed out, failed token validation, or threw transport error.
+                // Clean up peer connection so it doesn't linger as a zombie occupying a peer slot.
+                handle.PeerConnections.TryRemove(remotePeerId, out _);
+                try
+                {
+                    await connection.DisposeAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+            }
         }, CancellationToken.None);
 
         handle.PeerPumpTasks.TryAdd(remotePeerId, attachTask);

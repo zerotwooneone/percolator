@@ -236,35 +236,15 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             certMaterial.Fingerprint,
             isGroupTransfer);
 
-        byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Offer, _serializer.Serialize(offerPayload).Span);
+        byte[] inBandBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Offer, offerPayload);
+        OutboundPayloadContext outboundContext = FileTransferControlFraming.BuildOutboundContext(
+            channelId,
+            localInitiator,
+            isGroupTransfer ? null : recipients[0],
+            isGroupTransfer,
+            inBandBytes);
 
-        if (isGroupTransfer)
-        {
-            // Group V2 SenderKey broadcast: RecipientIdentityId MUST be null + DeliveryRoute.RelayedGroup
-            var groupOutbound = new OutboundPayloadContext(
-                channelId,
-                localInitiator,
-                RecipientIdentityId: null,
-                DeviceId.Primary,
-                AppId.FileTransferControl,
-                inBandBytes,
-                DeliveryRoute.RelayedGroup);
-
-            await _payloadSender.SendPayloadAsync(groupOutbound, ct);
-        }
-        else
-        {
-            var outboundContext = new OutboundPayloadContext(
-                channelId,
-                localInitiator,
-                recipients[0],
-                DeviceId.Primary,
-                AppId.FileTransferControl,
-                inBandBytes,
-                DeliveryRoute.RelayedOneToOne);
-
-            await _payloadSender.SendPayloadAsync(outboundContext, ct);
-        }
+        await _payloadSender.SendPayloadAsync(outboundContext, ct);
 
         return DomainResult<TransferSessionId>.Success(sessionId);
     }
@@ -399,18 +379,13 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 transportContext.EphemeralPeerId,
                 certMaterial.Fingerprint);
 
-            byte[] peerJoinBytes = PrependOpcode(
-                FileTransferControlOpcode.PeerJoin,
-                _serializer.Serialize(peerJoinPayload).Span);
-
-            var groupJoinContext = new OutboundPayloadContext(
+            byte[] peerJoinBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.PeerJoin, peerJoinPayload);
+            OutboundPayloadContext groupJoinContext = FileTransferControlFraming.BuildOutboundContext(
                 channelId,
                 localSenderId,
-                RecipientIdentityId: null,
-                DeviceId.Primary,
-                AppId.FileTransferControl,
-                peerJoinBytes,
-                DeliveryRoute.RelayedGroup);
+                directRecipientId: null,
+                isGroupTransfer: true,
+                peerJoinBytes);
 
             await _payloadSender.SendPayloadAsync(groupJoinContext, ct);
         }
@@ -424,16 +399,13 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 session.LocalBitfield,
                 certMaterial.Fingerprint);
 
-            byte[] inBandBytes = PrependOpcode(FileTransferControlOpcode.Accept, _serializer.Serialize(acceptPayload).Span);
-
-            var outboundContext = new OutboundPayloadContext(
+            byte[] inBandBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Accept, acceptPayload);
+            OutboundPayloadContext outboundContext = FileTransferControlFraming.BuildOutboundContext(
                 channelId,
                 localSenderId,
-                session.InitiatorId,
-                DeviceId.Primary,
-                AppId.FileTransferControl,
-                inBandBytes,
-                DeliveryRoute.RelayedOneToOne);
+                directRecipientId: session.InitiatorId,
+                isGroupTransfer: false,
+                inBandBytes);
 
             await _payloadSender.SendPayloadAsync(outboundContext, ct);
         }
@@ -543,20 +515,15 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                             transportContext.EphemeralPeerId,
                             certMaterial.Fingerprint);
 
-                        byte[] peerJoinBytes = PrependOpcode(
-                            FileTransferControlOpcode.PeerJoin,
-                            _serializer.Serialize(peerJoinPayload).Span);
+                        byte[] peerJoinBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.PeerJoin, peerJoinPayload);
+                        OutboundPayloadContext outboundContext = FileTransferControlFraming.BuildOutboundContext(
+                            transportContext.ChannelId,
+                            transportContext.LocalIdentityId,
+                            directRecipientId: null,
+                            isGroupTransfer: true,
+                            peerJoinBytes);
 
-                        await _payloadSender.SendPayloadAsync(
-                            new OutboundPayloadContext(
-                                transportContext.ChannelId,
-                                transportContext.LocalIdentityId,
-                                RecipientIdentityId: null,
-                                DeviceId.Primary,
-                                AppId.FileTransferControl,
-                                peerJoinBytes,
-                                DeliveryRoute.RelayedGroup),
-                            ct);
+                        await _payloadSender.SendPayloadAsync(outboundContext, ct);
                     }
                     else
                     {
@@ -567,20 +534,15 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                             session.LocalBitfield,
                             certMaterial.Fingerprint);
 
-                        byte[] acceptBytes = PrependOpcode(
-                            FileTransferControlOpcode.Accept,
-                            _serializer.Serialize(resumeAccept).Span);
+                        byte[] acceptBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Accept, resumeAccept);
+                        OutboundPayloadContext outboundContext = FileTransferControlFraming.BuildOutboundContext(
+                            transportContext.ChannelId,
+                            transportContext.LocalIdentityId,
+                            directRecipientId: session.InitiatorId,
+                            isGroupTransfer: false,
+                            acceptBytes);
 
-                        await _payloadSender.SendPayloadAsync(
-                            new OutboundPayloadContext(
-                                transportContext.ChannelId,
-                                transportContext.LocalIdentityId,
-                                session.InitiatorId,
-                                DeviceId.Primary,
-                                AppId.FileTransferControl,
-                                acceptBytes,
-                                DeliveryRoute.RelayedOneToOne),
-                            ct);
+                        await _payloadSender.SendPayloadAsync(outboundContext, ct);
                     }
                 }
             }
@@ -666,13 +628,5 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             TransferTopology.MultiPeer multiPeer when multiPeer.Recipients.Count > 0 => multiPeer.Recipients[0],
             _ => session.InitiatorId
         };
-    }
-
-    private static byte[] PrependOpcode(FileTransferControlOpcode opcode, ReadOnlySpan<byte> payload)
-    {
-        byte[] framed = new byte[1 + payload.Length];
-        framed[0] = (byte)opcode;
-        payload.CopyTo(framed.AsSpan(1));
-        return framed;
     }
 }

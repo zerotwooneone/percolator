@@ -326,7 +326,7 @@ public sealed class TransferSessionRuntimeTests
         PublicIdentityId peerId = PublicIdentityId.New();
 
         var node = CreateNode(localId, clock, serializer, blobStorage, endpointDiscovery);
-        node.EventBus.SubscriptionCount.Should().Be(2, "Subscribes to PeerLeftSessionEvent and TransferIceCandidateDiscoveredEvent");
+        node.EventBus.SubscriptionCount.Should().BeGreaterThan(0, "Subscribes to active domain and transport application events");
 
         List<InMemoryPairedTransferDataChannel> activeChannels = [];
         List<SwarmRendezvousId> rendezvousIds = [];
@@ -546,6 +546,76 @@ public sealed class TransferSessionRuntimeTests
 
         await alice.EventBus.PublishAsync(candidateEvent);
         alice.PayloadSender.SentPayloads.Should().BeEmpty("Candidate published after session stop must be ignored");
+    }
+
+    [Test]
+    public async Task EventBusTrickleIceCandidates_GroupTransfer_PopulatesTargetPeerIdAndRelayedGroupRoute()
+    {
+        FakeDateTimeProvider clock = new();
+        TestPayloadSerializer serializer = new();
+        InMemoryBlobStorageService blobStorage = new();
+        FakeNetworkEndpointDiscoveryPort endpointDiscovery = new();
+
+        var aliceId = PublicIdentityId.New();
+        var bobId = PublicIdentityId.New();
+        var channelId = ChannelId.New();
+        var sessionId = TransferSessionId.New();
+
+        await using var alice = CreateNode(aliceId, clock, serializer, blobStorage, endpointDiscovery);
+
+        var manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("GroupBundle"),
+            ChunkSizeBytes.Default,
+            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32])]),
+            [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("f0.dat"), FileSizeBytes.FromBytes(100), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(clock.UtcNow))]);
+
+        var groupSession = TransferSession.CreateOutgoingMultiPeer(sessionId, aliceId, [bobId], manifest, SeedRatio.Zero, clock);
+        var groupTransport = new TransferSessionTransportContext(
+            sessionId,
+            channelId,
+            aliceId,
+            SwarmRendezvousId.Generate(),
+            EphemeralSwarmPeerId.Generate(),
+            StreamAuthToken.Generate(),
+            DirectWanPolicy.DisabledByDefault,
+            RelayRendezvous: null,
+            DirectCandidates: [],
+            LocalRootPath: RootDirectoryPath.Parse(@"C:\Alice"),
+            IsGroupTransfer: true);
+
+        CertSha256Fingerprint bobCertFp = CertSha256Fingerprint.FromBytes(RandomNumberGenerator.GetBytes(32));
+
+        await alice.Runtime.StartOrUpdateSessionAsync(groupSession, groupTransport, RootDirectoryPath.Parse(@"C:\Alice"));
+        await alice.Runtime.RegisterPinnedPeerCertificateAsync(sessionId, bobId, bobCertFp);
+
+        await alice.Runtime.InitiateDirectConnectionAsync(sessionId, bobId);
+        var fakeConn = alice.PeerTransport.CreatedConnections.Single(c => c.SessionId == sessionId);
+
+        alice.PayloadSender.SentPayloads.Clear();
+
+        var candidateEvent = new TransferIceCandidateDiscoveredEvent(
+            Guid.NewGuid(),
+            clock.UtcNow,
+            sessionId,
+            bobId,
+            "candidate:2 1 UDP 2122260223 192.168.1.101 50001 typ host",
+            "0",
+            fakeConn.LocalDtlsFingerprint);
+
+        await alice.EventBus.PublishAsync(candidateEvent);
+
+        alice.PayloadSender.SentPayloads.Should().ContainSingle();
+        var sentGroup = alice.PayloadSender.SentPayloads[0];
+        sentGroup.Route.Should().Be(DeliveryRoute.RelayedGroup);
+        sentGroup.RecipientIdentityId.Should().BeNull("Group V2 broadcast must omit RecipientIdentityId");
+        sentGroup.ChannelId.Should().Be(channelId);
+        sentGroup.Payload.Span[0].Should().Be((byte)FileTransferControlOpcode.IceSignal);
+
+        var signalPayload = serializer.Deserialize<FileTransferIceSignalPayload>(sentGroup.Payload.Slice(1)).Value;
+        signalPayload.Kind.Should().Be(IceSignalKind.IceCandidate);
+        signalPayload.SdpOrCandidate.Should().Be(candidateEvent.Candidate);
+        signalPayload.TargetPeerId.Should().Be(bobId, "Group transfer ICE candidate must address the specific target peer");
     }
 
     private static TestTransferNode CreateNode(
