@@ -172,9 +172,8 @@ public sealed class OutboundPendingRetryWorker : IOutboundPendingRetryWorker
 
                 try
                 {
-                    var ownerId = model.OwnerId.IsValid ? model.OwnerId : model.PeerId;
                     var result = await _peerConnectionService.ConnectWithInvitationAsync(
-                        ownerId,
+                        model.OwnerId,
                         invitationDomain.Value,
                         ct: attemptCts.Token).ConfigureAwait(false);
 

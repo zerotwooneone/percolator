@@ -78,6 +78,7 @@ public sealed class ConversationStateServiceTests
             BlindedRoutingToken.New());
 
         _pendingModel = new OutboundPendingConnectionModel(
+            _personaId,
             _peerId,
             "Bob Offline",
             payload,

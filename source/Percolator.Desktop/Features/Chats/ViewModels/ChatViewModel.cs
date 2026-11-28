@@ -45,11 +45,11 @@ public sealed partial class ChatViewModel : ViewModelBase
     private readonly ICurrentPersonaService _currentPersonaService;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ChatViewModel> _logger;
-    private readonly IFileTransferActionHandler? _fileTransferActionHandler;
-    private readonly IFileTransferQueryService? _fileTransferQueryService;
-    private readonly IDialogService? _dialogService;
-    private readonly IFilePickerService? _filePickerService;
-    private readonly IPeerIntroductionConsentRepository? _peerIntroductionConsentRepository;
+    private readonly IFileTransferActionHandler _fileTransferActionHandler;
+    private readonly IFileTransferQueryService _fileTransferQueryService;
+    private readonly IDialogService _dialogService;
+    private readonly IFilePickerService _filePickerService;
+    private readonly IPeerIntroductionConsentRepository _peerIntroductionConsentRepository;
 
     private readonly ObservableList<ChatMessageViewModel> _messagesList = new();
     private readonly Dictionary<PayloadId, ChatMessageModel> _modelsById = new();
@@ -133,11 +133,11 @@ public sealed partial class ChatViewModel : ViewModelBase
         TimeProvider timeProvider,
         ILogger<ChatViewModel> logger,
         ILogger<ChatReloadCoordinator> reloadCoordinatorLogger,
-        IFileTransferActionHandler? fileTransferActionHandler = null,
-        IFileTransferQueryService? fileTransferQueryService = null,
-        IDialogService? dialogService = null,
-        IFilePickerService? filePickerService = null,
-        IPeerIntroductionConsentRepository? peerIntroductionConsentRepository = null)
+        IFileTransferActionHandler fileTransferActionHandler,
+        IFileTransferQueryService fileTransferQueryService,
+        IDialogService dialogService,
+        IFilePickerService filePickerService,
+        IPeerIntroductionConsentRepository peerIntroductionConsentRepository)
     {
         _channelId = channelId;
         _chatService = chatService ?? throw new ArgumentNullException(nameof(chatService));
@@ -149,11 +149,11 @@ public sealed partial class ChatViewModel : ViewModelBase
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(reloadCoordinatorLogger);
 
-        _fileTransferActionHandler = fileTransferActionHandler;
-        _fileTransferQueryService = fileTransferQueryService;
-        _dialogService = dialogService;
-        _filePickerService = filePickerService;
-        _peerIntroductionConsentRepository = peerIntroductionConsentRepository;
+        _fileTransferActionHandler = fileTransferActionHandler ?? throw new ArgumentNullException(nameof(fileTransferActionHandler));
+        _fileTransferQueryService = fileTransferQueryService ?? throw new ArgumentNullException(nameof(fileTransferQueryService));
+        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+        _filePickerService = filePickerService ?? throw new ArgumentNullException(nameof(filePickerService));
+        _peerIntroductionConsentRepository = peerIntroductionConsentRepository ?? throw new ArgumentNullException(nameof(peerIntroductionConsentRepository));
 
         var view = _messagesList.CreateView(x => x);
         Messages = SynchronizationContext.Current != null
@@ -546,12 +546,6 @@ public sealed partial class ChatViewModel : ViewModelBase
             return;
         }
 
-        if (_dialogService == null || _filePickerService == null || _fileTransferActionHandler == null)
-        {
-            _logger.LogWarning("Cannot initiate file transfer: required services are unavailable.");
-            return;
-        }
-
         var match = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
         var contactName = match?.DisplayName ?? "Peer";
 
@@ -607,12 +601,6 @@ public sealed partial class ChatViewModel : ViewModelBase
 
     public async Task AcceptTransferAsync(TransferSessionId sessionId)
     {
-        if (_dialogService == null || _filePickerService == null || _fileTransferActionHandler == null)
-        {
-            _logger.LogWarning("Cannot accept transfer: required services are unavailable.");
-            return;
-        }
-
         var match = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
         var contactName = match?.DisplayName ?? "Peer";
 
@@ -648,28 +636,24 @@ public sealed partial class ChatViewModel : ViewModelBase
 
     public async Task PauseTransferAsync(TransferSessionId sessionId)
     {
-        if (_fileTransferActionHandler == null) return;
         await _fileTransferActionHandler.PauseTransferAsync(sessionId).ConfigureAwait(true);
         await RefreshTransfersAsync().ConfigureAwait(true);
     }
 
     public async Task ResumeTransferAsync(TransferSessionId sessionId)
     {
-        if (_fileTransferActionHandler == null) return;
         await _fileTransferActionHandler.ResumeTransferAsync(sessionId).ConfigureAwait(true);
         await RefreshTransfersAsync().ConfigureAwait(true);
     }
 
     public async Task StopSeedingAsync(TransferSessionId sessionId)
     {
-        if (_fileTransferActionHandler == null) return;
         await _fileTransferActionHandler.StopSeedingAsync(sessionId).ConfigureAwait(true);
         await RefreshTransfersAsync().ConfigureAwait(true);
     }
 
     public async Task CancelTransferAsync(TransferSessionId sessionId)
     {
-        if (_fileTransferActionHandler == null) return;
         await _fileTransferActionHandler.CancelTransferAsync(sessionId, TransferTerminationReason.SenderCancelled).ConfigureAwait(true);
         await RefreshTransfersAsync().ConfigureAwait(true);
     }
@@ -682,8 +666,6 @@ public sealed partial class ChatViewModel : ViewModelBase
 
     public async Task RefreshTransfersAsync()
     {
-        if (_fileTransferQueryService == null) return;
-
         try
         {
             var match = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
@@ -753,15 +735,22 @@ public sealed partial class ChatViewModel : ViewModelBase
 
     private void TeardownTransfersOnLock()
     {
-        if (_fileTransferActionHandler == null) return;
-
         lock (_transfersLock)
         {
             foreach (var transfer in _transfersList)
             {
                 if (transfer.IsInFlight || transfer.IsSeeding)
                 {
-                    _ = _fileTransferActionHandler.CancelTransferAsync(transfer.SessionId, TransferTerminationReason.SenderCancelled);
+                    var sessionId = transfer.SessionId;
+                    _fileTransferActionHandler.CancelTransferAsync(sessionId, TransferTerminationReason.SenderCancelled)
+                        .AsTask()
+                        .ContinueWith(t =>
+                        {
+                            if (t.IsFaulted && t.Exception != null)
+                            {
+                                _logger.LogError(t.Exception, "Failed to cancel transfer {SessionId} on vault lock teardown.", sessionId);
+                            }
+                        }, TaskScheduler.Default);
                 }
             }
         }
@@ -829,7 +818,6 @@ public sealed partial class ChatViewModel : ViewModelBase
 
     public async Task RefreshPendingIntroductionsAsync()
     {
-        if (_peerIntroductionConsentRepository == null) return;
         var currentPersona = _currentPersonaService.CurrentPersona;
         if (currentPersona == null || !currentPersona.IdentityId.IsValid) return;
 

@@ -11,8 +11,8 @@ namespace Percolator.Desktop.Features.Transports.Models;
 /// Tracks peer metadata, invitation tokens, and the initial attempt timestamp for background retries.
 /// </summary>
 public sealed record OutboundPendingConnectionModel(
+    PublicIdentityId OwnerId,
     PublicIdentityId PeerId,
     string DisplayName,
     PeerInvitationPayload Invitation,
-    DateTimeOffset InitiatedAtUtc,
-    PublicIdentityId OwnerId = default);
+    DateTimeOffset InitiatedAtUtc);

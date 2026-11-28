@@ -15,6 +15,7 @@ using NUnit.Framework;
 using Percolator.Apps.Chat.Features.Media;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Reactions;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Features.Chats.Models;
 using Percolator.Desktop.Features.Chats.Services;
@@ -25,6 +26,7 @@ using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Apps.Chat.Features.Introductions;
 
 [TestFixture]
 public sealed class ChatViewModelTests
@@ -37,6 +39,11 @@ public sealed class ChatViewModelTests
     private ChatDraftStateService _draftStateService = null!;
     private Mock<ICurrentPersonaService> _currentPersonaServiceMock = null!;
     private FakeTimeProvider _timeProvider = null!;
+    private Mock<IFileTransferActionHandler> _actionHandlerMock = null!;
+    private Mock<IFileTransferQueryService> _ftQueryServiceMock = null!;
+    private Mock<IDialogService> _dialogServiceMock = null!;
+    private Mock<IFilePickerService> _filePickerMock = null!;
+    private Mock<IPeerIntroductionConsentRepository> _introRepoMock = null!;
     private SynchronizationContext? _previousSyncContext;
 
     private sealed class ImmediateSynchronizationContext : SynchronizationContext
@@ -65,6 +72,12 @@ public sealed class ChatViewModelTests
 
         _draftStateService = new ChatDraftStateService(_currentPersonaServiceMock.Object, NullLogger<ChatDraftStateService>.Instance);
         _timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
+
+        _actionHandlerMock = new Mock<IFileTransferActionHandler>();
+        _ftQueryServiceMock = new Mock<IFileTransferQueryService>();
+        _dialogServiceMock = new Mock<IDialogService>();
+        _filePickerMock = new Mock<IFilePickerService>();
+        _introRepoMock = new Mock<IPeerIntroductionConsentRepository>();
 
         _queryServiceMock.Setup(q => q.GetMessagesAsync(
                 _channelId,
@@ -97,7 +110,12 @@ public sealed class ChatViewModelTests
             _currentPersonaServiceMock.Object,
             _timeProvider,
             NullLogger<ChatViewModel>.Instance,
-            NullLogger<ChatReloadCoordinator>.Instance);
+            NullLogger<ChatReloadCoordinator>.Instance,
+            _actionHandlerMock.Object,
+            _ftQueryServiceMock.Object,
+            _dialogServiceMock.Object,
+            _filePickerMock.Object,
+            _introRepoMock.Object);
     }
 
     [Test]
@@ -112,7 +130,12 @@ public sealed class ChatViewModelTests
             _currentPersonaServiceMock.Object,
             _timeProvider,
             NullLogger<ChatViewModel>.Instance,
-            NullLogger<ChatReloadCoordinator>.Instance);
+            NullLogger<ChatReloadCoordinator>.Instance,
+            _actionHandlerMock.Object,
+            _ftQueryServiceMock.Object,
+            _dialogServiceMock.Object,
+            _filePickerMock.Object,
+            _introRepoMock.Object);
         act1.Should().Throw<ArgumentNullException>().WithParameterName("chatService");
 
         var act2 = () => new ChatViewModel(
@@ -124,8 +147,98 @@ public sealed class ChatViewModelTests
             _currentPersonaServiceMock.Object,
             _timeProvider,
             NullLogger<ChatViewModel>.Instance,
-            NullLogger<ChatReloadCoordinator>.Instance);
+            NullLogger<ChatReloadCoordinator>.Instance,
+            _actionHandlerMock.Object,
+            _ftQueryServiceMock.Object,
+            _dialogServiceMock.Object,
+            _filePickerMock.Object,
+            _introRepoMock.Object);
         act2.Should().Throw<ArgumentNullException>().WithParameterName("queryService");
+
+        var act3 = () => new ChatViewModel(
+            _channelId,
+            _chatServiceMock.Object,
+            _queryServiceMock.Object,
+            _conversationStateService,
+            _draftStateService,
+            _currentPersonaServiceMock.Object,
+            _timeProvider,
+            NullLogger<ChatViewModel>.Instance,
+            NullLogger<ChatReloadCoordinator>.Instance,
+            null!,
+            _ftQueryServiceMock.Object,
+            _dialogServiceMock.Object,
+            _filePickerMock.Object,
+            _introRepoMock.Object);
+        act3.Should().Throw<ArgumentNullException>().WithParameterName("fileTransferActionHandler");
+
+        var act4 = () => new ChatViewModel(
+            _channelId,
+            _chatServiceMock.Object,
+            _queryServiceMock.Object,
+            _conversationStateService,
+            _draftStateService,
+            _currentPersonaServiceMock.Object,
+            _timeProvider,
+            NullLogger<ChatViewModel>.Instance,
+            NullLogger<ChatReloadCoordinator>.Instance,
+            _actionHandlerMock.Object,
+            null!,
+            _dialogServiceMock.Object,
+            _filePickerMock.Object,
+            _introRepoMock.Object);
+        act4.Should().Throw<ArgumentNullException>().WithParameterName("fileTransferQueryService");
+
+        var act5 = () => new ChatViewModel(
+            _channelId,
+            _chatServiceMock.Object,
+            _queryServiceMock.Object,
+            _conversationStateService,
+            _draftStateService,
+            _currentPersonaServiceMock.Object,
+            _timeProvider,
+            NullLogger<ChatViewModel>.Instance,
+            NullLogger<ChatReloadCoordinator>.Instance,
+            _actionHandlerMock.Object,
+            _ftQueryServiceMock.Object,
+            null!,
+            _filePickerMock.Object,
+            _introRepoMock.Object);
+        act5.Should().Throw<ArgumentNullException>().WithParameterName("dialogService");
+
+        var act6 = () => new ChatViewModel(
+            _channelId,
+            _chatServiceMock.Object,
+            _queryServiceMock.Object,
+            _conversationStateService,
+            _draftStateService,
+            _currentPersonaServiceMock.Object,
+            _timeProvider,
+            NullLogger<ChatViewModel>.Instance,
+            NullLogger<ChatReloadCoordinator>.Instance,
+            _actionHandlerMock.Object,
+            _ftQueryServiceMock.Object,
+            _dialogServiceMock.Object,
+            null!,
+            _introRepoMock.Object);
+        act6.Should().Throw<ArgumentNullException>().WithParameterName("filePickerService");
+
+        var act7 = () => new ChatViewModel(
+            _channelId,
+            _chatServiceMock.Object,
+            _queryServiceMock.Object,
+            _conversationStateService,
+            _draftStateService,
+            _currentPersonaServiceMock.Object,
+            _timeProvider,
+            NullLogger<ChatViewModel>.Instance,
+            NullLogger<ChatReloadCoordinator>.Instance,
+            _actionHandlerMock.Object,
+            _ftQueryServiceMock.Object,
+            _dialogServiceMock.Object,
+            _filePickerMock.Object,
+            null!);
+        act7.Should().Throw<ArgumentNullException>().WithParameterName("peerIntroductionConsentRepository");
     }
 
     [Test]

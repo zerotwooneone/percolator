@@ -191,6 +191,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
             {
                 dialogStatus = OutboundConnectionStatus.PendingOffline;
                 var pendingModel = new OutboundPendingConnectionModel(
+                    _activePersonaId.Value,
                     payload.IdentityId,
                     peerDisplayName,
                     payload,

@@ -137,7 +137,11 @@ public sealed class SqlPeerIntroductionConsentRepository : IPeerIntroductionCons
             var deserialized = _serializer.Deserialize<PeerInvitationWireDto>(entity.InvitationData);
             if (deserialized.IsSuccess)
             {
-                invitation = deserialized.Value.ToDomain().Value;
+                var domRes = deserialized.Value.ToDomain();
+                if (domRes.IsSuccess)
+                {
+                    invitation = domRes.Value;
+                }
             }
         }
 

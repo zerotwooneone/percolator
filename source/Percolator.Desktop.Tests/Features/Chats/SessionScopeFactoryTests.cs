@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Percolator.Apps.Chat.Features.Messaging;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Features.Chats.Models;
 using Percolator.Desktop.Features.Chats.Services;
@@ -18,6 +19,7 @@ using Percolator.Desktop.Features.Chats.ViewModels;
 using Percolator.Desktop.Features.Shell.Models;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities;
+using Percolator.Apps.Chat.Features.Introductions;
 using R3;
 
 [TestFixture]
@@ -53,6 +55,11 @@ public sealed class SessionScopeFactoryTests
         services.AddSingleton<ILogger<ChatViewModel>>(NullLogger<ChatViewModel>.Instance);
         services.AddSingleton<ILogger<ChatReloadCoordinator>>(NullLogger<ChatReloadCoordinator>.Instance);
         services.AddSingleton<ILogger<SessionScopeFactory>>(NullLogger<SessionScopeFactory>.Instance);
+        services.AddSingleton(Mock.Of<IFileTransferActionHandler>());
+        services.AddSingleton(Mock.Of<IFileTransferQueryService>());
+        services.AddSingleton(Mock.Of<IDialogService>());
+        services.AddSingleton(Mock.Of<IFilePickerService>());
+        services.AddSingleton(Mock.Of<IPeerIntroductionConsentRepository>());
 
         _serviceProvider = services.BuildServiceProvider();
         var scopeFactory = _serviceProvider.GetRequiredService<IServiceScopeFactory>();
