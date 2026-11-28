@@ -14,6 +14,7 @@ public sealed record TransferTerminationReason
     public static readonly TransferTerminationReason VerificationFailed = new("VerificationFailed");
     public static readonly TransferTerminationReason Timeout = new("Timeout");
     public static readonly TransferTerminationReason OfferExpired = new("OfferExpired");
+    public static readonly TransferTerminationReason NetworkError = new("NetworkError");
 
     public static TransferTerminationReason FromText(string text)
     {

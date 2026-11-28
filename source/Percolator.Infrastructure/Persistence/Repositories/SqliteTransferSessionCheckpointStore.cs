@@ -44,7 +44,7 @@ public sealed class SqliteTransferSessionCheckpointStore : ITransferSessionCheck
 
         session.State = (int)state;
         session.UploadedSizeBytes = uploadedBytes.Bytes;
-        session.CompletedAtUtc = completedAtUtc;
+        session.CompletedAtUtc = completedAtUtc ?? session.CompletedAtUtc;
 
         TransferBitfieldEntity? bitfieldEntity = await db.TransferBitfields
             .FirstOrDefaultAsync(b => b.TransferId == sessionId.Value, ct)

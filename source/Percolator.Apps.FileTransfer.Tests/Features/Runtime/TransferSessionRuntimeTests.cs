@@ -474,6 +474,7 @@ public sealed class TransferSessionRuntimeTests
         // 1. Batched checkpoint after receiving 2 chunks (InFlight, PopCount == 2)
         // 2. Forced immediate checkpoint on InFlight -> Seeding transition (Seeding, PopCount == 3, CompletedAtUtc is null while actively seeding)
         bob.CheckpointStore.Checkpoints.Should().NotBeEmpty();
+        bob.CheckpointStore.Checkpoints.Should().Contain(c => c.State == TransferSessionState.InFlight && c.LocalBitfield.PopCount == 2);
 
         var seedingCheckpoint = bob.CheckpointStore.Checkpoints.Last();
         seedingCheckpoint.SessionId.Should().Be(sessionId);

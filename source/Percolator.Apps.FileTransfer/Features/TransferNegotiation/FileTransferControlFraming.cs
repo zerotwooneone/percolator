@@ -6,7 +6,7 @@ using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
 namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
-internal static class FileTransferControlFraming
+public static class FileTransferControlFraming
 {
     public static byte[] FramePayload<TPayload>(
         IPayloadSerializer serializer,

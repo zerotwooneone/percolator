@@ -249,6 +249,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (sendResult.IsFailure)
         {
             await _runtime.StopSessionAsync(sessionId, deleteCertificate: true, ct);
+            session.MarkFailed(TransferTerminationReason.NetworkError, _clock);
+            await _sessionRepository.SaveSessionAsync(session, ct);
             return DomainResult<TransferSessionId>.Failure(sendResult.Error);
         }
 
@@ -397,6 +399,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             if (sendResult.IsFailure)
             {
                 await _runtime.StopSessionAsync(sessionId, deleteCertificate: false, ct);
+                session.MarkFailed(TransferTerminationReason.NetworkError, _clock);
+                await _sessionRepository.SaveSessionAsync(session, ct);
                 return sendResult;
             }
         }
@@ -422,6 +426,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             if (sendResult.IsFailure)
             {
                 await _runtime.StopSessionAsync(sessionId, deleteCertificate: false, ct);
+                session.MarkFailed(TransferTerminationReason.NetworkError, _clock);
+                await _sessionRepository.SaveSessionAsync(session, ct);
                 return sendResult;
             }
         }

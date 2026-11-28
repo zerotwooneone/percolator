@@ -113,7 +113,7 @@ public sealed class IngressControlTests
 
         TransferSessionId sessionId = TransferSessionId.New();
         FileTransferOfferPayload offer = CreateValidOffer(sessionId, relayUri: blockedRelay);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Offer, _serializer.Serialize(offer).Span);
+        byte[] payloadBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Offer, offer);
 
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
@@ -138,7 +138,7 @@ public sealed class IngressControlTests
 
         TransferSessionId sessionId = TransferSessionId.New();
         FileTransferOfferPayload offer = CreateValidOffer(sessionId);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Offer, _serializer.Serialize(offer).Span);
+        byte[] payloadBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Offer, offer);
 
         PublicIdentityId senderId = PublicIdentityId.New();
         InboundPayloadContext context = new(
@@ -291,7 +291,7 @@ public sealed class IngressControlTests
         await _sessionRepository.SaveSessionAsync(session);
 
         FileTransferCancelPayload cancel = new(sessionId, TransferTerminationReason.SenderCancelled);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Cancel, _serializer.Serialize(cancel).Span);
+        byte[] payloadBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Cancel, cancel);
 
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
@@ -334,7 +334,7 @@ public sealed class IngressControlTests
         PublicIdentityId attackerId = PublicIdentityId.FromBytes(attackerBytes);
 
         FileTransferCancelPayload cancel = new(sessionId, TransferTerminationReason.SenderCancelled);
-        byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Cancel, _serializer.Serialize(cancel).Span);
+        byte[] payloadBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Cancel, cancel);
 
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
@@ -418,13 +418,5 @@ public sealed class IngressControlTests
 
         IngressDecision blockedDecision = await filter.EvaluateAsync(allowedContext);
         blockedDecision.Should().Be(IngressDecision.DiscardSilently, "Recipient's policy blocks sender");
-    }
-
-    private static byte[] PrependOpcode(byte opcode, ReadOnlySpan<byte> payload)
-    {
-        byte[] combined = new byte[1 + payload.Length];
-        combined[0] = opcode;
-        payload.CopyTo(combined.AsSpan(1));
-        return combined;
     }
 }

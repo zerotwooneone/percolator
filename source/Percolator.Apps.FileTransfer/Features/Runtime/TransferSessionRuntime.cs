@@ -1111,6 +1111,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
                             lock (handle.SyncRoot)
                             {
+                                handle.ChunksSinceCheckpoint++;
                                 handle.HasUnpersistedChanges = true;
                             }
 

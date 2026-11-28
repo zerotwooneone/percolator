@@ -511,5 +511,13 @@ public sealed class ActionHandlerAndQueryTests
 
         // Runtime handle must be stopped so no zombie session remains active
         _runtime.ActiveSessionCount.Should().Be(0);
+
+        IReadOnlyList<TransferSession> allSessions = await _sessionRepo.GetActiveSessionsAsync();
+        allSessions.Should().ContainSingle();
+        TransferSession failedSession = allSessions[0];
+        failedSession.State.Should().Be(TransferSessionState.Failed);
+
+        using var cert = await _certStore.GetAsync(failedSession.Id);
+        cert.Should().BeNull("Certificate must be deleted when initiation fails");
     }
 }
