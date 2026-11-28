@@ -90,7 +90,7 @@ internal sealed class WebRtcPeerConnectionAdapter : ITransferPeerConnection
             IceServers = iceServers,
             CertificateType = rtcCertificateType.RTC_CERTIFICATE_ECDSA,
             DisableAutoNegotiation = true,
-            MaxMessageSize = SwarmFrameCodec.MaxWireFrameSizeBytes + 64
+            MaxMessageSize = WebRtcDataChannelAdapter.MaxSctpMessageBytes
         };
 
         _candidateQueue = Channel.CreateUnbounded<TransferIceCandidateDiscoveredEvent>(new UnboundedChannelOptions

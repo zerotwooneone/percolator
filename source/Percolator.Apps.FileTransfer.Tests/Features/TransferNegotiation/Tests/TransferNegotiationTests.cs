@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -402,5 +403,104 @@ public sealed class TransferNegotiationTests
 
         initiateResult.IsSuccess.Should().BeFalse();
         initiateResult.Error.Code.Should().Be("Transfer.NoRecipients");
+    }
+
+    [Test]
+    public async Task InitiateTransferAsync_FileSequentialParallelHashing_ProducesByteIdenticalMerkleTreeAndReportsProgress()
+    {
+        var root = RootDirectoryPath.Parse(@"C:\TestBundleSource");
+        var channelId = ChannelId.New();
+        var initiatorId = PublicIdentityId.New();
+        var recipientId = PublicIdentityId.New();
+
+        // 1,000 tiny files + 0-byte files + larger boundary-spanning files
+        const int tinyFileCount = 1000;
+        var relativePaths = new List<SanitizedRelativePath>();
+        var allBytes = new MemoryStream();
+
+        // 0-byte file at the beginning
+        var emptyPath1 = SanitizedRelativePath.Parse("zero1.dat");
+        relativePaths.Add(emptyPath1);
+        _fileStorage.FilesOnDisk[ResolvedFilePath.Resolve(root, emptyPath1).AbsolutePath] = [];
+
+        for (int i = 0; i < tinyFileCount; i++)
+        {
+            var rel = SanitizedRelativePath.Parse($"node_modules/pkg_{i % 50}/file_{i}.js");
+            relativePaths.Add(rel);
+            byte[] content = System.Text.Encoding.UTF8.GetBytes($"console.log('file {i}');\n");
+            _fileStorage.FilesOnDisk[ResolvedFilePath.Resolve(root, rel).AbsolutePath] = content;
+            allBytes.Write(content);
+        }
+
+        // Another 0-byte file in the middle
+        var emptyPath2 = SanitizedRelativePath.Parse("zero2.dat");
+        relativePaths.Add(emptyPath2);
+        _fileStorage.FilesOnDisk[ResolvedFilePath.Resolve(root, emptyPath2).AbsolutePath] = [];
+
+        // Larger file spanning chunk boundaries
+        var largePath = SanitizedRelativePath.Parse("assets/large_asset.bin");
+        relativePaths.Add(largePath);
+        byte[] largeContent = new byte[150_000];
+        RandomNumberGenerator.Fill(largeContent);
+        _fileStorage.FilesOnDisk[ResolvedFilePath.Resolve(root, largePath).AbsolutePath] = largeContent;
+        allBytes.Write(largeContent);
+
+        byte[] fullContiguous = allBytes.ToArray();
+        TotalBundleBytes totalBytes = TotalBundleBytes.FromBytes(fullContiguous.Length);
+        ChunkSizeBytes chunkSize = ChunkSizeBytes.SelectOptimalForBundle(totalBytes);
+        int expectedChunkCount = (int)Math.Max(1, (fullContiguous.Length + chunkSize.Bytes - 1) / chunkSize.Bytes);
+
+        var expectedLeaves = new List<ChunkHash>();
+        for (int c = 0; c < expectedChunkCount; c++)
+        {
+            int offset = c * chunkSize.Bytes;
+            int len = Math.Min(chunkSize.Bytes, fullContiguous.Length - offset);
+            expectedLeaves.Add(MerkleTreeBuilder.HashLeaf(fullContiguous.AsSpan(offset, len)));
+        }
+        var expectedMerkleTree = MerkleTreeBuilder.BuildFromLeaves(expectedLeaves);
+
+        var reportedProgress = new List<TransferPreparationProgress>();
+        var progressHandler = new SynchronousProgress<TransferPreparationProgress>(p =>
+        {
+            lock (reportedProgress)
+            {
+                reportedProgress.Add(p);
+            }
+        });
+
+        var result = await _handler.InitiateTransferAsync(
+            channelId,
+            initiatorId,
+            [recipientId],
+            root,
+            relativePaths,
+            DirectWanPolicy.ExplicitlyAllowed,
+            preparationProgress: progressHandler);
+
+        result.IsSuccess.Should().BeTrue();
+        TransferSession? session = await _sessionRepo.GetSessionByIdAsync(result.Value);
+        session.Should().NotBeNull();
+        session!.Manifest.TotalFiles.Count.Should().Be(relativePaths.Count);
+        session.Manifest.TotalChunks.Count.Should().Be(expectedChunkCount);
+        session.Manifest.MerkleTree.Root.Should().Be(expectedMerkleTree.Root);
+
+        for (int i = 0; i < expectedChunkCount; i++)
+        {
+            session.Manifest.MerkleTree.Leaves[i].Should().Be(expectedLeaves[i]);
+        }
+
+        reportedProgress.Should().NotBeEmpty();
+        var lastProgress = reportedProgress[^1];
+        lastProgress.FilesScanned.Should().Be(relativePaths.Count);
+        lastProgress.TotalFiles.Should().Be(relativePaths.Count);
+        lastProgress.ChunksHashed.Should().Be(expectedChunkCount);
+        lastProgress.TotalChunks.Should().Be(expectedChunkCount);
+    }
+
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public SynchronousProgress(Action<T> handler) => _handler = handler;
+        public void Report(T value) => _handler(value);
     }
 }

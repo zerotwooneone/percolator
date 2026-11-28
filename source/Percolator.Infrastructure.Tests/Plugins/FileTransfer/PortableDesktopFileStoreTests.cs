@@ -35,6 +35,7 @@ public sealed class PortableDesktopFileStoreTests
     [TearDown]
     public void TearDown()
     {
+        _fileStore?.Dispose();
         if (Directory.Exists(_tempRoot))
         {
             try { Directory.Delete(_tempRoot, recursive: true); } catch { }
@@ -82,7 +83,7 @@ public sealed class PortableDesktopFileStoreTests
         var nonZeroEntry = new FileEntry(
             FileIndex.FromInt(1),
             SanitizedRelativePath.Parse("content.dat"),
-            FileSizeBytes.FromBytes(1024),
+            FileSizeBytes.FromBytes(1024 * 1024),
             BundleByteOffset.Zero,
             FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow));
 
@@ -91,7 +92,7 @@ public sealed class PortableDesktopFileStoreTests
         var manifest = TransferManifest.Create(
             TransferSessionId.New(),
             RootBundleName.Parse("TestBundle"),
-            ChunkSizeBytes.FromBytes(65536),
+            ChunkSizeBytes.FromBytes(1024 * 1024),
             merkleTree,
             [zeroByteEntry, nonZeroEntry]);
 
@@ -104,7 +105,7 @@ public sealed class PortableDesktopFileStoreTests
 
         string contentPartPath = Path.Combine(_tempRoot, "content.dat.percolator-part");
         File.Exists(contentPartPath).Should().BeTrue();
-        new FileInfo(contentPartPath).Length.Should().Be(1024);
+        new FileInfo(contentPartPath).Length.Should().Be(1024 * 1024);
     }
 
     [Test]
@@ -140,16 +141,17 @@ public sealed class PortableDesktopFileStoreTests
 
         await _fileStore.PreAllocateFilesAsync(root, manifest, SelectedFileIndices.All(manifest.TotalFiles));
 
-        // Part file exists with length 131072
+        // Part file is lazily allocated on first chunk write for files < 1 MB
         string partPath = $"{resolved.AbsolutePath}.percolator-part";
-        File.Exists(partPath).Should().BeTrue();
-        new FileInfo(partPath).Length.Should().Be(131072);
+        File.Exists(partPath).Should().BeFalse();
 
         // Write first chunk to part file
         await _fileStore.WriteChunkAsync(
             resolved,
             FileByteOffset.Zero,
             PlaintextChunkData.FromBytes(payload));
+
+        File.Exists(partPath).Should().BeTrue();
 
         // Read chunk back
         PlaintextChunkData readChunk = await _fileStore.ReadChunkAsync(
@@ -263,5 +265,73 @@ public sealed class PortableDesktopFileStoreTests
         fullBitfield.HasChunk(ChunkIndex.FromInt(0)).Should().BeTrue();
         fullBitfield.HasChunk(ChunkIndex.FromInt(1)).Should().BeTrue();
         fullBitfield.IsComplete.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task LruHandleCache_FiveHundredFiles_EvictsGracefullyAndFinalizesWithoutSharingViolations()
+    {
+        // Max 8 open handles to force continuous eviction
+        using var constrainedStore = new PortableDesktopFileStore(_tempPartials, maxOpenHandles: 8);
+        var root = RootDirectoryPath.Parse(_tempRoot);
+        const int fileCount = 500;
+        var files = new (ResolvedFilePath Path, byte[] Data)[fileCount];
+
+        for (int i = 0; i < fileCount; i++)
+        {
+            var relPath = SanitizedRelativePath.Parse($"sub/folder_{i % 10}/file_{i}.txt");
+            var resolved = ResolvedFilePath.Resolve(root, relPath);
+            byte[] data = RandomNumberGenerator.GetBytes(128);
+            files[i] = (resolved, data);
+        }
+
+        // Concurrently write and finalize all 500 files
+        await Parallel.ForEachAsync(files, new ParallelOptions { MaxDegreeOfParallelism = 16 }, async (file, ct) =>
+        {
+            await constrainedStore.WriteChunkAsync(file.Path, FileByteOffset.Zero, PlaintextChunkData.FromBytes(file.Data), ct);
+            await constrainedStore.FinalizeFileAsync(file.Path, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow), ct);
+        });
+
+        // Verify exact byte integrity of all 500 files
+        for (int i = 0; i < fileCount; i++)
+        {
+            File.Exists(files[i].Path.AbsolutePath).Should().BeTrue();
+            byte[] onDisk = await File.ReadAllBytesAsync(files[i].Path.AbsolutePath);
+            onDisk.SequenceEqual(files[i].Data).Should().BeTrue();
+        }
+    }
+
+    [Test]
+    public async Task HasAnyExistingTransferFilesAsync_EmptyFolder_ReturnsFalse_NonEmpty_ReturnsTrue()
+    {
+        string emptyDir = Path.Combine(Path.GetTempPath(), "EmptyDir_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(emptyDir);
+        try
+        {
+            var root = RootDirectoryPath.Parse(emptyDir);
+            var fileEntry = new FileEntry(
+                FileIndex.FromInt(0),
+                SanitizedRelativePath.Parse("test.bin"),
+                FileSizeBytes.FromBytes(1024),
+                BundleByteOffset.Zero,
+                FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow));
+
+            var manifest = TransferManifest.Create(
+                TransferSessionId.New(),
+                RootBundleName.Parse("Test"),
+                ChunkSizeBytes.Default,
+                MerkleTreeIndex.Create(MerkleRoot.FromSpan(new byte[32]), [ChunkHash.FromSpan(new byte[32])]),
+                [fileEntry]);
+
+            bool hasEntries = await _fileStore.HasAnyExistingTransferFilesAsync(root, manifest, SelectedFileIndices.All(FileCount.FromInt(1)));
+            hasEntries.Should().BeFalse();
+
+            await File.WriteAllTextAsync(Path.Combine(emptyDir, "somefile.txt"), "hello");
+            bool hasEntriesAfter = await _fileStore.HasAnyExistingTransferFilesAsync(root, manifest, SelectedFileIndices.All(FileCount.FromInt(1)));
+            hasEntriesAfter.Should().BeTrue();
+        }
+        finally
+        {
+            try { Directory.Delete(emptyDir, recursive: true); } catch { }
+        }
     }
 }

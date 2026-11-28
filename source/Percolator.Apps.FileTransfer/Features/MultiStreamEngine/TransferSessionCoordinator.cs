@@ -133,7 +133,10 @@ public sealed class TransferSessionCoordinator
             }
 
             PlaintextChunkData plaintextChunk = PlaintextChunkData.FromMemory(rentedPlaintext.AsMemory(0, length));
-            await stream.SendFrameAsync(new ChunkDataFrame(chunkIdx, plaintextChunk), ct).ConfigureAwait(false);
+            var owner = new ArrayPoolBufferOwner(rentedPlaintext);
+            var chunkFrame = new ChunkDataFrame(chunkIdx, plaintextChunk, owner);
+            rentedPlaintext = null;
+            await stream.SendFrameAsync(chunkFrame, ct).ConfigureAwait(false);
 
             lock (_sessionSync)
             {
@@ -500,5 +503,19 @@ public sealed class TransferSessionCoordinator
         }
         _scheduler.ReleaseChunk(chunkIndex);
         await stream.DisposeAsync();
+    }
+
+    private sealed class ArrayPoolBufferOwner : IDisposable
+    {
+        private byte[]? _buffer;
+        public ArrayPoolBufferOwner(byte[] buffer) => _buffer = buffer;
+        public void Dispose()
+        {
+            byte[]? b = Interlocked.Exchange(ref _buffer, null);
+            if (b != null)
+            {
+                ArrayPool<byte>.Shared.Return(b);
+            }
+        }
     }
 }

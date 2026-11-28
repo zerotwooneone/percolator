@@ -325,6 +325,33 @@ public sealed partial class WindowsSparseDesktopFileStore : IDesktopFileStorage
         }
     }
 
+    public ValueTask<bool> HasAnyExistingTransferFilesAsync(
+        RootDirectoryPath rootPath,
+        TransferManifest manifest,
+        SelectedFileIndices selectedIndices,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rootPath);
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(selectedIndices);
+
+        if (!Directory.Exists(rootPath.Value))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        try
+        {
+            using IEnumerator<string> enumerator = Directory.EnumerateFileSystemEntries(rootPath.Value).GetEnumerator();
+            bool hasEntries = enumerator.MoveNext();
+            return ValueTask.FromResult(hasEntries);
+        }
+        catch (Exception)
+        {
+            return ValueTask.FromResult(true);
+        }
+    }
+
     public ValueTask<FileMetadataResult> GetFileMetadataAsync(ResolvedFilePath sourcePath, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sourcePath);

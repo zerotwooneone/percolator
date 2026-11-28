@@ -12,7 +12,9 @@ public sealed record TransferSessionRuntimeOptions(
     TimeSpan? TeardownTimeout = null,
     int MaxPeersPerSession = 16,
     TimeSpan? CheckpointInterval = null,
-    int CheckpointChunkBatchSize = 16)
+    int CheckpointChunkBatchSize = 16,
+    int MaxConcurrentIoWorkers = 6,
+    int OutboundPeerQueueCapacity = 64)
 {
     public TimeSpan EffectiveSeedingTtl => SeedingTtl ?? TimeSpan.FromHours(24);
     public TimeSpan EffectiveTeardownTimeout => TeardownTimeout ?? TimeSpan.FromMilliseconds(750);

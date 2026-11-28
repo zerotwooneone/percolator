@@ -161,6 +161,7 @@ public sealed class ChatViewModelFileTransferAndIntroTests
             It.IsAny<RootBundleName>(),
             It.IsAny<SeedRatio>(),
             It.IsAny<bool>(),
+            It.IsAny<IProgress<TransferPreparationProgress>?>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -190,6 +191,7 @@ public sealed class ChatViewModelFileTransferAndIntroTests
                 It.IsAny<RootBundleName>(),
                 null,
                 false,
+                It.IsAny<IProgress<TransferPreparationProgress>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DomainResult<TransferSessionId>.Success(expectedSessionId));
 
@@ -212,6 +214,7 @@ public sealed class ChatViewModelFileTransferAndIntroTests
             It.IsAny<RootBundleName>(),
             null,
             false,
+            It.IsAny<IProgress<TransferPreparationProgress>?>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

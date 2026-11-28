@@ -328,4 +328,75 @@ public sealed class WebRtcPeerTransportTests
         await _transportA.CloseSessionConnectionsAsync(sessionId);
         _transportA.ActiveConnectionCount.Should().Be(0);
     }
+
+    [Test]
+    public async Task DirectWebRtc_TwoMegabyteChunk_SubFramedAndReassembledTransparently()
+    {
+        var sessionId = TransferSessionId.New();
+        var peerAId = PublicIdentityId.New();
+        var peerBId = PublicIdentityId.New();
+        var authToken = StreamAuthToken.Generate();
+
+        IPEndPoint stunEp = _stunService.BoundEndpoint!;
+        var stunDescriptor = new StunEndpointDescriptor(
+            EndpointHost.Parse(stunEp.Address.ToString()),
+            PortNumber.FromInt(stunEp.Port));
+
+        ITransferPeerConnection connA = await _transportA.CreateDirectConnectionAsync(
+            new DirectPeerConnectionOptions(sessionId, peerBId, IsInitiator: true, ExchangeStunEndpoint: stunDescriptor));
+        ITransferPeerConnection connB = await _transportB.CreateDirectConnectionAsync(
+            new DirectPeerConnectionOptions(sessionId, peerAId, IsInitiator: false, ExchangeStunEndpoint: stunDescriptor));
+
+        using IDisposable subA = _eventBusA.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
+        {
+            if (evt.SessionId == sessionId && evt.RemotePeerId == peerBId)
+            {
+                try { await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); }
+                catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException or TransferTransportException) { }
+            }
+        });
+
+        using IDisposable subB = _eventBusB.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) =>
+        {
+            if (evt.SessionId == sessionId && evt.RemotePeerId == peerAId)
+            {
+                try { await connA.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); }
+                catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException or TransferTransportException) { }
+            }
+        });
+
+        string offerSdp = await connA.CreateOfferAsync();
+        string answerSdp = await connB.AcceptOfferAndCreateAnswerAsync(offerSdp, connA.LocalDtlsFingerprint);
+        await connA.ApplyRemoteAnswerAsync(answerSdp, connB.LocalDtlsFingerprint);
+
+        Task<ITransferDataChannel> openATask = connA.WaitForAuthenticatedChannelAsync(authToken, peerAId).AsTask();
+        Task<ITransferDataChannel> openBTask = connB.WaitForAuthenticatedChannelAsync(authToken, peerBId).AsTask();
+        await Task.WhenAll(openATask, openBTask);
+
+        ITransferDataChannel channelA = openATask.Result;
+        ITransferDataChannel channelB = openBTask.Result;
+
+        // 2 MB chunk (> 64 KB SCTP limit, requires ~33 fragments)
+        const int twoMb = 2 * 1024 * 1024;
+        byte[] payload = RandomNumberGenerator.GetBytes(twoMb);
+
+        await channelA.SendFrameAsync(new ChunkDataFrame(
+            ChunkIndex.FromInt(42),
+            PlaintextChunkData.FromBytes(payload)));
+
+        using var recvCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        IStreamFramePayload received = await channelB.ReceiveFrameAsync(recvCts.Token);
+
+        received.Should().BeOfType<ChunkDataFrame>();
+        var chunkReceived = (ChunkDataFrame)received;
+        chunkReceived.ChunkIndex.Value.Should().Be(42);
+        chunkReceived.Data.Length.Should().Be(twoMb);
+        chunkReceived.Data.Span.SequenceEqual(payload).Should().BeTrue();
+
+        chunkReceived.ReleaseBuffer();
+        await channelA.DisposeAsync();
+        await channelB.DisposeAsync();
+        await _transportA.CloseSessionConnectionsAsync(sessionId);
+        await _transportB.CloseSessionConnectionsAsync(sessionId);
+    }
 }

@@ -1,6 +1,9 @@
 namespace Percolator.Infrastructure.Plugins.FileTransfer.WebRtc;
 
 using System;
+using System.Buffers;
+using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Channels;
@@ -18,13 +21,20 @@ using Percolator.Apps.FileTransfer.Ports;
 /// handler references held until disposal). Backpressure is enforced at the application protocol layer
 /// via request-driven chunk windowing (ChunkPipelineScheduler), eliminating unmanaged SCTP buffer polling
 /// and reflection into native channel handles.
+/// Sub-frames oversized payloads (> 64 KB) into 64 KB SCTP fragments to eliminate WebRTC message size cliffs.
 /// </summary>
 internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
 {
+    internal const int MaxSctpMessageBytes = 65_536;
+    private const byte FragmentOpcode = 0xFF;
+    private const int FragmentHeaderBytes = 13; // [0xFF (1B) | uint32 msgId (4B) | uint32 totalLen (4B) | uint32 offset (4B)]
+    private const int MaxFragmentPayloadBytes = MaxSctpMessageBytes - FragmentHeaderBytes; // 65_523
+    private const int MaxConcurrentReassemblies = 4;
+    private const long MaxBufferedInboundBytes = 8L * 1024 * 1024; // 8 MB cap per channel
     private const int InboundChannelCapacity = 128;
 
     private readonly IRtcDataChannel _channel;
-    private readonly Channel<byte[]> _inboundFrames;
+    private readonly Channel<PooledWireFrame> _inboundFrames;
     private readonly TaskCompletionSource<bool> _openTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly Action? _onDisposed;
@@ -34,6 +44,11 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
     private readonly Action<IRtcDataChannel> _onCloseHandler;
     private readonly Action<IRtcDataChannel, string> _onErrorHandler;
     private readonly Action<IRtcDataChannel, RtcBinaryReceivedEventSafe> _onBinaryHandler;
+
+    private readonly Dictionary<uint, InboundReassembly> _reassemblies = new();
+    private readonly object _reassemblyLock = new();
+    private int _nextFragmentMsgId;
+    private long _bufferedInboundBytes;
 
     private CertSha256Fingerprint _verifiedRemoteCertSha256 = CertSha256Fingerprint.FromBytes(new byte[32]);
     private int _disposed;
@@ -83,7 +98,7 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         Label = channel.Label ?? "percolator-ft-0";
         _onDisposed = onDisposed;
 
-        _inboundFrames = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(InboundChannelCapacity)
+        _inboundFrames = Channel.CreateBounded<PooledWireFrame>(new BoundedChannelOptions(InboundChannelCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = false,
@@ -152,7 +167,35 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
                 throw new IOException("Cannot send frame on a closed WebRTC DataChannel.");
             }
 
-            _channel.Send(encoded.Span);
+            if (encoded.Length <= MaxSctpMessageBytes)
+            {
+                _channel.Send(encoded.Span);
+            }
+            else
+            {
+                uint msgId = unchecked((uint)Interlocked.Increment(ref _nextFragmentMsgId));
+                byte[] scratch = ArrayPool<byte>.Shared.Rent(MaxSctpMessageBytes);
+                try
+                {
+                    int offset = 0;
+                    while (offset < encoded.Length)
+                    {
+                        int sliceLen = Math.Min(MaxFragmentPayloadBytes, encoded.Length - offset);
+                        scratch[0] = FragmentOpcode;
+                        BinaryPrimitives.WriteUInt32BigEndian(scratch.AsSpan(1, 4), msgId);
+                        BinaryPrimitives.WriteUInt32BigEndian(scratch.AsSpan(5, 4), (uint)encoded.Length);
+                        BinaryPrimitives.WriteUInt32BigEndian(scratch.AsSpan(9, 4), (uint)offset);
+                        encoded.Span.Slice(offset, sliceLen).CopyTo(scratch.AsSpan(FragmentHeaderBytes, sliceLen));
+
+                        _channel.Send(scratch.AsSpan(0, FragmentHeaderBytes + sliceLen));
+                        offset += sliceLen;
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(scratch, clearArray: false);
+                }
+            }
         }
         finally
         {
@@ -164,7 +207,7 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
     {
         ThrowIfDisposed();
 
-        byte[] rawFrame;
+        PooledWireFrame rawFrame;
         try
         {
             rawFrame = await _inboundFrames.Reader.ReadAsync(ct).ConfigureAwait(false);
@@ -176,7 +219,10 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
 
         try
         {
-            return SwarmFrameCodec.DecodeFramed(rawFrame);
+            using (rawFrame)
+            {
+                return SwarmFrameCodec.DecodeFramed(rawFrame.Span);
+            }
         }
         catch (InvalidDataException)
         {
@@ -204,6 +250,23 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         }
         catch
         {
+        }
+
+        // Drain any pending queued PooledWireFrames
+        while (_inboundFrames.Reader.TryRead(out PooledWireFrame? frame))
+        {
+            frame.Dispose();
+        }
+
+        // Drain any in-flight reassembly buffers
+        lock (_reassemblyLock)
+        {
+            foreach (InboundReassembly reassembly in _reassemblies.Values)
+            {
+                Interlocked.Add(ref _bufferedInboundBytes, -reassembly.TotalLength);
+                ArrayPool<byte>.Shared.Return(reassembly.Buffer, clearArray: false);
+            }
+            _reassemblies.Clear();
         }
 
         // Offload native disposal to a thread-pool thread so teardown never re-enters a libdatachannel callback thread.
@@ -248,24 +311,131 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         }
 
         ReadOnlySpan<byte> data = evt.Data;
-        if (data.Length < SwarmFrameCodec.FrameHeaderSizeBytes ||
-            data.Length > SwarmFrameCodec.MaxWireFrameSizeBytes)
+        if (data.Length == 0)
         {
-            var err = new InvalidDataException(
-                $"Inbound WebRTC frame length {data.Length} violates bounds [{SwarmFrameCodec.FrameHeaderSizeBytes}..{SwarmFrameCodec.MaxWireFrameSizeBytes}].");
-            _inboundFrames.Writer.TryComplete(err);
-            _ = Task.Run(() => DisposeAsync().AsTask());
             return;
         }
 
-        byte[] copy = data.ToArray();
-        if (!_inboundFrames.Writer.TryWrite(copy))
+        if (data[0] == FragmentOpcode)
         {
-            // Non-blocking on native callback thread: if consumer stalled past bounded capacity, fail fast off-thread.
-            var err = new IOException("Inbound WebRTC DataChannel frame queue overflowed.");
-            _inboundFrames.Writer.TryComplete(err);
-            _ = Task.Run(() => DisposeAsync().AsTask());
+            if (data.Length <= FragmentHeaderBytes)
+            {
+                FailChannelOffThread(new InvalidDataException(
+                    $"Inbound WebRTC fragment length {data.Length} is too short to contain header."));
+                return;
+            }
+
+            uint msgId = BinaryPrimitives.ReadUInt32BigEndian(data.Slice(1, 4));
+            uint totalLen = BinaryPrimitives.ReadUInt32BigEndian(data.Slice(5, 4));
+            uint offset = BinaryPrimitives.ReadUInt32BigEndian(data.Slice(9, 4));
+            int payloadLen = data.Length - FragmentHeaderBytes;
+
+            if (totalLen < SwarmFrameCodec.FrameHeaderSizeBytes || totalLen > SwarmFrameCodec.MaxWireFrameSizeBytes)
+            {
+                FailChannelOffThread(new InvalidDataException(
+                    $"WebRTC fragment declared total length {totalLen} is out of bounds [{SwarmFrameCodec.FrameHeaderSizeBytes}..{SwarmFrameCodec.MaxWireFrameSizeBytes}]."));
+                return;
+            }
+
+            if (offset + (uint)payloadLen > totalLen)
+            {
+                FailChannelOffThread(new InvalidDataException(
+                    $"WebRTC fragment offset {offset} + payload {payloadLen} exceeds total length {totalLen}."));
+                return;
+            }
+
+            PooledWireFrame? completedFrame = null;
+            lock (_reassemblyLock)
+            {
+                if (!_reassemblies.TryGetValue(msgId, out InboundReassembly? reassembly))
+                {
+                    if (_reassemblies.Count >= MaxConcurrentReassemblies)
+                    {
+                        FailChannelOffThread(new IOException("Exceeded maximum concurrent frame reassemblies."));
+                        return;
+                    }
+
+                    long currentBuffered = Interlocked.Add(ref _bufferedInboundBytes, (int)totalLen);
+                    if (currentBuffered > MaxBufferedInboundBytes)
+                    {
+                        Interlocked.Add(ref _bufferedInboundBytes, -(int)totalLen);
+                        FailChannelOffThread(new IOException("Inbound WebRTC DataChannel memory budget exceeded."));
+                        return;
+                    }
+
+                    byte[] rented = ArrayPool<byte>.Shared.Rent((int)totalLen);
+                    reassembly = new InboundReassembly(msgId, (int)totalLen, rented);
+                    _reassemblies[msgId] = reassembly;
+                }
+                else
+                {
+                    if (reassembly.TotalLength != (int)totalLen)
+                    {
+                        FailChannelOffThread(new InvalidDataException(
+                            $"WebRTC fragment total length mismatch for msgId {msgId}: expected {reassembly.TotalLength}, got {totalLen}."));
+                        return;
+                    }
+                }
+
+                data.Slice(FragmentHeaderBytes, payloadLen).CopyTo(reassembly.Buffer.AsSpan((int)offset, payloadLen));
+                reassembly.ReceivedBytes += payloadLen;
+
+                if (reassembly.ReceivedBytes >= reassembly.TotalLength)
+                {
+                    _reassemblies.Remove(msgId);
+                    completedFrame = new PooledWireFrame(this, reassembly.Buffer, reassembly.TotalLength);
+                }
+            }
+
+            if (completedFrame != null)
+            {
+                if (!_inboundFrames.Writer.TryWrite(completedFrame))
+                {
+                    completedFrame.Dispose();
+                    FailChannelOffThread(new IOException("Inbound WebRTC DataChannel frame queue overflowed."));
+                }
+            }
         }
+        else
+        {
+            if (data.Length < SwarmFrameCodec.FrameHeaderSizeBytes ||
+                data.Length > SwarmFrameCodec.MaxWireFrameSizeBytes)
+            {
+                FailChannelOffThread(new InvalidDataException(
+                    $"Inbound WebRTC frame length {data.Length} violates bounds [{SwarmFrameCodec.FrameHeaderSizeBytes}..{SwarmFrameCodec.MaxWireFrameSizeBytes}]."));
+                return;
+            }
+
+            long currentBuffered = Interlocked.Add(ref _bufferedInboundBytes, data.Length);
+            if (currentBuffered > MaxBufferedInboundBytes)
+            {
+                Interlocked.Add(ref _bufferedInboundBytes, -data.Length);
+                FailChannelOffThread(new IOException("Inbound WebRTC DataChannel memory budget exceeded."));
+                return;
+            }
+
+            byte[] rented = ArrayPool<byte>.Shared.Rent(data.Length);
+            data.CopyTo(rented);
+            var frame = new PooledWireFrame(this, rented, data.Length);
+
+            if (!_inboundFrames.Writer.TryWrite(frame))
+            {
+                frame.Dispose();
+                FailChannelOffThread(new IOException("Inbound WebRTC DataChannel frame queue overflowed."));
+            }
+        }
+    }
+
+    private void FailChannelOffThread(Exception ex)
+    {
+        _inboundFrames.Writer.TryComplete(ex);
+        _ = Task.Run(() => DisposeAsync().AsTask());
+    }
+
+    internal void ReleaseBufferedWireFrame(byte[] buffer, int length)
+    {
+        Interlocked.Add(ref _bufferedInboundBytes, -length);
+        ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
     }
 
     private void ThrowIfDisposed()
@@ -273,6 +443,46 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
         if (Volatile.Read(ref _disposed) != 0)
         {
             throw new ObjectDisposedException(nameof(WebRtcDataChannelAdapter));
+        }
+    }
+
+    private sealed class InboundReassembly
+    {
+        public uint MsgId { get; }
+        public int TotalLength { get; }
+        public byte[] Buffer { get; }
+        public int ReceivedBytes { get; set; }
+
+        public InboundReassembly(uint msgId, int totalLength, byte[] buffer)
+        {
+            MsgId = msgId;
+            TotalLength = totalLength;
+            Buffer = buffer;
+        }
+    }
+
+    internal sealed class PooledWireFrame : IDisposable
+    {
+        private readonly WebRtcDataChannelAdapter _owner;
+        private byte[]? _rentedBuffer;
+
+        public int Length { get; }
+        public ReadOnlySpan<byte> Span => _rentedBuffer != null ? _rentedBuffer.AsSpan(0, Length) : ReadOnlySpan<byte>.Empty;
+
+        public PooledWireFrame(WebRtcDataChannelAdapter owner, byte[] rentedBuffer, int length)
+        {
+            _owner = owner;
+            _rentedBuffer = rentedBuffer;
+            Length = length;
+        }
+
+        public void Dispose()
+        {
+            byte[]? buf = Interlocked.Exchange(ref _rentedBuffer, null);
+            if (buf != null)
+            {
+                _owner.ReleaseBufferedWireFrame(buf, Length);
+            }
         }
     }
 }

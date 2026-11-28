@@ -10,7 +10,7 @@ public readonly record struct ValidationResult(bool IsValid, string? ErrorMessag
 
 public static class IngressTransferOfferValidator
 {
-    public const int MaxFilesPerBundle = 50_000;
+    public const int MaxFilesPerBundle = 250_000;
     public const int MaxChunksPerBundle = 1_000_000;
     public const long MaxBundleSizeBytes = 16_000_000_000_000L; // 16 TB
     public const int MaxInlineManifestBytes = 49_152; // 48 KB (preserves headroom in 64 KB Double Ratchet envelope)

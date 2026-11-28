@@ -165,7 +165,7 @@ public sealed class IngressControlTests
         TransferBundleSummary summary = TransferBundleSummary.Create(
             RootBundleName.Parse("OverflowBundle"),
             TotalBundleBytes.FromBytes(1000),
-            FileCount.FromInt(50_001), // Cap is 50,000
+            FileCount.FromInt(250_001), // Cap is 250,000
             ChunkSizeBytes.Default,
             ChunkCount.FromInt(1),
             MerkleRoot.FromBytes(new byte[32]));

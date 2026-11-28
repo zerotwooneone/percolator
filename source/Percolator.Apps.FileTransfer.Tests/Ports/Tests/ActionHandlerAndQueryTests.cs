@@ -88,9 +88,9 @@ public sealed class ActionHandlerAndQueryTests
     [Test]
     public async Task UT_CMD_01_InitiateTransferBoundsEnforcement()
     {
-        // 50,001 files (exceeds 50,000 maximum allowed)
-        List<SanitizedRelativePath> tooManyFiles = [];
-        for (int i = 0; i < 50_001; i++)
+        // 250,001 files (exceeds 250,000 maximum allowed)
+        List<SanitizedRelativePath> tooManyFiles = new(250_001);
+        for (int i = 0; i < 250_001; i++)
         {
             tooManyFiles.Add(SanitizedRelativePath.Parse($"f{i}.bin"));
         }

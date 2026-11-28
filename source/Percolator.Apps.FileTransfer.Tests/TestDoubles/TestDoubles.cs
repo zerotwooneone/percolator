@@ -178,6 +178,25 @@ public sealed class InMemoryDesktopFileStorage : IDesktopFileStorage
         }
     }
 
+    public ValueTask<int> ReadChunkIntoAsync(ResolvedFilePath sourcePath, FileByteOffset fileOffset, Memory<byte> destination, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            if (!FilesOnDisk.TryGetValue(sourcePath.AbsolutePath, out var buffer))
+            {
+                return ValueTask.FromResult(0);
+            }
+
+            int available = Math.Max(0, buffer.Length - (int)fileOffset.Offset);
+            int copyLen = Math.Min(destination.Length, available);
+            if (copyLen > 0)
+            {
+                buffer.AsSpan((int)fileOffset.Offset, copyLen).CopyTo(destination.Span);
+            }
+            return ValueTask.FromResult(copyLen);
+        }
+    }
+
     public ValueTask<FileMetadataResult> GetFileMetadataAsync(ResolvedFilePath sourcePath, CancellationToken ct = default)
     {
         lock (_sync)

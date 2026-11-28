@@ -2,11 +2,13 @@ namespace Percolator.Infrastructure.Plugins.FileTransfer;
 
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.Exceptions;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
@@ -15,15 +17,21 @@ using Percolator.Apps.FileTransfer.Features.Storage;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 
-public sealed class PortableDesktopFileStore : IDesktopFileStorage
+public sealed class PortableDesktopFileStore : IDesktopFileStorage, IDisposable
 {
     private readonly string _boundaryPartialsBaseDirectory;
+    private readonly int _maxOpenHandles;
+    private readonly object _handleCacheLock = new();
+    private readonly Dictionary<HandleKey, HandleEntry> _handleCache = new();
+    private readonly LinkedList<HandleKey> _lruList = new();
+    private readonly ConcurrentDictionary<string, byte> _createdDirectories = new(StringComparer.OrdinalIgnoreCase);
 
-    public PortableDesktopFileStore(string? partialsBaseDirectory = null)
+    public PortableDesktopFileStore(string? partialsBaseDirectory = null, int maxOpenHandles = 256)
     {
         _boundaryPartialsBaseDirectory = !string.IsNullOrWhiteSpace(partialsBaseDirectory)
             ? partialsBaseDirectory
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Percolator", "Partials");
+        _maxOpenHandles = Math.Max(1, maxOpenHandles);
     }
 
     public ValueTask PreAllocateFilesAsync(
@@ -50,14 +58,14 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
             if (entry.FileSize.Bytes == 0)
             {
                 EnsureParentDirectoryExists(targetFile.AbsolutePath);
-                using FileStream emptyFs = new(targetFile.AbsolutePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
+                using FileStream emptyFs = new(targetFile.AbsolutePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
             }
-            else
+            else if (entry.FileSize.Bytes >= 1024 * 1024)
             {
                 string partPath = GetPartFilePath(targetFile.AbsolutePath);
                 EnsureParentDirectoryExists(partPath);
 
-                using FileStream partFs = new(partPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
+                using FileStream partFs = new(partPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
                 if (partFs.Length != entry.FileSize.Bytes)
                 {
                     partFs.SetLength(entry.FileSize.Bytes);
@@ -78,27 +86,25 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
         ArgumentNullException.ThrowIfNull(data);
 
         string partPath = GetPartFilePath(targetPath.AbsolutePath);
-        string effectivePath = File.Exists(partPath) ? partPath : targetPath.AbsolutePath;
+        string effectivePath = File.Exists(targetPath.AbsolutePath) ? targetPath.AbsolutePath : partPath;
 
         EnsureParentDirectoryExists(effectivePath);
 
-        await using FileStream fs = new(
-            effectivePath,
-            FileMode.OpenOrCreate,
-            FileAccess.Write,
-            FileShare.ReadWrite,
-            bufferSize: 4096,
-            useAsync: true);
-
-        fs.Seek(fileOffset.Offset, SeekOrigin.Begin);
-        await fs.WriteAsync(data.Memory, ct).ConfigureAwait(false);
-        await fs.FlushAsync(ct).ConfigureAwait(false);
+        HandleEntry entry = AcquireHandle(effectivePath, FileMode.OpenOrCreate, FileAccess.Write);
+        try
+        {
+            await RandomAccess.WriteAsync(entry.Handle, data.Memory, fileOffset.Offset, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReleaseHandle(entry);
+        }
     }
 
-    public async ValueTask<PlaintextChunkData> ReadChunkAsync(
+    public async ValueTask<int> ReadChunkIntoAsync(
         ResolvedFilePath sourcePath,
         FileByteOffset fileOffset,
-        TransferByteLength length,
+        Memory<byte> destination,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sourcePath);
@@ -111,31 +117,46 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
             throw new FileNotFoundException($"Cannot read chunk from non-existent file: {effectivePath}");
         }
 
-        byte[] buffer = new byte[length.Bytes];
-        await using (FileStream fs = new(
-            effectivePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite,
-            bufferSize: 4096,
-            useAsync: true))
+        HandleEntry entry = AcquireHandle(effectivePath, FileMode.Open, FileAccess.Read);
+        try
         {
-            fs.Seek(fileOffset.Offset, SeekOrigin.Begin);
             int totalRead = 0;
-            while (totalRead < length.Bytes)
+            int needed = destination.Length;
+            while (totalRead < needed)
             {
-                int read = await fs.ReadAsync(buffer.AsMemory(totalRead, length.Bytes - totalRead), ct).ConfigureAwait(false);
+                int read = await RandomAccess.ReadAsync(
+                    entry.Handle,
+                    destination.Slice(totalRead, needed - totalRead),
+                    fileOffset.Offset + totalRead,
+                    ct).ConfigureAwait(false);
+
                 if (read == 0)
                 {
                     break;
                 }
+
                 totalRead += read;
             }
 
-            if (totalRead < length.Bytes)
-            {
-                Array.Resize(ref buffer, totalRead);
-            }
+            return totalRead;
+        }
+        finally
+        {
+            ReleaseHandle(entry);
+        }
+    }
+
+    public async ValueTask<PlaintextChunkData> ReadChunkAsync(
+        ResolvedFilePath sourcePath,
+        FileByteOffset fileOffset,
+        TransferByteLength length,
+        CancellationToken ct = default)
+    {
+        byte[] buffer = new byte[length.Bytes];
+        int totalRead = await ReadChunkIntoAsync(sourcePath, fileOffset, buffer, ct).ConfigureAwait(false);
+        if (totalRead < length.Bytes)
+        {
+            Array.Resize(ref buffer, totalRead);
         }
 
         return PlaintextChunkData.FromBytes(buffer);
@@ -233,6 +254,8 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
     {
         ArgumentNullException.ThrowIfNull(targetPath);
 
+        EvictPath(targetPath.AbsolutePath);
+
         string partPath = GetPartFilePath(targetPath.AbsolutePath);
         if (File.Exists(partPath))
         {
@@ -276,6 +299,33 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
         catch (Exception)
         {
             return ValueTask.FromResult(DiskSpacePreflightResult.Sufficient(requiredBytes, requiredBytes));
+        }
+    }
+
+    public ValueTask<bool> HasAnyExistingTransferFilesAsync(
+        RootDirectoryPath rootPath,
+        TransferManifest manifest,
+        SelectedFileIndices selectedIndices,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rootPath);
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(selectedIndices);
+
+        if (!Directory.Exists(rootPath.Value))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        try
+        {
+            using IEnumerator<string> enumerator = Directory.EnumerateFileSystemEntries(rootPath.Value).GetEnumerator();
+            bool hasEntries = enumerator.MoveNext();
+            return ValueTask.FromResult(hasEntries);
+        }
+        catch (Exception)
+        {
+            return ValueTask.FromResult(true);
         }
     }
 
@@ -342,7 +392,6 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
 
                 foreach (FileChunkSlice slice in slices)
                 {
-                    PlaintextChunkData sliceData;
                     if (selectedIndices != null && !selectedIndices.Contains(slice.FileIndex))
                     {
                         PlaintextChunkData? boundarySlice = await ReadBoundarySliceAsync(
@@ -358,16 +407,18 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
                             break;
                         }
 
-                        sliceData = boundarySlice;
+                        boundarySlice.Span.CopyTo(rentedBuffer.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
                     }
                     else
                     {
                         FileEntry entry = manifest.Files[slice.FileIndex.Value];
                         ResolvedFilePath resolvedPath = ResolveAndValidateContainedPath(rootPath, entry.RelativePath);
-                        sliceData = await ReadChunkAsync(resolvedPath, slice.OffsetInFile, slice.SliceLength, ct).ConfigureAwait(false);
+                        await ReadChunkIntoAsync(
+                            resolvedPath,
+                            slice.OffsetInFile,
+                            rentedBuffer.AsMemory(slice.BufferOffset, slice.SliceLength.Bytes),
+                            ct).ConfigureAwait(false);
                     }
-
-                    sliceData.Span.CopyTo(rentedBuffer.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
                 }
 
                 if (!allSlicesPresent)
@@ -375,8 +426,7 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
                     continue;
                 }
 
-                ChunkHash computedHash = MerkleTreeBuilder.HashLeaf(rentedBuffer.AsSpan(0, expectedBytes));
-                if (computedHash == manifest.MerkleTree.Leaves[c])
+                if (manifest.MerkleTree.VerifyLeaf(chunkIndex, rentedBuffer.AsSpan(0, expectedBytes)))
                 {
                     bitfieldBuilder.Set(chunkIndex);
                 }
@@ -420,12 +470,188 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
 
     private static string GetPartFilePath(string absolutePath) => $"{absolutePath}.percolator-part";
 
-    private static void EnsureParentDirectoryExists(string filePath)
+    private void EnsureParentDirectoryExists(string filePath)
     {
         string? parent = Path.GetDirectoryName(filePath);
-        if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+        if (!string.IsNullOrEmpty(parent))
         {
-            Directory.CreateDirectory(parent);
+            string normalizedParent = Path.GetFullPath(parent);
+            _createdDirectories.GetOrAdd(normalizedParent, p =>
+            {
+                if (!Directory.Exists(p))
+                {
+                    Directory.CreateDirectory(p);
+                }
+                return 0;
+            });
+        }
+    }
+
+    private HandleEntry AcquireHandle(string path, FileMode mode, FileAccess access)
+    {
+        string normalized = Path.GetFullPath(path);
+        var key = new HandleKey(normalized, access);
+
+        lock (_handleCacheLock)
+        {
+            if (_handleCache.TryGetValue(key, out HandleEntry? existing) &&
+                !existing.Handle.IsClosed &&
+                !existing.Handle.IsInvalid)
+            {
+                existing.RefCount++;
+                if (existing.LruNode != null)
+                {
+                    _lruList.Remove(existing.LruNode);
+                    _lruList.AddLast(existing.LruNode);
+                }
+                return existing;
+            }
+
+            EvictLruHandlesUnderLock();
+
+            FileShare share = FileShare.ReadWrite | FileShare.Delete;
+            FileOptions options = FileOptions.Asynchronous | FileOptions.RandomAccess;
+            SafeFileHandle handle = File.OpenHandle(normalized, mode, access, share, options);
+
+            var node = new LinkedListNode<HandleKey>(key);
+            var entry = new HandleEntry(handle) { LruNode = node };
+            _handleCache[key] = entry;
+            _lruList.AddLast(node);
+            return entry;
+        }
+    }
+
+    private void ReleaseHandle(HandleEntry entry)
+    {
+        SafeFileHandle? toDispose = null;
+        lock (_handleCacheLock)
+        {
+            entry.RefCount--;
+            if (entry.MarkedForEviction && entry.RefCount == 0)
+            {
+                toDispose = entry.Handle;
+            }
+        }
+        toDispose?.Dispose();
+    }
+
+    private void EvictLruHandlesUnderLock()
+    {
+        while (_handleCache.Count >= _maxOpenHandles && _lruList.First != null)
+        {
+            LinkedListNode<HandleKey>? curr = _lruList.First;
+            bool evictedAny = false;
+            while (curr != null)
+            {
+                HandleKey key = curr.Value;
+                if (_handleCache.TryGetValue(key, out HandleEntry? e) && e.RefCount == 0)
+                {
+                    _handleCache.Remove(key);
+                    _lruList.Remove(curr);
+                    e.MarkedForEviction = true;
+                    e.Handle.Dispose();
+                    evictedAny = true;
+                    break;
+                }
+                curr = curr.Next;
+            }
+
+            if (!evictedAny)
+            {
+                break;
+            }
+        }
+    }
+
+    private void EvictPath(string path)
+    {
+        string normTarget = Path.GetFullPath(path);
+        string normPart = Path.GetFullPath(GetPartFilePath(path));
+
+        List<HandleEntry> pendingDisposals = [];
+        lock (_handleCacheLock)
+        {
+            EvictKeyUnderLock(new HandleKey(normTarget, FileAccess.Read), pendingDisposals);
+            EvictKeyUnderLock(new HandleKey(normTarget, FileAccess.Write), pendingDisposals);
+            EvictKeyUnderLock(new HandleKey(normPart, FileAccess.Read), pendingDisposals);
+            EvictKeyUnderLock(new HandleKey(normPart, FileAccess.Write), pendingDisposals);
+        }
+
+        foreach (HandleEntry entry in pendingDisposals)
+        {
+            int attempts = 0;
+            while (Volatile.Read(ref entry.RefCount) > 0 && attempts++ < 50)
+            {
+                Thread.Sleep(5);
+            }
+            try
+            {
+                entry.Handle.Dispose();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private void EvictKeyUnderLock(HandleKey key, List<HandleEntry> pendingDisposals)
+    {
+        if (_handleCache.Remove(key, out HandleEntry? entry))
+        {
+            if (entry.LruNode != null)
+            {
+                _lruList.Remove(entry.LruNode);
+            }
+            entry.MarkedForEviction = true;
+            if (entry.RefCount == 0)
+            {
+                try
+                {
+                    entry.Handle.Dispose();
+                }
+                catch
+                {
+                }
+            }
+            else
+            {
+                pendingDisposals.Add(entry);
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_handleCacheLock)
+        {
+            foreach (HandleEntry entry in _handleCache.Values)
+            {
+                try
+                {
+                    entry.Handle.Dispose();
+                }
+                catch
+                {
+                }
+            }
+            _handleCache.Clear();
+            _lruList.Clear();
+        }
+    }
+
+    private readonly record struct HandleKey(string NormalizedPath, FileAccess Access);
+
+    private sealed class HandleEntry
+    {
+        public SafeFileHandle Handle { get; }
+        public int RefCount;
+        public bool MarkedForEviction { get; set; }
+        public LinkedListNode<HandleKey>? LruNode { get; set; }
+
+        public HandleEntry(SafeFileHandle handle)
+        {
+            Handle = handle;
+            RefCount = 1;
         }
     }
 }

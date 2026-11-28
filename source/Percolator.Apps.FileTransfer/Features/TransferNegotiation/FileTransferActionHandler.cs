@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Security.Cryptography;
+using System.Threading.Channels;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
@@ -69,6 +70,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         RootBundleName? customBundleName = null,
         SeedRatio? targetSeedRatio = null,
         bool isGroupTransfer = false,
+        IProgress<TransferPreparationProgress>? preparationProgress = null,
         CancellationToken ct = default)
     {
         if (!_ingressFilter.IsEnabled)
@@ -93,13 +95,19 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         {
             SanitizedRelativePath relPath = filePaths[i];
             ResolvedFilePath absPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
-            FileMetadataResult metadata = await _fileStorage.GetFileMetadataAsync(absPath, ct);
+            FileMetadataResult metadata = await _fileStorage.GetFileMetadataAsync(absPath, ct).ConfigureAwait(false);
             if (!metadata.Exists)
                 return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.FileNotFound", $"File not found: '{relPath.Value}'."));
 
             BundleByteOffset startOffset = BundleByteOffset.FromOffset(cumulativeOffset);
             entries.Add(new FileEntry(FileIndex.FromInt(i), relPath, metadata.Size, startOffset, metadata.LastModifiedUtc));
             cumulativeOffset += metadata.Size.Bytes;
+
+            preparationProgress?.Report(new TransferPreparationProgress(
+                FilesScanned: i + 1,
+                TotalFiles: filePaths.Count,
+                ChunksHashed: 0,
+                TotalChunks: 0));
         }
 
         if (cumulativeOffset > IngressTransferOfferValidator.MaxBundleSizeBytes)
@@ -111,35 +119,144 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (chunkCount > IngressTransferOfferValidator.MaxChunksPerBundle)
             return DomainResult<TransferSessionId>.Failure(new DomainError("Transfer.ChunkLimitExceeded", "Bundle total chunk count exceeds 1,000,000."));
 
-        // Build leaf hashes and Merkle tree using pooled buffers (zero LOH thrashing)
-        List<ChunkHash> leafHashes = new(chunkCount);
-        byte[] rentedChunkBuffer = ArrayPool<byte>.Shared.Rent(chunkSize.Bytes);
-        try
+        // File-sequential streaming reader + bounded parallel SHA-256 hashing stage
+        ChunkHash[] leafHashes = new ChunkHash[chunkCount];
+        int chunksHashed = 0;
+
+        if (cumulativeOffset == 0)
         {
-            for (int c = 0; c < chunkCount; c++)
+            byte[] rented = ArrayPool<byte>.Shared.Rent(chunkSize.Bytes);
+            try
             {
-                ChunkIndex chunkIdx = ChunkIndex.FromInt(c);
-                int expectedBytes = (int)Math.Min((long)chunkSize.Bytes, cumulativeOffset - ((long)c * chunkSize.Bytes));
-                ChunkByteLength expectedSize = ChunkByteLength.FromBytes(expectedBytes);
-
-                Span<byte> activeSpan = rentedChunkBuffer.AsSpan(0, expectedBytes);
-                activeSpan.Clear();
-
-                IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlicesFromEntries(entries, chunkSize, chunkIdx, expectedSize);
-                foreach (FileChunkSlice slice in slices)
-                {
-                    FileEntry entry = entries[slice.FileIndex.Value];
-                    ResolvedFilePath filePath = ResolvedFilePath.Resolve(sourceRoot, entry.RelativePath);
-                    PlaintextChunkData sliceData = await _fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
-                    sliceData.Span.CopyTo(rentedChunkBuffer.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
-                }
-
-                leafHashes.Add(MerkleTreeBuilder.HashLeaf(rentedChunkBuffer.AsSpan(0, expectedBytes)));
+                leafHashes[0] = MerkleTreeBuilder.HashLeaf(ReadOnlySpan<byte>.Empty);
+                preparationProgress?.Report(new TransferPreparationProgress(
+                    FilesScanned: filePaths.Count,
+                    TotalFiles: filePaths.Count,
+                    ChunksHashed: 1,
+                    TotalChunks: 1));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented, clearArray: true);
             }
         }
-        finally
+        else
         {
-            ArrayPool<byte>.Shared.Return(rentedChunkBuffer, clearArray: true);
+            int maxWorkers = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+            var hashChannel = Channel.CreateBounded<(int ChunkIdx, byte[] Buffer, int Length)>(
+                new BoundedChannelOptions(maxWorkers * 2)
+                {
+                    SingleReader = false,
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait
+                });
+
+            Task[] workers = new Task[maxWorkers];
+            for (int w = 0; w < maxWorkers; w++)
+            {
+                workers[w] = Task.Run(async () =>
+                {
+                    while (await hashChannel.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
+                    {
+                        while (hashChannel.Reader.TryRead(out (int ChunkIdx, byte[] Buffer, int Length) item))
+                        {
+                            try
+                            {
+                                leafHashes[item.ChunkIdx] = MerkleTreeBuilder.HashLeaf(item.Buffer.AsSpan(0, item.Length));
+                                int hashed = Interlocked.Increment(ref chunksHashed);
+                                preparationProgress?.Report(new TransferPreparationProgress(
+                                    FilesScanned: filePaths.Count,
+                                    TotalFiles: filePaths.Count,
+                                    ChunksHashed: hashed,
+                                    TotalChunks: chunkCount));
+                            }
+                            finally
+                            {
+                                ArrayPool<byte>.Shared.Return(item.Buffer, clearArray: true);
+                            }
+                        }
+                    }
+                }, ct);
+            }
+
+            int currentChunkIdx = 0;
+            byte[] currentChunkBuf = ArrayPool<byte>.Shared.Rent(chunkSize.Bytes);
+            int currentChunkOffset = 0;
+            int expectedBytesForChunk = (int)Math.Min((long)chunkSize.Bytes, cumulativeOffset - ((long)currentChunkIdx * chunkSize.Bytes));
+
+            try
+            {
+                for (int f = 0; f < entries.Count; f++)
+                {
+                    FileEntry entry = entries[f];
+                    if (entry.FileSize.Bytes == 0)
+                    {
+                        continue;
+                    }
+
+                    long fileOffset = 0;
+                    long fileRemaining = entry.FileSize.Bytes;
+                    ResolvedFilePath filePath = ResolvedFilePath.Resolve(sourceRoot, entry.RelativePath);
+
+                    while (fileRemaining > 0)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        int spaceInChunk = expectedBytesForChunk - currentChunkOffset;
+                        int bytesToRead = (int)Math.Min(fileRemaining, (long)spaceInChunk);
+
+                        int bytesRead = await _fileStorage.ReadChunkIntoAsync(
+                            filePath,
+                            FileByteOffset.FromOffset(fileOffset),
+                            currentChunkBuf.AsMemory(currentChunkOffset, bytesToRead),
+                            ct).ConfigureAwait(false);
+
+                        if (bytesRead < bytesToRead)
+                        {
+                            throw new EndOfStreamException(
+                                $"Unexpected end of stream while reading '{entry.RelativePath.Value}'. Expected {bytesToRead} bytes, read {bytesRead}.");
+                        }
+
+                        fileOffset += bytesRead;
+                        fileRemaining -= bytesRead;
+                        currentChunkOffset += bytesRead;
+
+                        if (currentChunkOffset == expectedBytesForChunk)
+                        {
+                            await hashChannel.Writer.WriteAsync(
+                                (currentChunkIdx, currentChunkBuf, expectedBytesForChunk),
+                                ct).ConfigureAwait(false);
+
+                            currentChunkIdx++;
+                            if (currentChunkIdx < chunkCount)
+                            {
+                                currentChunkBuf = ArrayPool<byte>.Shared.Rent(chunkSize.Bytes);
+                                currentChunkOffset = 0;
+                                expectedBytesForChunk = (int)Math.Min((long)chunkSize.Bytes, cumulativeOffset - ((long)currentChunkIdx * chunkSize.Bytes));
+                            }
+                            else
+                            {
+                                currentChunkBuf = null!;
+                            }
+                        }
+                    }
+                }
+
+                hashChannel.Writer.Complete();
+                await Task.WhenAll(workers).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                hashChannel.Writer.TryComplete(ex);
+                if (currentChunkBuf != null)
+                {
+                    ArrayPool<byte>.Shared.Return(currentChunkBuf, clearArray: true);
+                }
+                while (hashChannel.Reader.TryRead(out (int ChunkIdx, byte[] Buffer, int Length) remaining))
+                {
+                    ArrayPool<byte>.Shared.Return(remaining.Buffer, clearArray: true);
+                }
+                throw;
+            }
         }
 
         MerkleTreeIndex merkleTree = MerkleTreeBuilder.BuildFromLeaves(leafHashes);
@@ -295,12 +412,20 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         if (!diskCheck.HasSufficientSpace)
             return DomainResult.Failure(new DomainError("Storage.InsufficientSpace", $"Insufficient disk space. Required: {requiredBytes} bytes."));
 
-        // Scan existing partial files on disk to compute resumption bitfield
-        Bitfield resumptionBitfield = await _fileStorage.ScanAndComputeBitfieldAsync(
+        // Scan existing partial files on disk to compute resumption bitfield (fast-path if directory is empty)
+        bool hasExistingFiles = await _fileStorage.HasAnyExistingTransferFilesAsync(
             destinationFolder,
             session.Manifest,
             chosenFiles,
-            ct);
+            ct).ConfigureAwait(false);
+
+        Bitfield resumptionBitfield = hasExistingFiles
+            ? await _fileStorage.ScanAndComputeBitfieldAsync(
+                destinationFolder,
+                session.Manifest,
+                chosenFiles,
+                ct).ConfigureAwait(false)
+            : Bitfield.Empty(session.Manifest.TotalChunks);
 
         DomainResult acceptResult = session.AcceptTransfer(chosenFiles, _clock, resumptionBitfield);
         if (acceptResult.IsFailure)

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Threading.Channels;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
@@ -31,6 +32,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
     private readonly TransferSessionRuntimeOptions _options;
     private readonly IDisposable _memberRemovedSubscription;
     private readonly IDisposable _iceCandidateSubscription;
+    private readonly SemaphoreSlim _globalIoWorkerGate;
 
     private readonly ConcurrentDictionary<TransferSessionId, ActiveTransferHandle> _sessions = new();
     private int _disposed;
@@ -61,6 +63,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         _payloadDispatcher = payloadDispatcher ?? throw new ArgumentNullException(nameof(payloadDispatcher));
         _checkpointStore = checkpointStore ?? throw new ArgumentNullException(nameof(checkpointStore));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _globalIoWorkerGate = new SemaphoreSlim(Math.Max(1, _options.MaxConcurrentIoWorkers));
 
         _memberRemovedSubscription = eventSubscriber.Subscribe<GroupMemberRemovedApplicationEvent>(OnGroupMemberRemovedAsync);
         _iceCandidateSubscription = eventSubscriber.Subscribe<TransferIceCandidateDiscoveredEvent>(OnLocalIceCandidateDiscoveredAsync);
@@ -572,15 +575,18 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
         handle.SwarmCoordinator.RegisterPeer(remotePeerId);
 
-        if (handle.PeerChannels.TryGetValue(remotePeerId, out ITransferDataChannel? existingChannel))
+        if (handle.PeerPipes.TryGetValue(remotePeerId, out PeerChannelPipe? existingPipe))
         {
-            await existingChannel.DisposeAsync().ConfigureAwait(false);
+            await existingPipe.DisposeAsync().ConfigureAwait(false);
         }
 
+        var pipe = new PeerChannelPipe(channel, _options.OutboundPeerQueueCapacity);
+        handle.PeerPipes[remotePeerId] = pipe;
         handle.PeerChannels[remotePeerId] = channel;
 
-        Task pumpTask = Task.Run(() => PumpChannelAsync(handle, remotePeerId, channel, handle.SessionCts.Token), CancellationToken.None);
-        handle.PeerPumpTasks[remotePeerId] = pumpTask;
+        Task writerTask = Task.Run(() => RunPeerWriterLoopAsync(pipe, handle.SessionCts.Token), CancellationToken.None);
+        Task readerTask = Task.Run(() => RunPeerReaderLoopAsync(handle, remotePeerId, pipe, handle.SessionCts.Token), CancellationToken.None);
+        handle.PeerPumpTasks[remotePeerId] = Task.WhenAll(writerTask, readerTask);
         return DomainResult.Success();
     }
 
@@ -721,11 +727,11 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             TransferSessionTransportContext ctx = handle.TransportContext;
             unregisterTasks.Add(UnregisterBestEffortAsync(ctx.SwarmRendezvousId, ctx.EphemeralPeerId, handle.ExchangeEndpoint, boundedCt));
 
-            foreach (ITransferDataChannel channel in handle.PeerChannels.Values)
+            foreach (PeerChannelPipe pipe in handle.PeerPipes.Values)
             {
                 try
                 {
-                    await channel.DisposeAsync().ConfigureAwait(false);
+                    await pipe.DisposeAsync().ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
@@ -743,6 +749,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 }
             }
 
+            handle.PeerPipes.Clear();
             handle.PeerChannels.Clear();
             handle.PeerConnections.Clear();
         }
@@ -795,6 +802,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         _memberRemovedSubscription.Dispose();
         _iceCandidateSubscription.Dispose();
         await StopAllSessionsAsync(CancellationToken.None).ConfigureAwait(false);
+        _globalIoWorkerGate.Dispose();
     }
 
     private ValueTask OnGroupMemberRemovedAsync(GroupMemberRemovedApplicationEvent ev, CancellationToken ct)
@@ -951,12 +959,58 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         handle.PeerPumpTasks.TryAdd(remotePeerId, attachTask);
     }
 
-    private async Task PumpChannelAsync(
-        ActiveTransferHandle handle,
-        PublicIdentityId remotePeerId,
-        ITransferDataChannel channel,
+    private static async Task RunPeerWriterLoopAsync(
+        PeerChannelPipe pipe,
         CancellationToken ct)
     {
+        try
+        {
+            while (await pipe.OutboundQueue.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
+            {
+                while (pipe.OutboundQueue.Reader.TryRead(out IStreamFramePayload? frame))
+                {
+                    try
+                    {
+                        if (pipe.Channel.IsOpen)
+                        {
+                            await pipe.Channel.SendFrameAsync(frame, ct).ConfigureAwait(false);
+                        }
+                    }
+                    finally
+                    {
+                        if (frame is ChunkDataFrame chunk)
+                        {
+                            chunk.ReleaseBuffer();
+                        }
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            while (pipe.OutboundQueue.Reader.TryRead(out IStreamFramePayload? remaining))
+            {
+                if (remaining is ChunkDataFrame chunk)
+                {
+                    chunk.ReleaseBuffer();
+                }
+            }
+        }
+    }
+
+    private async Task RunPeerReaderLoopAsync(
+        ActiveTransferHandle handle,
+        PublicIdentityId remotePeerId,
+        PeerChannelPipe pipe,
+        CancellationToken ct)
+    {
+        var workerTasks = new ConcurrentDictionary<Task, byte>();
         try
         {
             Bitfield initialBitfield;
@@ -967,10 +1021,10 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 hasAnyChunks = initialBitfield.PopCount > 0;
             }
 
-            await channel.SendFrameAsync(new BitfieldFrame(initialBitfield), ct).ConfigureAwait(false);
+            pipe.OutboundQueue.Writer.TryWrite(new BitfieldFrame(initialBitfield));
             if (hasAnyChunks)
             {
-                await channel.SendFrameAsync(new UnchokeFrame(), ct).ConfigureAwait(false);
+                pipe.OutboundQueue.Writer.TryWrite(new UnchokeFrame());
             }
 
             while (!ct.IsCancellationRequested)
@@ -988,12 +1042,12 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                     break;
                 }
 
-                await ScheduleAndRequestMissingChunksAsync(handle, remotePeerId, channel, ct).ConfigureAwait(false);
+                await ScheduleAndRequestMissingChunksAsync(handle, remotePeerId, pipe, ct).ConfigureAwait(false);
 
                 IStreamFramePayload frame;
                 try
                 {
-                    frame = await channel.ReceiveFrameAsync(ct).ConfigureAwait(false);
+                    frame = await pipe.Channel.ReceiveFrameAsync(ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1003,7 +1057,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 {
                     break;
                 }
-                catch (System.Threading.Channels.ChannelClosedException)
+                catch (ChannelClosedException)
                 {
                     break;
                 }
@@ -1033,7 +1087,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
                         if (peerHasNeeded)
                         {
-                            await channel.SendFrameAsync(new InterestedFrame(), ct).ConfigureAwait(false);
+                            pipe.OutboundQueue.Writer.TryWrite(new InterestedFrame());
                         }
                         break;
                     }
@@ -1056,7 +1110,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                             handle.Session.SetWeChokingPeer(remotePeerId, PeerChokeStatus.Unchoked);
                         }
 
-                        await channel.SendFrameAsync(new UnchokeFrame(), ct).ConfigureAwait(false);
+                        pipe.OutboundQueue.Writer.TryWrite(new UnchokeFrame());
                         break;
                     }
 
@@ -1106,22 +1160,36 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
                         if (canServe)
                         {
-                            await handle.Coordinator.HandleRequestChunkAsync(
-                                handle.Session,
-                                remotePeerId,
-                                reqFrame,
-                                channel,
-                                _fileStorage,
-                                handle.LocalRootPath,
-                                ct).ConfigureAwait(false);
-
-                            lock (handle.SyncRoot)
+                            Task worker = Task.Run(async () =>
                             {
-                                handle.ChunksSinceCheckpoint++;
-                                handle.HasUnpersistedChanges = true;
-                            }
+                                await _globalIoWorkerGate.WaitAsync(ct).ConfigureAwait(false);
+                                try
+                                {
+                                    await handle.Coordinator.HandleRequestChunkAsync(
+                                        handle.Session,
+                                        remotePeerId,
+                                        reqFrame,
+                                        pipe,
+                                        _fileStorage,
+                                        handle.LocalRootPath,
+                                        ct).ConfigureAwait(false);
 
-                            await PersistCheckpointIfNeededAsync(handle, force: false, ct).ConfigureAwait(false);
+                                    lock (handle.SyncRoot)
+                                    {
+                                        handle.ChunksSinceCheckpoint++;
+                                        handle.HasUnpersistedChanges = true;
+                                    }
+
+                                    await PersistCheckpointIfNeededAsync(handle, force: false, ct).ConfigureAwait(false);
+                                }
+                                finally
+                                {
+                                    _globalIoWorkerGate.Release();
+                                }
+                            }, ct);
+
+                            workerTasks.TryAdd(worker, 0);
+                            _ = worker.ContinueWith(t => workerTasks.TryRemove(t, out _), TaskScheduler.Default);
                         }
                         break;
                     }
@@ -1130,66 +1198,76 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                     {
                         try
                         {
-                            bool wasSeedingBefore;
-                            lock (handle.SyncRoot)
+                            await _globalIoWorkerGate.WaitAsync(ct).ConfigureAwait(false);
+                            try
                             {
-                                wasSeedingBefore = handle.Session.State == TransferSessionState.Seeding;
-                            }
-
-                            DomainResult result = await handle.Coordinator.HandleIncomingChunkDataAsync(
-                                handle.Session,
-                                remotePeerId,
-                                chunkData,
-                                channel,
-                                handle.LocalRootPath,
-                                streamPool: null,
-                                ct).ConfigureAwait(false);
-
-                            if (result.IsFailure)
-                            {
-                                if (result.Error.Code == "MultiStream.CorruptedChunk")
+                                bool wasSeedingBefore;
+                                lock (handle.SyncRoot)
                                 {
+                                    wasSeedingBefore = handle.Session.State == TransferSessionState.Seeding;
+                                }
+
+                                DomainResult result = await handle.Coordinator.HandleIncomingChunkDataAsync(
+                                    handle.Session,
+                                    remotePeerId,
+                                    chunkData,
+                                    pipe.Channel,
+                                    handle.LocalRootPath,
+                                    streamPool: null,
+                                    ct).ConfigureAwait(false);
+
+                                if (result.IsFailure)
+                                {
+                                    if (result.Error.Code == "MultiStream.CorruptedChunk")
+                                    {
+                                        pipe.OutboundQueue.Writer.TryComplete();
+                                        return;
+                                    }
                                     return;
                                 }
-                                break;
-                            }
 
-                            await BroadcastHaveAsync(handle, chunkData.ChunkIndex, ct).ConfigureAwait(false);
+                                BroadcastHave(handle, chunkData.ChunkIndex);
 
-                            bool transitionedToSeeding = false;
-                            isTerminal = false;
-                            lock (handle.SyncRoot)
-                            {
-                                handle.Session.ClearDomainEvents();
-                                if (!wasSeedingBefore && handle.Session.State == TransferSessionState.Seeding)
+                                bool transitionedToSeeding = false;
+                                bool terminal = false;
+                                lock (handle.SyncRoot)
                                 {
-                                    handle.SeedingStartedAtUtc ??= _clock.UtcNow;
-                                    transitionedToSeeding = true;
+                                    handle.Session.ClearDomainEvents();
+                                    if (!wasSeedingBefore && handle.Session.State == TransferSessionState.Seeding)
+                                    {
+                                        handle.SeedingStartedAtUtc ??= _clock.UtcNow;
+                                        transitionedToSeeding = true;
+                                    }
+
+                                    terminal = handle.Session.State == TransferSessionState.Completed ||
+                                               handle.Session.State == TransferSessionState.Cancelled ||
+                                               handle.Session.State == TransferSessionState.Failed;
+                                    handle.ChunksSinceCheckpoint++;
+                                    handle.HasUnpersistedChanges = true;
                                 }
 
-                                isTerminal = handle.Session.State == TransferSessionState.Completed ||
-                                             handle.Session.State == TransferSessionState.Cancelled ||
-                                             handle.Session.State == TransferSessionState.Failed;
-                                handle.ChunksSinceCheckpoint++;
-                                handle.HasUnpersistedChanges = true;
-                            }
+                                if (transitionedToSeeding)
+                                {
+                                    await AnnounceSeederBestEffortAsync(
+                                        handle.TransportContext.SwarmRendezvousId,
+                                        handle.TransportContext.EphemeralPeerId,
+                                        handle.ExchangeEndpoint,
+                                        ct).ConfigureAwait(false);
+                                }
 
-                            if (transitionedToSeeding)
+                                await PersistCheckpointIfNeededAsync(handle, force: transitionedToSeeding || terminal, ct).ConfigureAwait(false);
+                                await ScheduleAndRequestMissingChunksAsync(handle, remotePeerId, pipe, ct).ConfigureAwait(false);
+                            }
+                            finally
                             {
-                                await AnnounceSeederBestEffortAsync(
-                                    handle.TransportContext.SwarmRendezvousId,
-                                    handle.TransportContext.EphemeralPeerId,
-                                    handle.ExchangeEndpoint,
-                                    ct).ConfigureAwait(false);
+                                _globalIoWorkerGate.Release();
                             }
-
-                            await PersistCheckpointIfNeededAsync(handle, force: transitionedToSeeding || isTerminal, ct).ConfigureAwait(false);
-                            break;
                         }
                         finally
                         {
                             chunkData.ReleaseBuffer();
                         }
+                        break;
                     }
 
                     case KeepAliveFrame:
@@ -1199,15 +1277,29 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         }
         finally
         {
+            pipe.OutboundQueue.Writer.TryComplete();
+
+            if (workerTasks.Count > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(workerTasks.Keys).ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+            }
+
             lock (handle.SyncRoot)
             {
                 handle.PieceAvailability.RemovePeer(remotePeerId);
             }
             handle.Coordinator.Scheduler.ReleasePeer(remotePeerId);
             handle.PeerChannels.TryRemove(remotePeerId, out _);
+            handle.PeerPipes.TryRemove(remotePeerId, out _);
             try
             {
-                await channel.DisposeAsync().ConfigureAwait(false);
+                await pipe.Channel.DisposeAsync().ConfigureAwait(false);
             }
             catch (ObjectDisposedException)
             {
@@ -1215,10 +1307,26 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         }
     }
 
+    private static void BroadcastHave(
+        ActiveTransferHandle handle,
+        ChunkIndex chunkIndex)
+    {
+        var haveFrame = new HaveFrame(chunkIndex);
+        foreach (PeerChannelPipe pipe in handle.PeerPipes.Values)
+        {
+            if (!pipe.Channel.IsOpen)
+            {
+                continue;
+            }
+
+            pipe.OutboundQueue.Writer.TryWrite(haveFrame);
+        }
+    }
+
     private async ValueTask ScheduleAndRequestMissingChunksAsync(
         ActiveTransferHandle handle,
         PublicIdentityId remotePeerId,
-        ITransferDataChannel channel,
+        PeerChannelPipe pipe,
         CancellationToken ct)
     {
         while (handle.Coordinator.Scheduler.CanRequest(remotePeerId))
@@ -1256,31 +1364,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 break;
             }
 
-            await channel.SendFrameAsync(new RequestChunkFrame(nextChunk.Value), ct).ConfigureAwait(false);
-        }
-    }
-
-    private static async ValueTask BroadcastHaveAsync(
-        ActiveTransferHandle handle,
-        ChunkIndex chunkIndex,
-        CancellationToken ct)
-    {
-        var haveFrame = new HaveFrame(chunkIndex);
-        foreach (ITransferDataChannel peerChannel in handle.PeerChannels.Values)
-        {
-            if (!peerChannel.IsOpen)
-            {
-                continue;
-            }
-
-            try
-            {
-                await peerChannel.SendFrameAsync(haveFrame, ct).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Individual peer channel may have closed concurrently; continue broadcasting to remaining peers.
-            }
+            await pipe.SendFrameAsync(new RequestChunkFrame(nextChunk.Value), ct).ConfigureAwait(false);
         }
     }
 
@@ -1304,11 +1388,11 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             {
             }
 
-            foreach (ITransferDataChannel channel in handle.PeerChannels.Values)
+            foreach (PeerChannelPipe pipe in handle.PeerPipes.Values)
             {
                 try
                 {
-                    await channel.DisposeAsync().ConfigureAwait(false);
+                    await pipe.DisposeAsync().ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
@@ -1326,6 +1410,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 }
             }
 
+            handle.PeerPipes.Clear();
             handle.PeerChannels.Clear();
             handle.PeerConnections.Clear();
 
@@ -1550,6 +1635,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         public ConcurrentDictionary<PublicIdentityId, bool> RemoteDescriptionApplied { get; } = new();
         public ConcurrentDictionary<PublicIdentityId, ConcurrentQueue<(string Candidate, string Mid)>> PendingRemoteCandidates { get; } = new();
         public ConcurrentDictionary<PublicIdentityId, ITransferDataChannel> PeerChannels { get; } = new();
+        public ConcurrentDictionary<PublicIdentityId, PeerChannelPipe> PeerPipes { get; } = new();
         public ConcurrentDictionary<PublicIdentityId, Task> PeerPumpTasks { get; } = new();
 
         public ActiveTransferHandle(
@@ -1577,6 +1663,47 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             ExchangeEndpoint = exchangeEndpoint;
             SeedingStartedAtUtc = seedingStartedAtUtc;
             LastCheckpointUtc = lastCheckpointUtc;
+        }
+    }
+
+    private sealed class PeerChannelPipe : ITransferStream
+    {
+        public ITransferDataChannel Channel { get; }
+        public Channel<IStreamFramePayload> OutboundQueue { get; }
+        public StreamIndex Index => Channel.Index;
+
+        public PeerChannelPipe(ITransferDataChannel channel, int outboundCapacity)
+        {
+            Channel = channel;
+            OutboundQueue = System.Threading.Channels.Channel.CreateBounded<IStreamFramePayload>(
+                new BoundedChannelOptions(outboundCapacity)
+                {
+                    SingleReader = true,
+                    SingleWriter = false,
+                    FullMode = BoundedChannelFullMode.Wait
+                });
+        }
+
+        public ValueTask SendFrameAsync(IStreamFramePayload frame, CancellationToken ct = default)
+        {
+            return OutboundQueue.Writer.WriteAsync(frame, ct);
+        }
+
+        public ValueTask<IStreamFramePayload> ReceiveFrameAsync(CancellationToken ct = default)
+        {
+            return Channel.ReceiveFrameAsync(ct);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            OutboundQueue.Writer.TryComplete();
+            try
+            {
+                await Channel.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
 }

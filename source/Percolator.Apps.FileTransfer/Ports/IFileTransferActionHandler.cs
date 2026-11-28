@@ -21,6 +21,7 @@ public interface IFileTransferActionHandler
         RootBundleName? customBundleName = null,
         SeedRatio? targetSeedRatio = null,
         bool isGroupTransfer = false,
+        IProgress<TransferPreparationProgress>? preparationProgress = null,
         CancellationToken ct = default);
 
     ValueTask<DomainResult> AcceptTransferAsync(

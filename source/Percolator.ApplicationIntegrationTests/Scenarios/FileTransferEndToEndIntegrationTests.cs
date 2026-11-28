@@ -938,6 +938,124 @@ public sealed class FileTransferEndToEndIntegrationTests
         return (alice, bob, charlie, groupChannelId);
     }
 
+    [Test]
+    public async Task ConcurrentStress_ThreeSimultaneousTransfers_OverLiveWebRtcAndSqlite_Sha256MatchAndCleanTeardown()
+    {
+        var trackerPolicy = new RelayHostingPolicy(
+            enabledFeatures: RelayFeatureFlags.DefaultCore | RelayFeatureFlags.SwarmTracker);
+
+        var relay = await _topology.CreateRelayAsync(trackerPolicy).ConfigureAwait(false);
+        var alice = await _topology.CreatePersonaAsync("Alice").ConfigureAwait(false);
+        var bob = await _topology.CreatePersonaAsync("Bob").ConfigureAwait(false);
+        alice.EnableFileTransfers();
+        bob.EnableFileTransfers();
+
+        await alice.LinkRelayAsync(relay).ConfigureAwait(false);
+        await bob.LinkRelayAsync(relay).ConfigureAwait(false);
+        await _topology.PairPersonasAsync(alice, bob, relay).ConfigureAwait(false);
+
+        ChannelId directChannelId = ChannelId.DeterministicForDirect(alice.IdentityId, bob.IdentityId, relay.Endpoint);
+
+        // Bundle 1: Single 1 MB file
+        string aliceDir1 = CreateSubDir("stress_alice_1");
+        string bobDir1 = CreateSubDir("stress_bob_1");
+        byte[] hash1 = WriteDeterministicFile(aliceDir1, "data1.bin", 1_048_576, seed: 111);
+
+        // Bundle 2: Two files (300 KB + 400 KB)
+        string aliceDir2 = CreateSubDir("stress_alice_2");
+        string bobDir2 = CreateSubDir("stress_bob_2");
+        byte[] hash2a = WriteDeterministicFile(aliceDir2, "sub/data2a.bin", 300_000, seed: 222);
+        byte[] hash2b = WriteDeterministicFile(aliceDir2, "sub/data2b.bin", 400_000, seed: 333);
+
+        // Bundle 3: Multi-hundred-file bundle (150 tiny files)
+        string aliceDir3 = CreateSubDir("stress_alice_3");
+        string bobDir3 = CreateSubDir("stress_bob_3");
+        const int bundle3FileCount = 150;
+        var bundle3Files = new List<(string RelPath, byte[] Hash)>();
+        for (int i = 0; i < bundle3FileCount; i++)
+        {
+            string rel = $"modules/mod_{i % 10}/file_{i}.txt";
+            byte[] h = WriteDeterministicFile(aliceDir3, rel, 256, seed: 400 + i);
+            bundle3Files.Add((rel, h));
+        }
+
+        // Alice initiates all 3 transfers
+        TransferSessionId sessionId1, sessionId2, sessionId3;
+        using (var scope = alice.Services.CreateScope())
+        {
+            var actions = scope.ServiceProvider.GetRequiredService<IFileTransferActionHandler>();
+
+            var init1 = await actions.InitiateTransferAsync(
+                directChannelId,
+                alice.IdentityId,
+                [bob.IdentityId],
+                RootDirectoryPath.Parse(aliceDir1),
+                [SanitizedRelativePath.Parse("data1.bin")],
+                DirectWanPolicy.ExplicitlyAllowed,
+                RootBundleName.Parse("StressBundle1")).ConfigureAwait(false);
+            init1.IsSuccess.Should().BeTrue();
+            sessionId1 = init1.Value;
+
+            var init2 = await actions.InitiateTransferAsync(
+                directChannelId,
+                alice.IdentityId,
+                [bob.IdentityId],
+                RootDirectoryPath.Parse(aliceDir2),
+                [SanitizedRelativePath.Parse("sub/data2a.bin"), SanitizedRelativePath.Parse("sub/data2b.bin")],
+                DirectWanPolicy.ExplicitlyAllowed,
+                RootBundleName.Parse("StressBundle2")).ConfigureAwait(false);
+            init2.IsSuccess.Should().BeTrue();
+            sessionId2 = init2.Value;
+
+            var init3 = await actions.InitiateTransferAsync(
+                directChannelId,
+                alice.IdentityId,
+                [bob.IdentityId],
+                RootDirectoryPath.Parse(aliceDir3),
+                bundle3Files.Select(f => SanitizedRelativePath.Parse(f.RelPath)).ToList(),
+                DirectWanPolicy.ExplicitlyAllowed,
+                RootBundleName.Parse("StressBundle3")).ConfigureAwait(false);
+            init3.IsSuccess.Should().BeTrue();
+            sessionId3 = init3.Value;
+        }
+
+        // Wait for Bob to receive all 3 offers
+        await Task.WhenAll(
+            WaitForSessionInDbAsync(bob, sessionId1, TransferSessionState.PendingConsent, TimeSpan.FromSeconds(20)),
+            WaitForSessionInDbAsync(bob, sessionId2, TransferSessionState.PendingConsent, TimeSpan.FromSeconds(20)),
+            WaitForSessionInDbAsync(bob, sessionId3, TransferSessionState.PendingConsent, TimeSpan.FromSeconds(20)));
+
+        // Bob accepts all 3 transfers concurrently
+        using (var scope = bob.Services.CreateScope())
+        {
+            var actions = scope.ServiceProvider.GetRequiredService<IFileTransferActionHandler>();
+            var accept1 = await actions.AcceptTransferAsync(sessionId1, RootDirectoryPath.Parse(bobDir1)).ConfigureAwait(false);
+            var accept2 = await actions.AcceptTransferAsync(sessionId2, RootDirectoryPath.Parse(bobDir2)).ConfigureAwait(false);
+            var accept3 = await actions.AcceptTransferAsync(sessionId3, RootDirectoryPath.Parse(bobDir3)).ConfigureAwait(false);
+
+            accept1.IsSuccess.Should().BeTrue();
+            accept2.IsSuccess.Should().BeTrue();
+            accept3.IsSuccess.Should().BeTrue();
+        }
+
+        // Wait for all 3 transfers on Bob to complete and transition to Seeding
+        await Task.WhenAll(
+            WaitForRuntimeStateAsync(bob, sessionId1, TransferSessionState.Seeding, TimeSpan.FromSeconds(60)),
+            WaitForRuntimeStateAsync(bob, sessionId2, TransferSessionState.Seeding, TimeSpan.FromSeconds(60)),
+            WaitForRuntimeStateAsync(bob, sessionId3, TransferSessionState.Seeding, TimeSpan.FromSeconds(60)));
+
+        // Verify SHA-256 integrity on all transferred files
+        ComputeFileSha256(Path.Combine(bobDir1, "data1.bin")).Should().Equal(hash1);
+        ComputeFileSha256(Path.Combine(bobDir2, "sub", "data2a.bin")).Should().Equal(hash2a);
+        ComputeFileSha256(Path.Combine(bobDir2, "sub", "data2b.bin")).Should().Equal(hash2b);
+
+        foreach (var (relPath, expectedHash) in bundle3Files)
+        {
+            string fullDst = Path.Combine(bobDir3, relPath.Replace('/', Path.DirectorySeparatorChar));
+            ComputeFileSha256(fullDst).Should().Equal(expectedHash);
+        }
+    }
+
     private string CreateSubDir(string name)
     {
         string path = Path.Combine(_testTempRoot, name);
