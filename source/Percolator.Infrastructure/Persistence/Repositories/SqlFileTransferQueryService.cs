@@ -33,6 +33,7 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
 
         List<TransferSessionEntity> entities = await db.TransferSessions
             .AsNoTracking()
+            .OrderByDescending(s => s.CreatedAtUtc)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -43,25 +44,45 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
 
         List<Guid> transferIds = entities.Select(e => e.TransferId).ToList();
 
-        Dictionary<Guid, TransferBitfieldEntity> bitfieldMap = await db.TransferBitfields
-            .AsNoTracking()
-            .Where(b => transferIds.Contains(b.TransferId))
-            .ToDictionaryAsync(b => b.TransferId, ct)
-            .ConfigureAwait(false);
+        // Chunk by 500 to guarantee safe SQLite parameter counts ([REPO-007])
+        Dictionary<Guid, TransferBitfieldEntity> bitfieldMap = new(entities.Count);
+        List<TransferSessionRecipientEntity> recipientEntities = new();
+        Dictionary<Guid, TransferSessionTransportContextEntity> transportMap = new(entities.Count);
 
-        List<TransferSessionRecipientEntity> recipientEntities = await db.TransferSessionRecipients
-            .AsNoTracking()
-            .Where(r => transferIds.Contains(r.TransferId))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        foreach (Guid[] batch in transferIds.Chunk(500))
+        {
+            Dictionary<Guid, TransferBitfieldEntity> bitfields = await db.TransferBitfields
+                .AsNoTracking()
+                .Where(b => batch.Contains(b.TransferId))
+                .ToDictionaryAsync(b => b.TransferId, ct)
+                .ConfigureAwait(false);
+
+            foreach (var kvp in bitfields)
+            {
+                bitfieldMap[kvp.Key] = kvp.Value;
+            }
+
+            List<TransferSessionRecipientEntity> recipients = await db.TransferSessionRecipients
+                .AsNoTracking()
+                .Where(r => batch.Contains(r.TransferId))
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            recipientEntities.AddRange(recipients);
+
+            Dictionary<Guid, TransferSessionTransportContextEntity> transports = await db.TransferSessionTransportContexts
+                .AsNoTracking()
+                .Where(t => batch.Contains(t.TransferId))
+                .ToDictionaryAsync(t => t.TransferId, ct)
+                .ConfigureAwait(false);
+
+            foreach (var kvp in transports)
+            {
+                transportMap[kvp.Key] = kvp.Value;
+            }
+        }
 
         ILookup<Guid, byte[]> recipientsLookup = recipientEntities.ToLookup(r => r.TransferId, r => r.RecipientIdentityId);
-
-        Dictionary<Guid, TransferSessionTransportContextEntity> transportMap = await db.TransferSessionTransportContexts
-            .AsNoTracking()
-            .Where(t => transferIds.Contains(t.TransferId))
-            .ToDictionaryAsync(t => t.TransferId, ct)
-            .ConfigureAwait(false);
 
         List<TransferSessionReadModel> models = new(entities.Count);
         foreach (TransferSessionEntity entity in entities)
@@ -220,7 +241,9 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
         IEnumerable<byte[]> recipients,
         TransferSessionTransportContextEntity? transportContext)
     {
-        int totalPieces = bitfield?.TotalPieces ?? (entity.TotalSizeBytes == 0 ? 1 : (int)((entity.TotalSizeBytes + entity.ChunkSizeBytes - 1) / entity.ChunkSizeBytes));
+        int totalPieces = bitfield is { TotalPieces: > 0 }
+            ? bitfield.TotalPieces
+            : (entity.TotalSizeBytes == 0 ? 1 : (int)((entity.TotalSizeBytes + entity.ChunkSizeBytes - 1) / entity.ChunkSizeBytes));
         long downloadedBytes = 0;
         int verifiedPieces = 0;
 
@@ -276,7 +299,8 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             ? SeedRatio.Unlimited
             : SeedRatio.FromMultiplier(entity.TargetSeedRatio);
 
-        double currentRatio = downloadedBytes > 0 ? (double)entity.UploadedSizeBytes / downloadedBytes : 0.0;
+        // Domain-consistent CurrentSeedRatio: UploadedBytes / TotalSizeBytes (matches TransferSession.CurrentSeedRatio)
+        double currentRatio = entity.TotalSizeBytes > 0 ? (double)entity.UploadedSizeBytes / entity.TotalSizeBytes : 0.0;
 
         return new TransferSessionReadModel(
             TransferSessionId.FromGuid(entity.TransferId),

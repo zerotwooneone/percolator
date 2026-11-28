@@ -193,7 +193,155 @@ public sealed class SqlFileTransferQueryServiceTests
         result.CompletedChunks.Count.Should().Be(1);
         result.TotalChunks.Count.Should().Be(2);
         result.UploadedBytes.Bytes.Should().Be(16_384);
-        result.CurrentSeedRatio.Multiplier.Should().Be(0.5, "16,384 / 32,768 == 0.5");
+        result.CurrentSeedRatio.Multiplier.Should().BeApproximately(16_384.0 / 98_304.0, 0.0001, "Domain-consistent: 16,384 / 98,304 ~= 0.1667");
+    }
+
+    [Test]
+    public async Task GetAllTransfersAsync_ReturnsTransfersOrderedByCreatedAtUtcDescending()
+    {
+        var baseTime = new DateTimeOffset(2026, 6, 1, 12, 0, 0, TimeSpan.Zero);
+        var idOld = Guid.NewGuid();
+        var idMid = Guid.NewGuid();
+        var idNew = Guid.NewGuid();
+
+        await using (var db = _db.CreateNewContext())
+        {
+            db.TransferSessions.AddRange(
+                new TransferSessionEntity
+                {
+                    TransferId = idOld,
+                    InitiatorId = PublicIdentityId.New().ToByteArray(),
+                    TopologyType = 3,
+                    Role = (int)TransferRole.Sender,
+                    State = (int)TransferSessionState.Offered,
+                    RootName = "Old",
+                    TotalSizeBytes = 1000,
+                    ChunkSizeBytes = 500,
+                    TargetSeedRatio = 0.0,
+                    CreatedAtUtc = baseTime,
+                    AllFilesSelected = true
+                },
+                new TransferSessionEntity
+                {
+                    TransferId = idNew,
+                    InitiatorId = PublicIdentityId.New().ToByteArray(),
+                    TopologyType = 3,
+                    Role = (int)TransferRole.Sender,
+                    State = (int)TransferSessionState.Offered,
+                    RootName = "New",
+                    TotalSizeBytes = 1000,
+                    ChunkSizeBytes = 500,
+                    TargetSeedRatio = 0.0,
+                    CreatedAtUtc = baseTime.AddHours(2),
+                    AllFilesSelected = true
+                },
+                new TransferSessionEntity
+                {
+                    TransferId = idMid,
+                    InitiatorId = PublicIdentityId.New().ToByteArray(),
+                    TopologyType = 3,
+                    Role = (int)TransferRole.Sender,
+                    State = (int)TransferSessionState.Offered,
+                    RootName = "Mid",
+                    TotalSizeBytes = 1000,
+                    ChunkSizeBytes = 500,
+                    TargetSeedRatio = 0.0,
+                    CreatedAtUtc = baseTime.AddHours(1),
+                    AllFilesSelected = true
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+
+        IReadOnlyList<TransferSessionReadModel> result = await _queryService.GetAllTransfersAsync();
+
+        result.Should().HaveCount(3);
+        result[0].SessionId.Value.Should().Be(idNew);
+        result[1].SessionId.Value.Should().Be(idMid);
+        result[2].SessionId.Value.Should().Be(idOld);
+    }
+
+    [Test]
+    public async Task GetTransferByIdAsync_HandlesCorruptedZeroTotalPiecesBitfield_Gracefully()
+    {
+        var transferGuid = Guid.NewGuid();
+        await using (var db = _db.CreateNewContext())
+        {
+            db.TransferSessions.Add(new TransferSessionEntity
+            {
+                TransferId = transferGuid,
+                InitiatorId = PublicIdentityId.New().ToByteArray(),
+                TopologyType = 3,
+                Role = (int)TransferRole.Recipient,
+                State = (int)TransferSessionState.InFlight,
+                RootName = "CorruptBitfield",
+                TotalSizeBytes = 100_000,
+                ChunkSizeBytes = 10_000,
+                TargetSeedRatio = 1.0,
+                UploadedSizeBytes = 0,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                AllFilesSelected = true
+            });
+
+            // Corrupted record where TotalPieces is 0 and bitfield bytes are empty
+            db.TransferBitfields.Add(new TransferBitfieldEntity
+            {
+                TransferId = transferGuid,
+                BitfieldBytes = Array.Empty<byte>(),
+                TotalPieces = 0,
+                VerifiedPieces = 0
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        // Must not throw DomainValidationException("Chunk count must be positive.")
+        TransferSessionReadModel? result = await _queryService.GetTransferByIdAsync(TransferSessionId.FromGuid(transferGuid));
+
+        result.Should().NotBeNull();
+        result!.TotalChunks.Count.Should().Be(10, "Calculated from TotalSizeBytes (100,000) / ChunkSizeBytes (10,000)");
+        result.CompletedChunks.Count.Should().Be(0);
+        result.DownloadedBytes.Bytes.Should().Be(0);
+    }
+
+    [Test]
+    public async Task GetManifestFilesAsync_ReturnsEmpty_WhenSessionDoesNotExist()
+    {
+        IReadOnlyList<ManifestFileReadModel> result = await _queryService.GetManifestFilesAsync(TransferSessionId.New());
+        result.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task ProjectReadModel_HandlesZeroByteBundle_WithoutException()
+    {
+        var transferGuid = Guid.NewGuid();
+        await using (var db = _db.CreateNewContext())
+        {
+            db.TransferSessions.Add(new TransferSessionEntity
+            {
+                TransferId = transferGuid,
+                InitiatorId = PublicIdentityId.New().ToByteArray(),
+                TopologyType = 3,
+                Role = (int)TransferRole.Sender,
+                State = (int)TransferSessionState.Completed,
+                RootName = "ZeroByteBundle",
+                TotalSizeBytes = 0,
+                ChunkSizeBytes = 65_536,
+                TargetSeedRatio = 0.0,
+                UploadedSizeBytes = 0,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                AllFilesSelected = true
+            });
+            await db.SaveChangesAsync();
+        }
+
+        TransferSessionReadModel? result = await _queryService.GetTransferByIdAsync(TransferSessionId.FromGuid(transferGuid));
+
+        result.Should().NotBeNull();
+        result!.TotalBytes.Bytes.Should().Be(0);
+        result.DownloadedBytes.Bytes.Should().Be(0);
+        result.TotalChunks.Count.Should().Be(1, "Zero-byte bundle has at least 1 nominal chunk count");
+        result.CurrentSeedRatio.IsZero.Should().BeTrue();
     }
 
     [Test]
@@ -307,7 +455,15 @@ public sealed class SqlFileTransferQueryServiceTests
         var t2 = _queryService.GetTransferByIdAsync(TransferSessionId.FromGuid(id)).AsTask();
         var t3 = _queryService.GetManifestFilesAsync(TransferSessionId.FromGuid(id)).AsTask();
 
-        var act = async () => await Task.WhenAll(t1, t2, t3);
-        await act.Should().NotThrowAsync();
+        await Task.WhenAll(t1, t2, t3);
+
+        IReadOnlyList<TransferSessionReadModel> all = await t1;
+        TransferSessionReadModel? byId = await t2;
+        IReadOnlyList<ManifestFileReadModel> files = await t3;
+
+        all.Should().ContainSingle(s => s.SessionId.Value == id);
+        byId.Should().NotBeNull();
+        byId!.SessionId.Value.Should().Be(id);
+        files.Should().BeEmpty();
     }
 }
