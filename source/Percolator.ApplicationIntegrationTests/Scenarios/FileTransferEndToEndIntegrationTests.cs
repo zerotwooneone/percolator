@@ -148,8 +148,8 @@ public sealed class FileTransferEndToEndIntegrationTests
         SwarmRendezvousId rendezvousId;
         using (var scope = alice.Services.CreateScope())
         {
-            var repo = scope.ServiceProvider.GetRequiredService<ITransferSessionRepository>();
-            var ctx = await repo.GetTransportContextAsync(sessionId).ConfigureAwait(false);
+            var transportStore = scope.ServiceProvider.GetRequiredService<ITransferSessionTransportStore>();
+            var ctx = await transportStore.GetTransportContextAsync(sessionId).ConfigureAwait(false);
             ctx.Should().NotBeNull();
             rendezvousId = ctx!.SwarmRendezvousId;
         }
@@ -216,8 +216,8 @@ public sealed class FileTransferEndToEndIntegrationTests
             initResult.IsSuccess.Should().BeTrue(initResult.IsFailure ? initResult.Error.Description : null);
             sessionId = initResult.Value;
 
-            var repo = scope.ServiceProvider.GetRequiredService<ITransferSessionRepository>();
-            rendezvousId = (await repo.GetTransportContextAsync(sessionId).ConfigureAwait(false))!.SwarmRendezvousId;
+            var transportStore = scope.ServiceProvider.GetRequiredService<ITransferSessionTransportStore>();
+            rendezvousId = (await transportStore.GetTransportContextAsync(sessionId).ConfigureAwait(false))!.SwarmRendezvousId;
         }
 
         // Wait for BOTH Bob and Charlie to receive the Group V2 SenderKey offer
@@ -586,8 +586,8 @@ public sealed class FileTransferEndToEndIntegrationTests
             initResult.IsSuccess.Should().BeTrue();
             sessionId = initResult.Value;
 
-            var repo = scope.ServiceProvider.GetRequiredService<ITransferSessionRepository>();
-            rendezvousId = (await repo.GetTransportContextAsync(sessionId).ConfigureAwait(false))!.SwarmRendezvousId;
+            var transportStore = scope.ServiceProvider.GetRequiredService<ITransferSessionTransportStore>();
+            rendezvousId = (await transportStore.GetTransportContextAsync(sessionId).ConfigureAwait(false))!.SwarmRendezvousId;
         }
 
         await WaitForSessionInDbAsync(bob, sessionId, TransferSessionState.PendingConsent, TimeSpan.FromSeconds(15)).ConfigureAwait(false);

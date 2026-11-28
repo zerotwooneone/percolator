@@ -11,7 +11,7 @@ using Percolator.Domain.Security.Ports;
 public sealed class SqlCipherPragmaInterceptor : DbConnectionInterceptor
 {
     private const string CipherMemorySecurityPragma = "PRAGMA cipher_memory_security = ON;";
-    private const string StandardWalPragmas = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
+    private const string StandardWalPragmas = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
 
     private readonly IMasterKeyHandle _keyHandle;
     private readonly VaultStorageOptions _options;

@@ -453,6 +453,7 @@ public sealed class TransferSessionRuntimeTests
         services.AddSingleton<IFileTransferFilterPolicyRepository>(new InMemoryFilterPolicyRepository());
         services.AddScoped<IPayloadSender, RecordingPayloadSender>();
         services.AddScoped<ITransferSessionRepository, InMemoryTransferSessionRepository>();
+        services.AddSingleton<ITransferSessionTransportStore, InMemoryTransferSessionTransportStore>();
 
         await using ServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
@@ -480,6 +481,7 @@ public sealed class TransferSessionRuntimeTests
         TimeSpan? seedingTtl = null)
     {
         InMemoryTransferSessionRepository sessionRepo = new();
+        InMemoryTransferSessionTransportStore transportStore = new();
         InMemoryDesktopFileStorage fileStorage = new();
         RecordingPayloadSender payloadSender = new();
         RecordingTrackerPort trackerPort = new();
@@ -510,7 +512,8 @@ public sealed class TransferSessionRuntimeTests
             blobStorage,
             endpointDiscovery,
             runtime,
-            certStore);
+            certStore,
+            transportStore);
 
         FileTransferPayloadHandler payloadHandler = new(
             sessionRepo,
@@ -520,7 +523,8 @@ public sealed class TransferSessionRuntimeTests
             blobStorage,
             runtime,
             new DirectBackgroundPayloadDispatcher(payloadSender),
-            certStore);
+            certStore,
+            transportStore);
 
         return new TestTransferNode(
             sessionRepo,

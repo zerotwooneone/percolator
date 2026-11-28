@@ -399,6 +399,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<CallbackEndpointValidator>();
         services.AddSingleton<ITransferRateLimiter, TokenBucketRateLimiter>();
         services.AddSingleton<ITransferSessionCertificateStore, SqliteTransferSessionCertificateStore>();
+        services.AddSingleton<ITransferSessionTransportStore, SqliteTransferSessionTransportStore>();
         services.AddSingleton<ITransferPeerTransport, TransferPeerTransport>();
         services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
         services.AddSingleton<IDistributedTrackerPort, GrpcSwarmTrackerClient>();

@@ -22,6 +22,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
     private readonly ITransferSessionRuntime _runtime;
     private readonly IBackgroundPayloadDispatcher _payloadDispatcher;
     private readonly ITransferSessionCertificateStore _certificateStore;
+    private readonly ITransferSessionTransportStore _transportStore;
 
     public AppId TargetAppId => AppId.FileTransferControl;
 
@@ -33,7 +34,8 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         IBlobStorageService blobStorage,
         ITransferSessionRuntime runtime,
         IBackgroundPayloadDispatcher payloadDispatcher,
-        ITransferSessionCertificateStore certificateStore)
+        ITransferSessionCertificateStore certificateStore,
+        ITransferSessionTransportStore transportStore)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _policyRepository = policyRepository ?? throw new ArgumentNullException(nameof(policyRepository));
@@ -43,6 +45,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _payloadDispatcher = payloadDispatcher ?? throw new ArgumentNullException(nameof(payloadDispatcher));
         _certificateStore = certificateStore ?? throw new ArgumentNullException(nameof(certificateStore));
+        _transportStore = transportStore ?? throw new ArgumentNullException(nameof(transportStore));
     }
 
     public async ValueTask<DomainResult> HandleInboundAsync(InboundPayloadContext context, CancellationToken ct = default)
@@ -119,7 +122,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
             SenderCertSha256: offer.SenderCertSha256);
 
         await _sessionRepository.SaveSessionAsync(session, ct);
-        await _sessionRepository.SaveTransportContextAsync(transportContext, ct);
+        await _transportStore.SaveTransportContextAsync(transportContext, ct);
         return DomainResult.Success(); // Zero wire ACK emitted
     }
 
@@ -210,7 +213,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
 
             if (_runtime.HasActiveSession(accept.TransferSessionId))
             {
-                TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(accept.TransferSessionId, ct);
+                TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(accept.TransferSessionId, ct);
                 if (transportContext != null)
                 {
                     if (transportContext.LocalRootPath != null)
@@ -253,7 +256,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
 
         TransferSession? session = _runtime.GetActiveSession(join.TransferSessionId)
             ?? await _sessionRepository.GetSessionByIdAsync(join.TransferSessionId, ct);
-        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(join.TransferSessionId, ct);
+        TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(join.TransferSessionId, ct);
         if (session == null || transportContext == null || !transportContext.IsGroupTransfer)
             return DomainResult.Success(); // Ignore PeerJoin for unknown or non-group sessions
 
@@ -357,7 +360,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         if (senderId == localIdentityId)
             return DomainResult.Success();
 
-        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(signal.TransferSessionId, ct);
+        TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(signal.TransferSessionId, ct);
         ChannelId replyChannelId = transportContext?.ChannelId ?? channelId;
         PublicIdentityId replyLocalId = transportContext?.LocalIdentityId ?? localIdentityId;
         bool isGroupTransfer = transportContext?.IsGroupTransfer ?? false;

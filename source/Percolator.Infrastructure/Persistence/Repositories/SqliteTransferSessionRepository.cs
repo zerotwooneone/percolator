@@ -1,27 +1,25 @@
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.SwarmCoordination;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
-using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
 
 public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
 {
     private readonly PercolatorDbContext _dbContext;
-    private readonly ConcurrentDictionary<TransferSessionId, TransferSessionTransportContext> _transportContexts = new();
 
     public SqliteTransferSessionRepository(PercolatorDbContext dbContext)
     {
@@ -33,6 +31,8 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         ArgumentNullException.ThrowIfNull(session);
 
         Guid transferGuid = session.Id.Value;
+
+        await using var tx = await _dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         TransferSessionEntity? existing = await _dbContext.TransferSessions
             .FirstOrDefaultAsync(s => s.TransferId == transferGuid, ct)
@@ -62,58 +62,51 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         }
         existing.ConcatenatedLeaves = concatenatedLeaves;
 
-        existing.SelectedFilesJson = session.SelectedFiles != null
-            ? JsonSerializer.Serialize(session.SelectedFiles.Indices.Select(idx => idx.Value))
-            : null;
-
+        existing.AllFilesSelected = session.SelectedFiles != null && session.SelectedFiles.SelectedCount == session.Manifest.TotalFiles.Count;
         existing.TargetSeedRatio = session.TargetSeedRatio.IsUnlimited ? -1.0 : session.TargetSeedRatio.Multiplier;
         existing.UploadedSizeBytes = session.UploadedBytes.Bytes;
         existing.CreatedAtUtc = session.CreatedAtUtc;
         existing.CompletedAtUtc = session.CompletedAtUtc;
 
-        // Topology
+        // Topology & recipients
+        List<byte[]> recipientByteArrays = [];
         switch (session.Topology)
         {
             case TransferTopology.OneToOne oto:
                 existing.TopologyType = 1;
                 existing.InitiatorId = oto.InitiatorId.ToByteArray();
-                existing.RecipientsJson = JsonSerializer.Serialize(new[] { oto.RecipientId.Value.ToString() });
+                recipientByteArrays.Add(oto.RecipientId.ToByteArray());
                 break;
             case TransferTopology.MultiPeer mp:
                 existing.TopologyType = 2;
                 existing.InitiatorId = mp.InitiatorId.ToByteArray();
-                existing.RecipientsJson = JsonSerializer.Serialize(mp.Recipients.Select(r => r.Value.ToString()).ToList());
+                foreach (PublicIdentityId recipient in mp.Recipients)
+                {
+                    recipientByteArrays.Add(recipient.ToByteArray());
+                }
                 break;
             case TransferTopology.IncomingStaged incoming:
                 existing.TopologyType = 3;
                 existing.InitiatorId = incoming.InitiatorId.ToByteArray();
-                existing.RecipientsJson = "[]";
                 break;
         }
 
-        // Copy staged transport context columns onto the entity if present
-        if (_transportContexts.TryGetValue(session.Id, out TransferSessionTransportContext? stagedCtx))
-        {
-            ApplyTransportContext(existing, stagedCtx);
-        }
-
-        // Save manifest files if not present
-        bool hasFiles = await _dbContext.ManifestFiles
-            .AnyAsync(f => f.TransferId == transferGuid, ct)
+        var existingRecipients = await _dbContext.TransferSessionRecipients
+            .Where(r => r.TransferId == transferGuid)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
+        _dbContext.TransferSessionRecipients.RemoveRange(existingRecipients);
 
-        if (!hasFiles)
+        var seenRecipients = new HashSet<string>();
+        foreach (byte[] rBytes in recipientByteArrays)
         {
-            foreach (FileEntry file in session.Manifest.Files)
+            string hex = Convert.ToHexString(rBytes);
+            if (seenRecipients.Add(hex))
             {
-                _dbContext.ManifestFiles.Add(new ManifestFileEntity
+                _dbContext.TransferSessionRecipients.Add(new TransferSessionRecipientEntity
                 {
                     TransferId = transferGuid,
-                    FileIndex = file.Index.Value,
-                    RelativePath = file.RelativePath.Value,
-                    FileSizeBytes = file.FileSize.Bytes,
-                    StartOffset = file.StartOffset.Offset,
-                    LastModifiedUnixSeconds = file.LastModifiedUtc.UnixSeconds
+                    RecipientIdentityId = rBytes
                 });
             }
         }
@@ -137,32 +130,97 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         bitfieldEntity.TotalPieces = session.Manifest.TotalChunks.Count;
 
         await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
 
-    public async ValueTask SaveBitfieldAsync(TransferSessionId sessionId, Bitfield bitfield, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(bitfield);
+        DbConnection dbConn = _dbContext.Database.GetDbConnection();
+        DbTransaction dbTx = tx.GetDbTransaction();
+        string transferGuidString = transferGuid.ToString().ToUpperInvariant();
 
-        Guid transferGuid = sessionId.Value;
-
-        TransferBitfieldEntity? bitfieldEntity = await _dbContext.TransferBitfields
-            .FirstOrDefaultAsync(b => b.TransferId == transferGuid, ct)
+        // High-file-count bulk persistence for ft_manifest_files (insert-once when !hasFiles)
+        bool hasFiles = await _dbContext.ManifestFiles
+            .AnyAsync(f => f.TransferId == transferGuid, ct)
             .ConfigureAwait(false);
 
-        if (bitfieldEntity == null)
+        if (!hasFiles && session.Manifest.Files.Count > 0)
         {
-            bitfieldEntity = new TransferBitfieldEntity
+            await using DbCommand cmd = dbConn.CreateCommand();
+            cmd.Transaction = dbTx;
+            cmd.CommandText = """
+                INSERT INTO ft_manifest_files (transfer_id, file_index, relative_path, file_size_bytes, start_offset, last_modified_unix_seconds)
+                VALUES (@tid, @idx, @path, @size, @offset, @mtime)
+                """;
+
+            DbParameter pTid = cmd.CreateParameter();
+            pTid.ParameterName = "@tid";
+            cmd.Parameters.Add(pTid);
+
+            DbParameter pIdx = cmd.CreateParameter();
+            pIdx.ParameterName = "@idx";
+            cmd.Parameters.Add(pIdx);
+
+            DbParameter pPath = cmd.CreateParameter();
+            pPath.ParameterName = "@path";
+            cmd.Parameters.Add(pPath);
+
+            DbParameter pSize = cmd.CreateParameter();
+            pSize.ParameterName = "@size";
+            cmd.Parameters.Add(pSize);
+
+            DbParameter pOffset = cmd.CreateParameter();
+            pOffset.ParameterName = "@offset";
+            cmd.Parameters.Add(pOffset);
+
+            DbParameter pMtime = cmd.CreateParameter();
+            pMtime.ParameterName = "@mtime";
+            cmd.Parameters.Add(pMtime);
+
+            foreach (FileEntry file in session.Manifest.Files)
             {
-                TransferId = transferGuid,
-                TotalPieces = bitfield.TotalChunks.Count
-            };
-            _dbContext.TransferBitfields.Add(bitfieldEntity);
+                pTid.Value = transferGuidString;
+                pIdx.Value = file.Index.Value;
+                pPath.Value = file.RelativePath.Value;
+                pSize.Value = file.FileSize.Bytes;
+                pOffset.Value = file.StartOffset.Offset;
+                pMtime.Value = file.LastModifiedUtc.UnixSeconds;
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
         }
 
-        bitfieldEntity.BitfieldBytes = bitfield.ToByteArray();
-        bitfieldEntity.VerifiedPieces = bitfield.PopCount;
+        // Delete previous selected files rows
+        await using (DbCommand delCmd = dbConn.CreateCommand())
+        {
+            delCmd.Transaction = dbTx;
+            delCmd.CommandText = "DELETE FROM ft_session_selected_files WHERE transfer_id = @tid;";
+            DbParameter pTid = delCmd.CreateParameter();
+            pTid.ParameterName = "@tid";
+            pTid.Value = transferGuidString;
+            delCmd.Parameters.Add(pTid);
+            await delCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Insert selected files ONLY if partial selection (0 rows for AllFilesSelected == true or PendingConsent)
+        if (session.SelectedFiles != null && !existing.AllFilesSelected && session.SelectedFiles.SelectedCount > 0)
+        {
+            await using DbCommand selCmd = dbConn.CreateCommand();
+            selCmd.Transaction = dbTx;
+            selCmd.CommandText = "INSERT INTO ft_session_selected_files (transfer_id, file_index) VALUES (@tid, @idx);";
+
+            DbParameter pTid = selCmd.CreateParameter();
+            pTid.ParameterName = "@tid";
+            selCmd.Parameters.Add(pTid);
+
+            DbParameter pIdx = selCmd.CreateParameter();
+            pIdx.ParameterName = "@idx";
+            selCmd.Parameters.Add(pIdx);
+
+            foreach (FileIndex idx in session.SelectedFiles.Indices)
+            {
+                pTid.Value = transferGuidString;
+                pIdx.Value = idx.Value;
+                await selCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
     public async ValueTask<TransferSession?> GetSessionByIdAsync(TransferSessionId sessionId, CancellationToken ct = default)
@@ -179,7 +237,35 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             return null;
         }
 
-        return await ReconstituteSessionAsync(entity, ct).ConfigureAwait(false);
+        List<ManifestFileEntity> fileEntities = await _dbContext.ManifestFiles
+            .AsNoTracking()
+            .Where(f => f.TransferId == transferGuid)
+            .OrderBy(f => f.FileIndex)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        TransferBitfieldEntity? bitfieldEntity = await _dbContext.TransferBitfields
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.TransferId == transferGuid, ct)
+            .ConfigureAwait(false);
+
+        List<TransferSessionRecipientEntity> recipientEntities = await _dbContext.TransferSessionRecipients
+            .AsNoTracking()
+            .Where(r => r.TransferId == transferGuid)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        List<TransferSessionSelectedFileEntity>? selectedFileEntities = null;
+        if (!entity.AllFilesSelected)
+        {
+            selectedFileEntities = await _dbContext.TransferSessionSelectedFiles
+                .AsNoTracking()
+                .Where(s => s.TransferId == transferGuid)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+        }
+
+        return ReconstituteSession(entity, fileEntities, bitfieldEntity, recipientEntities, selectedFileEntities);
     }
 
     public async ValueTask<IReadOnlyList<TransferSession>> GetActiveSessionsAsync(CancellationToken ct = default)
@@ -195,121 +281,87 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        if (entities.Count == 0)
+        {
+            return Array.Empty<TransferSession>();
+        }
+
+        List<Guid> transferGuids = entities.Select(e => e.TransferId).ToList();
+
+        List<ManifestFileEntity> allFiles = await _dbContext.ManifestFiles
+            .AsNoTracking()
+            .Where(f => transferGuids.Contains(f.TransferId))
+            .OrderBy(f => f.FileIndex)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        List<TransferBitfieldEntity> allBitfields = await _dbContext.TransferBitfields
+            .AsNoTracking()
+            .Where(b => transferGuids.Contains(b.TransferId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        List<TransferSessionRecipientEntity> allRecipients = await _dbContext.TransferSessionRecipients
+            .AsNoTracking()
+            .Where(r => transferGuids.Contains(r.TransferId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        List<Guid> partialSelectionGuids = entities.Where(e => !e.AllFilesSelected).Select(e => e.TransferId).ToList();
+        List<TransferSessionSelectedFileEntity> allSelectedFiles = partialSelectionGuids.Count > 0
+            ? await _dbContext.TransferSessionSelectedFiles
+                .AsNoTracking()
+                .Where(s => partialSelectionGuids.Contains(s.TransferId))
+                .ToListAsync(ct)
+                .ConfigureAwait(false)
+            : [];
+
+        var filesByTransfer = allFiles.GroupBy(f => f.TransferId).ToDictionary(g => g.Key, g => (IReadOnlyList<ManifestFileEntity>)g.ToList());
+        var bitfieldByTransfer = allBitfields.ToDictionary(b => b.TransferId);
+        var recipientsByTransfer = allRecipients.GroupBy(r => r.TransferId).ToDictionary(g => g.Key, g => (IReadOnlyList<TransferSessionRecipientEntity>)g.ToList());
+        var selectedFilesByTransfer = allSelectedFiles.GroupBy(s => s.TransferId).ToDictionary(g => g.Key, g => (IReadOnlyList<TransferSessionSelectedFileEntity>)g.ToList());
+
         List<TransferSession> sessions = new(entities.Count);
         foreach (TransferSessionEntity entity in entities)
         {
-            TransferSession session = await ReconstituteSessionAsync(entity, ct).ConfigureAwait(false);
-            sessions.Add(session);
+            filesByTransfer.TryGetValue(entity.TransferId, out var files);
+            bitfieldByTransfer.TryGetValue(entity.TransferId, out var bitfield);
+            recipientsByTransfer.TryGetValue(entity.TransferId, out var recipients);
+            selectedFilesByTransfer.TryGetValue(entity.TransferId, out var selectedFiles);
+
+            sessions.Add(ReconstituteSession(
+                entity,
+                files ?? Array.Empty<ManifestFileEntity>(),
+                bitfield,
+                recipients ?? Array.Empty<TransferSessionRecipientEntity>(),
+                selectedFiles));
         }
 
         return sessions;
     }
 
-    public async ValueTask SaveTransportContextAsync(TransferSessionTransportContext context, CancellationToken ct = default)
+    public async ValueTask<IReadOnlyList<TransferSessionId>> GetExpiredPendingOfferIdsAsync(DateTimeOffset createdBeforeUtc, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        _transportContexts[context.SessionId] = context;
-
-        TransferSessionEntity? existing = await _dbContext.TransferSessions
-            .FirstOrDefaultAsync(s => s.TransferId == context.SessionId.Value, ct)
-            .ConfigureAwait(false);
-
-        if (existing != null)
-        {
-            ApplyTransportContext(existing, context);
-            await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-    }
-
-    public async ValueTask<TransferSessionTransportContext?> GetTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default)
-    {
-        if (_transportContexts.TryGetValue(sessionId, out TransferSessionTransportContext? cached))
-        {
-            return cached;
-        }
-
-        TransferSessionEntity? entity = await _dbContext.TransferSessions
+        var pendingSessions = await _dbContext.TransferSessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.TransferId == sessionId.Value, ct)
-            .ConfigureAwait(false);
-
-        if (entity == null ||
-            entity.SwarmRendezvousId.Length != 32 ||
-            entity.EphemeralPeerId.Length != 32 ||
-            entity.StreamAuthToken.Length != 32 ||
-            entity.LocalIdentityId.Length != 16)
-        {
-            return null;
-        }
-
-        RelayRendezvousDescriptor? relay = !string.IsNullOrWhiteSpace(entity.RelayEndpointUri) && entity.RelayPipeToken is { Length: 32 }
-            ? new RelayRendezvousDescriptor(
-                RelayPipeEndpointUri.Parse(entity.RelayEndpointUri),
-                RelayPipeToken.FromBytes(entity.RelayPipeToken))
-            : null;
-
-        List<DirectEndpointCandidate> candidates = [];
-        if (!string.IsNullOrWhiteSpace(entity.DirectCandidatesJson))
-        {
-            var rawCandidates = JsonSerializer.Deserialize<List<PersistedCandidateDto>>(entity.DirectCandidatesJson);
-            if (rawCandidates != null)
-            {
-                foreach (var c in rawCandidates)
-                {
-                    candidates.Add(new DirectEndpointCandidate(
-                        EndpointHost.Parse(c.Host),
-                        PortNumber.FromInt(c.Port),
-                        (DirectCandidateKind)c.Kind));
-                }
-            }
-        }
-
-        var rehydrated = new TransferSessionTransportContext(
-            sessionId,
-            Domain.Channels.ValueObjects.ChannelId.FromGuid(entity.ChannelId),
-            Domain.Identities.PublicIdentityId.FromBytes(entity.LocalIdentityId),
-            SwarmRendezvousId.FromBytes(entity.SwarmRendezvousId),
-            EphemeralSwarmPeerId.FromBytes(entity.EphemeralPeerId),
-            StreamAuthToken.FromBytes(entity.StreamAuthToken),
-            (DirectWanPolicy)entity.WanPolicy,
-            relay,
-            candidates,
-            string.IsNullOrWhiteSpace(entity.LocalRootPath) ? null : RootDirectoryPath.Parse(entity.LocalRootPath),
-            entity.IsGroupTransfer,
-            entity.SenderCertSha256 is { Length: 32 } ? CertSha256Fingerprint.FromBytes(entity.SenderCertSha256) : null);
-
-        _transportContexts[sessionId] = rehydrated;
-        return rehydrated;
-    }
-
-    private static void ApplyTransportContext(TransferSessionEntity entity, TransferSessionTransportContext context)
-    {
-        entity.ChannelId = context.ChannelId.Value;
-        entity.LocalIdentityId = context.LocalIdentityId.ToByteArray();
-        entity.SwarmRendezvousId = context.SwarmRendezvousId.Span.ToArray();
-        entity.EphemeralPeerId = context.EphemeralPeerId.Span.ToArray();
-        entity.StreamAuthToken = context.StreamAuthToken.Span.ToArray();
-        entity.WanPolicy = (int)context.WanPolicy;
-        entity.LocalRootPath = context.LocalRootPath?.Value;
-        entity.RelayEndpointUri = context.RelayRendezvous?.EndpointUri.Value;
-        entity.RelayPipeToken = context.RelayRendezvous?.Token.Span.ToArray();
-        entity.DirectCandidatesJson = JsonSerializer.Serialize(
-            context.DirectCandidates.Select(c => new PersistedCandidateDto(c.Host.Value, c.Port.Value, (int)c.Kind)).ToList());
-        entity.IsGroupTransfer = context.IsGroupTransfer;
-        entity.SenderCertSha256 = context.SenderCertSha256?.Span.ToArray();
-    }
-
-    private sealed record PersistedCandidateDto(string Host, int Port, int Kind);
-
-    private async Task<TransferSession> ReconstituteSessionAsync(TransferSessionEntity entity, CancellationToken ct)
-    {
-        List<ManifestFileEntity> fileEntities = await _dbContext.ManifestFiles
-            .AsNoTracking()
-            .Where(f => f.TransferId == entity.TransferId)
-            .OrderBy(f => f.FileIndex)
+            .Where(s => s.State == (int)TransferSessionState.PendingConsent)
+            .Select(s => new { s.TransferId, s.CreatedAtUtc })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        return pendingSessions
+            .Where(s => s.CreatedAtUtc < createdBeforeUtc)
+            .Select(s => TransferSessionId.FromGuid(s.TransferId))
+            .ToList();
+    }
+
+    private static TransferSession ReconstituteSession(
+        TransferSessionEntity entity,
+        IReadOnlyList<ManifestFileEntity> fileEntities,
+        TransferBitfieldEntity? bitfieldEntity,
+        IReadOnlyList<TransferSessionRecipientEntity> recipientEntities,
+        IReadOnlyList<TransferSessionSelectedFileEntity>? selectedFileEntities)
+    {
         List<FileEntry> files = new(fileEntities.Count);
         foreach (ManifestFileEntity f in fileEntities)
         {
@@ -338,37 +390,34 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             merkleTree,
             files);
 
-        TransferBitfieldEntity? bitfieldEntity = await _dbContext.TransferBitfields
-            .AsNoTracking()
-            .FirstOrDefaultAsync(b => b.TransferId == entity.TransferId, ct)
-            .ConfigureAwait(false);
-
         Bitfield bitfield = bitfieldEntity != null && bitfieldEntity.BitfieldBytes.Length > 0
             ? Bitfield.FromBytes(bitfieldEntity.BitfieldBytes, manifest.TotalChunks)
             : Bitfield.Empty(manifest.TotalChunks);
 
         SelectedFileIndices? selectedFiles = null;
-        if (!string.IsNullOrEmpty(entity.SelectedFilesJson))
+        if (entity.AllFilesSelected)
         {
-            var fileIndices = JsonSerializer.Deserialize<List<int>>(entity.SelectedFilesJson);
-            if (fileIndices != null)
-            {
-                selectedFiles = SelectedFileIndices.FromIndices(
-                    fileIndices.Select(FileIndex.FromInt),
-                    manifest.TotalFiles);
-            }
+            selectedFiles = SelectedFileIndices.All(manifest.TotalFiles);
+        }
+        else if (selectedFileEntities != null && selectedFileEntities.Count > 0)
+        {
+            selectedFiles = SelectedFileIndices.FromIndices(
+                selectedFileEntities.Select(e => FileIndex.FromInt(e.FileIndex)),
+                manifest.TotalFiles);
         }
 
-        Domain.Identities.PublicIdentityId initiatorId = Domain.Identities.PublicIdentityId.FromBytes(entity.InitiatorId);
+        PublicIdentityId initiatorId = PublicIdentityId.FromBytes(entity.InitiatorId);
         TransferTopology topology = entity.TopologyType switch
         {
             1 => new TransferTopology.OneToOne(
                 initiatorId,
-                Domain.Identities.PublicIdentityId.FromGuid(Guid.Parse(JsonSerializer.Deserialize<List<string>>(entity.RecipientsJson)![0]))),
+                recipientEntities.Count > 0
+                    ? PublicIdentityId.FromBytes(recipientEntities[0].RecipientIdentityId)
+                    : initiatorId),
             2 => new TransferTopology.MultiPeer(
                 initiatorId,
-                JsonSerializer.Deserialize<List<string>>(entity.RecipientsJson)!
-                    .Select(s => Domain.Identities.PublicIdentityId.FromGuid(Guid.Parse(s)))
+                recipientEntities
+                    .Select(r => PublicIdentityId.FromBytes(r.RecipientIdentityId))
                     .ToList()),
             _ => new TransferTopology.IncomingStaged(initiatorId)
         };

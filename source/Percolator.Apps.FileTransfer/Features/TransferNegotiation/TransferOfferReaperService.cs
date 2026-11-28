@@ -11,22 +11,23 @@ public sealed class TransferOfferReaperService : ITransferOfferReaperService
 
     public TransferOfferReaperService(ITransferSessionRepository sessionRepository, IDateTimeProvider clock)
     {
-        _sessionRepository = sessionRepository;
-        _clock = clock;
+        _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
     public async ValueTask<int> SweepAndExpireStaleOffersAsync(TimeSpan retentionWindow, CancellationToken ct = default)
     {
-        IReadOnlyList<TransferSession> activeSessions = await _sessionRepository.GetActiveSessionsAsync(ct);
-        DateTimeOffset now = _clock.UtcNow;
+        DateTimeOffset threshold = _clock.UtcNow - retentionWindow;
+        IReadOnlyList<TransferSessionId> expiredOfferIds = await _sessionRepository.GetExpiredPendingOfferIdsAsync(threshold, ct).ConfigureAwait(false);
         int expiredCount = 0;
 
-        foreach (TransferSession session in activeSessions)
+        foreach (TransferSessionId sessionId in expiredOfferIds)
         {
-            if (session.State == TransferSessionState.PendingConsent && (now - session.CreatedAtUtc) > retentionWindow)
+            TransferSession? session = await _sessionRepository.GetSessionByIdAsync(sessionId, ct).ConfigureAwait(false);
+            if (session != null && session.State == TransferSessionState.PendingConsent)
             {
                 session.ExpireOffer(_clock);
-                await _sessionRepository.SaveSessionAsync(session, ct);
+                await _sessionRepository.SaveSessionAsync(session, ct).ConfigureAwait(false);
                 expiredCount++;
             }
         }

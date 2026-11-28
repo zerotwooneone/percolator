@@ -3,7 +3,6 @@ namespace Percolator.Infrastructure.Persistence.Repositories;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +12,7 @@ using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Domain.Channels.ValueObjects;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
 
@@ -77,19 +76,19 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             .ConfigureAwait(false);
 
         HashSet<int>? selectedIndices = null;
-        if (!string.IsNullOrEmpty(sessionEntity.SelectedFilesJson))
+        if (!sessionEntity.AllFilesSelected)
         {
-            var parsed = JsonSerializer.Deserialize<List<int>>(sessionEntity.SelectedFilesJson);
-            if (parsed != null)
+            List<TransferSessionSelectedFileEntity> selectedEntities = await _dbContext.TransferSessionSelectedFiles
+                .AsNoTracking()
+                .Where(s => s.TransferId == sessionId.Value)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            if (selectedEntities.Count > 0)
             {
-                selectedIndices = new HashSet<int>(parsed);
+                selectedIndices = new HashSet<int>(selectedEntities.Select(s => s.FileIndex));
             }
         }
-
-        TransferBitfieldEntity? bitfieldEntity = await _dbContext.TransferBitfields
-            .AsNoTracking()
-            .FirstOrDefaultAsync(b => b.TransferId == sessionId.Value, ct)
-            .ConfigureAwait(false);
 
         bool isSessionComplete = sessionEntity.State == (int)TransferSessionState.Completed
                               || sessionEntity.State == (int)TransferSessionState.Seeding;
@@ -130,23 +129,38 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             downloadedBytes = entity.TotalSizeBytes;
         }
 
-        Domain.Identities.PublicIdentityId initiatorId = Domain.Identities.PublicIdentityId.FromBytes(entity.InitiatorId);
+        TransferSessionTransportContextEntity? transportContext = await _dbContext.TransferSessionTransportContexts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.TransferId == entity.TransferId, ct)
+            .ConfigureAwait(false);
+
+        List<TransferSessionRecipientEntity> recipientEntities = await _dbContext.TransferSessionRecipients
+            .AsNoTracking()
+            .Where(r => r.TransferId == entity.TransferId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        PublicIdentityId initiatorId = PublicIdentityId.FromBytes(entity.InitiatorId);
         TransferTopology topology = entity.TopologyType switch
         {
             1 => new TransferTopology.OneToOne(
                 initiatorId,
-                Domain.Identities.PublicIdentityId.FromGuid(Guid.Parse(JsonSerializer.Deserialize<List<string>>(entity.RecipientsJson)![0]))),
+                recipientEntities.Count > 0
+                    ? PublicIdentityId.FromBytes(recipientEntities[0].RecipientIdentityId)
+                    : initiatorId),
             2 => new TransferTopology.MultiPeer(
                 initiatorId,
-                JsonSerializer.Deserialize<List<string>>(entity.RecipientsJson)!
-                    .Select(s => Domain.Identities.PublicIdentityId.FromGuid(Guid.Parse(s)))
+                recipientEntities
+                    .Select(r => PublicIdentityId.FromBytes(r.RecipientIdentityId))
                     .ToList()),
             _ => new TransferTopology.IncomingStaged(initiatorId)
         };
 
-        RootDirectoryPath? localRoot = !string.IsNullOrWhiteSpace(entity.LocalRootPath)
-            ? RootDirectoryPath.Parse(entity.LocalRootPath)
+        RootDirectoryPath? localRoot = !string.IsNullOrWhiteSpace(transportContext?.LocalRootPath)
+            ? RootDirectoryPath.Parse(transportContext.LocalRootPath)
             : null;
+
+        Guid channelGuid = transportContext?.ChannelId ?? Guid.Empty;
 
         double currentRatio = downloadedBytes > 0 ? (double)entity.UploadedSizeBytes / downloadedBytes : 0.0;
 
@@ -171,6 +185,6 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             (TransferRole)entity.Role,
             entity.CreatedAtUtc,
             entity.CompletedAtUtc,
-            entity.ChannelId != Guid.Empty ? ChannelId.FromGuid(entity.ChannelId) : null);
+            channelGuid != Guid.Empty ? ChannelId.FromGuid(channelGuid) : null);
     }
 }

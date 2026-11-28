@@ -32,7 +32,6 @@ public sealed class FakeDateTimeProvider : IDateTimeProvider
 public sealed class InMemoryTransferSessionRepository : ITransferSessionRepository
 {
     private readonly ConcurrentDictionary<TransferSessionId, TransferSession> _sessions = new();
-    private readonly ConcurrentDictionary<TransferSessionId, TransferSessionTransportContext> _transportContexts = new();
 
     public ValueTask SaveSessionAsync(TransferSession session, CancellationToken ct = default)
     {
@@ -51,8 +50,23 @@ public sealed class InMemoryTransferSessionRepository : ITransferSessionReposito
         return ValueTask.FromResult<IReadOnlyList<TransferSession>>(_sessions.Values.ToList());
     }
 
+    public ValueTask<IReadOnlyList<TransferSessionId>> GetExpiredPendingOfferIdsAsync(DateTimeOffset createdBeforeUtc, CancellationToken ct = default)
+    {
+        var expired = _sessions.Values
+            .Where(s => s.State == TransferSessionState.PendingConsent && s.CreatedAtUtc < createdBeforeUtc)
+            .Select(s => s.Id)
+            .ToList();
+        return ValueTask.FromResult<IReadOnlyList<TransferSessionId>>(expired);
+    }
+}
+
+public sealed class InMemoryTransferSessionTransportStore : ITransferSessionTransportStore
+{
+    private readonly ConcurrentDictionary<TransferSessionId, TransferSessionTransportContext> _transportContexts = new();
+
     public ValueTask SaveTransportContextAsync(TransferSessionTransportContext context, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
         _transportContexts[context.SessionId] = context;
         return ValueTask.CompletedTask;
     }
@@ -61,6 +75,12 @@ public sealed class InMemoryTransferSessionRepository : ITransferSessionReposito
     {
         _transportContexts.TryGetValue(sessionId, out var ctx);
         return ValueTask.FromResult<TransferSessionTransportContext?>(ctx);
+    }
+
+    public ValueTask DeleteTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    {
+        _transportContexts.TryRemove(sessionId, out _);
+        return ValueTask.CompletedTask;
     }
 }
 

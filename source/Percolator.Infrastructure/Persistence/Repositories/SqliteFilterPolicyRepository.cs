@@ -3,14 +3,13 @@ namespace Percolator.Infrastructure.Persistence.Repositories;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Percolator.Apps.FileTransfer.Features.IngressControl;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
-using Percolator.Domain.Identities.ValueObjects;
+using Percolator.Domain.Identities;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
 
@@ -42,18 +41,42 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
             dbContext.FilterPolicies.Add(existing);
         }
 
-        existing.BlockedPeersJson = JsonSerializer.Serialize(
-            policy.BlockedPeers.Select(p => p.Value.ToString()));
-
-        existing.BlockedRelaysJson = JsonSerializer.Serialize(
-            policy.BlockedRelays.Select(r => r.Value));
-
         existing.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        List<FilterPolicyBlockedPeerEntity> existingPeers = await dbContext.FilterPolicyBlockedPeers
+            .Where(p => p.OwnerId == ownerBytes)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        dbContext.FilterPolicyBlockedPeers.RemoveRange(existingPeers);
+
+        foreach (PublicIdentityId peer in policy.BlockedPeers)
+        {
+            dbContext.FilterPolicyBlockedPeers.Add(new FilterPolicyBlockedPeerEntity
+            {
+                OwnerId = ownerBytes,
+                BlockedPeerId = peer.ToByteArray()
+            });
+        }
+
+        List<FilterPolicyBlockedRelayEntity> existingRelays = await dbContext.FilterPolicyBlockedRelays
+            .Where(r => r.OwnerId == ownerBytes)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        dbContext.FilterPolicyBlockedRelays.RemoveRange(existingRelays);
+
+        foreach (RelayPipeEndpointUri relay in policy.BlockedRelays)
+        {
+            dbContext.FilterPolicyBlockedRelays.Add(new FilterPolicyBlockedRelayEntity
+            {
+                OwnerId = ownerBytes,
+                RelayEndpointUri = relay.Value
+            });
+        }
 
         await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    public async ValueTask<FileTransferFilterPolicy> GetPolicyAsync(Domain.Identities.PublicIdentityId ownerId, CancellationToken ct = default)
+    public async ValueTask<FileTransferFilterPolicy> GetPolicyAsync(PublicIdentityId ownerId, CancellationToken ct = default)
     {
         await using PercolatorDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         byte[] ownerBytes = ownerId.ToByteArray();
@@ -67,33 +90,28 @@ public sealed class SqliteFilterPolicyRepository : IFileTransferFilterPolicyRepo
             return FileTransferFilterPolicy.DefaultPermissive(ownerId);
         }
 
-        HashSet<Domain.Identities.PublicIdentityId> blockedPeers = new();
-        if (!string.IsNullOrEmpty(entity.BlockedPeersJson))
+        List<FilterPolicyBlockedPeerEntity> blockedPeerEntities = await dbContext.FilterPolicyBlockedPeers
+            .AsNoTracking()
+            .Where(p => p.OwnerId == ownerBytes)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        HashSet<PublicIdentityId> blockedPeers = new();
+        foreach (FilterPolicyBlockedPeerEntity p in blockedPeerEntities)
         {
-            var peerGuids = JsonSerializer.Deserialize<List<string>>(entity.BlockedPeersJson);
-            if (peerGuids != null)
-            {
-                foreach (string guidStr in peerGuids)
-                {
-                    if (Guid.TryParse(guidStr, out Guid g))
-                    {
-                        blockedPeers.Add(Domain.Identities.PublicIdentityId.FromGuid(g));
-                    }
-                }
-            }
+            blockedPeers.Add(PublicIdentityId.FromBytes(p.BlockedPeerId));
         }
 
+        List<FilterPolicyBlockedRelayEntity> blockedRelayEntities = await dbContext.FilterPolicyBlockedRelays
+            .AsNoTracking()
+            .Where(r => r.OwnerId == ownerBytes)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         HashSet<RelayPipeEndpointUri> blockedRelays = new();
-        if (!string.IsNullOrEmpty(entity.BlockedRelaysJson))
+        foreach (FilterPolicyBlockedRelayEntity r in blockedRelayEntities)
         {
-            var relayUris = JsonSerializer.Deserialize<List<string>>(entity.BlockedRelaysJson);
-            if (relayUris != null)
-            {
-                foreach (string uriStr in relayUris)
-                {
-                    blockedRelays.Add(RelayPipeEndpointUri.Parse(uriStr));
-                }
-            }
+            blockedRelays.Add(RelayPipeEndpointUri.Parse(r.RelayEndpointUri));
         }
 
         return new FileTransferFilterPolicy(ownerId, blockedPeers, blockedRelays);

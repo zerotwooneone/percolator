@@ -29,6 +29,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
     private readonly ITransferSessionRuntime _runtime;
     private readonly ITransferSessionCertificateStore _certificateStore;
     private readonly FileTransferIngressFilter _ingressFilter;
+    private readonly ITransferSessionTransportStore _transportStore;
 
     public FileTransferActionHandler(
         ITransferSessionRepository sessionRepository,
@@ -41,7 +42,8 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         IBlobStorageService blobStorage,
         INetworkEndpointDiscoveryPort endpointDiscovery,
         ITransferSessionRuntime runtime,
-        ITransferSessionCertificateStore certificateStore)
+        ITransferSessionCertificateStore certificateStore,
+        ITransferSessionTransportStore transportStore)
     {
         _sessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
         _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
@@ -54,6 +56,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         _endpointDiscovery = endpointDiscovery ?? throw new ArgumentNullException(nameof(endpointDiscovery));
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _certificateStore = certificateStore ?? throw new ArgumentNullException(nameof(certificateStore));
+        _transportStore = transportStore ?? throw new ArgumentNullException(nameof(transportStore));
     }
 
     public async ValueTask<DomainResult<TransferSessionId>> InitiateTransferAsync(
@@ -180,7 +183,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             SenderCertSha256: certMaterial.Fingerprint);
 
         await _sessionRepository.SaveSessionAsync(session, ct);
-        await _sessionRepository.SaveTransportContextAsync(transportContext, ct);
+        await _transportStore.SaveTransportContextAsync(transportContext, ct);
         await _runtime.StartOrUpdateSessionAsync(
             session,
             transportContext,
@@ -339,7 +342,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
         using TransferSessionCertificateMaterial certMaterial = await _certificateStore.GetOrCreateAsync(sessionId, ct);
 
-        TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+        TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(sessionId, ct);
         if (transportContext == null)
         {
             return DomainResult.Failure(new DomainError(
@@ -356,7 +359,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         PublicIdentityId localSenderId = transportContext.LocalIdentityId;
 
         TransferSessionTransportContext updatedContext = transportContext with { LocalRootPath = destinationFolder };
-        await _sessionRepository.SaveTransportContextAsync(updatedContext, ct);
+        await _transportStore.SaveTransportContextAsync(updatedContext, ct);
 
         // Announce to blinded Exchange swarm tracker (zero Persona IDs, zero IP candidates)
         SwarmPeerRole role = session.IsDownloadComplete ? SwarmPeerRole.Seeder : SwarmPeerRole.Leecher;
@@ -453,7 +456,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
             if (!wasActiveInRuntime)
             {
-                TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+                TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(sessionId, ct);
                 if (transportContext != null)
                 {
                     await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
@@ -478,7 +481,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
         if (result.IsSuccess)
         {
-            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+            TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(sessionId, ct);
             if (transportContext?.LocalRootPath != null &&
                 session.Role == TransferRole.Recipient &&
                 !session.IsDownloadComplete)
@@ -600,7 +603,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
 
             if (!wasActiveInRuntime)
             {
-                TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+                TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(sessionId, ct);
                 if (transportContext != null)
                 {
                     await _trackerPort.UnregisterAsync(transportContext.SwarmRendezvousId, transportContext.EphemeralPeerId, ct: ct);
@@ -622,7 +625,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         {
             await _sessionRepository.SaveSessionAsync(session, ct);
 
-            TransferSessionTransportContext? transportContext = await _sessionRepository.GetTransportContextAsync(sessionId, ct);
+            TransferSessionTransportContext? transportContext = await _transportStore.GetTransportContextAsync(sessionId, ct);
             PublicIdentityId localIdentity = transportContext?.LocalIdentityId ?? session.InitiatorId;
             ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);
 

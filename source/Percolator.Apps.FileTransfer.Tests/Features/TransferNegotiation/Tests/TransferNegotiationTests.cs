@@ -26,6 +26,7 @@ public sealed class TransferNegotiationTests
     private RecordingTrackerPort _trackerPort = null!;
     private InMemoryFilterPolicyRepository _policyRepository = null!;
     private InMemoryTransferSessionCertificateStore _certStore = null!;
+    private InMemoryTransferSessionTransportStore _transportStore = null!;
     private TransferSessionRuntime _runtime = null!;
     private TestPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
@@ -35,6 +36,7 @@ public sealed class TransferNegotiationTests
     {
         _clock = new FakeDateTimeProvider();
         _sessionRepo = new InMemoryTransferSessionRepository();
+        _transportStore = new InMemoryTransferSessionTransportStore();
         _fileStorage = new InMemoryDesktopFileStorage();
         _payloadSender = new RecordingPayloadSender();
         _trackerPort = new RecordingTrackerPort();
@@ -63,7 +65,8 @@ public sealed class TransferNegotiationTests
             new InMemoryBlobStorageService(),
             new FakeNetworkEndpointDiscoveryPort(),
             _runtime,
-            _certStore);
+            _certStore,
+            _transportStore);
     }
 
     [TearDown]
@@ -96,7 +99,7 @@ public sealed class TransferNegotiationTests
 
         TransferSession session = TransferSession.CreateIncomingStaged(sessionId, senderId, manifest, SeedRatio.Zero, _clock);
         await _sessionRepo.SaveSessionAsync(session);
-        await _sessionRepo.SaveTransportContextAsync(new TransferSessionTransportContext(
+        await _transportStore.SaveTransportContextAsync(new TransferSessionTransportContext(
             sessionId,
             ChannelId.New(),
             PublicIdentityId.New(),
@@ -178,7 +181,7 @@ public sealed class TransferNegotiationTests
 
         TransferSession session = TransferSession.CreateIncomingStaged(sessionId, senderId, manifest, SeedRatio.Zero, _clock);
         await _sessionRepo.SaveSessionAsync(session);
-        await _sessionRepo.SaveTransportContextAsync(new TransferSessionTransportContext(
+        await _transportStore.SaveTransportContextAsync(new TransferSessionTransportContext(
             sessionId,
             ChannelId.New(),
             PublicIdentityId.New(),
@@ -269,7 +272,8 @@ public sealed class TransferNegotiationTests
             new InMemoryBlobStorageService(),
             discoveryPort,
             _runtime,
-            _certStore);
+            _certStore,
+            _transportStore);
 
         DomainResult<TransferSessionId> result = await handler.InitiateTransferAsync(
             channelId,
@@ -339,7 +343,8 @@ public sealed class TransferNegotiationTests
             new InMemoryBlobStorageService(),
             new FakeNetworkEndpointDiscoveryPort(),
             _runtime,
-            _certStore);
+            _certStore,
+            _transportStore);
 
         var initiateResult = await handler.InitiateTransferAsync(
             ChannelId.New(),
@@ -381,7 +386,8 @@ public sealed class TransferNegotiationTests
             new InMemoryBlobStorageService(),
             new FakeNetworkEndpointDiscoveryPort(),
             _runtime,
-            _certStore);
+            _certStore,
+            _transportStore);
 
         var initiateResult = await handler.InitiateTransferAsync(
             ChannelId.New(),

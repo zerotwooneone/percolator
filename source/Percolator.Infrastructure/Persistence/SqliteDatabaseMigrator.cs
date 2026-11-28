@@ -48,7 +48,6 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
             }
 
             await ApplyPreKeySchemaUpgradesAsync(ct);
-            await ApplyFileTransferSchemaUpgradesAsync(ct);
             await ApplyRetiredTableCleanupAsync(ct);
 
             return DomainResult.Success();
@@ -66,57 +65,6 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
             DROP TABLE IF EXISTS "relay_rendezvous_entries";
             DROP TABLE IF EXISTS "ft_swarm_endpoints";
             """, ct);
-    }
-
-    private async Task ApplyFileTransferSchemaUpgradesAsync(CancellationToken ct)
-    {
-        var conn = _dbContext.Database.GetDbConnection();
-        if (conn.State != System.Data.ConnectionState.Open)
-        {
-            await conn.OpenAsync(ct);
-        }
-
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ft_transfer_sessions';";
-        var ftTableCount = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
-        if (ftTableCount == 0)
-        {
-            return;
-        }
-
-        cmd.CommandText = "PRAGMA table_info('ft_transfer_sessions');";
-        var ftCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using (var reader = await cmd.ExecuteReaderAsync(ct))
-        {
-            while (await reader.ReadAsync(ct))
-            {
-                ftCols.Add(reader.GetString(1));
-            }
-        }
-
-        if (!ftCols.Contains("SwarmRendezvousId"))
-        {
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "ALTER TABLE ft_transfer_sessions ADD COLUMN SwarmRendezvousId BLOB NOT NULL DEFAULT X'';", ct);
-        }
-
-        if (!ftCols.Contains("EphemeralPeerId"))
-        {
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "ALTER TABLE ft_transfer_sessions ADD COLUMN EphemeralPeerId BLOB NOT NULL DEFAULT X'';", ct);
-        }
-
-        if (!ftCols.Contains("IsGroupTransfer"))
-        {
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "ALTER TABLE ft_transfer_sessions ADD COLUMN IsGroupTransfer INTEGER NOT NULL DEFAULT 0;", ct);
-        }
-
-        if (!ftCols.Contains("SenderCertSha256"))
-        {
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "ALTER TABLE ft_transfer_sessions ADD COLUMN SenderCertSha256 BLOB NULL;", ct);
-        }
     }
 
     private async Task ApplyPreKeySchemaUpgradesAsync(CancellationToken ct)
@@ -189,15 +137,5 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
                     """, ct);
             }
         }
-
-        await _dbContext.Database.ExecuteSqlRawAsync("""
-            CREATE TABLE IF NOT EXISTS "ft_session_certificates" (
-                "TransferId" TEXT NOT NULL CONSTRAINT "PK_ft_session_certificates" PRIMARY KEY,
-                "CertSha256" BLOB NOT NULL,
-                "CertificateDer" BLOB NOT NULL,
-                "PrivateKeyPkcs8" BLOB NOT NULL,
-                "CreatedAtUtc" TEXT NOT NULL
-            );
-            """, ct);
     }
 }

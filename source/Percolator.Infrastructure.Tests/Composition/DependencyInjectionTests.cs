@@ -150,6 +150,7 @@ public sealed class DependencyInjectionTests
         // 10. File Transfer & Swarm
         sp.GetRequiredService<ITransferPeerTransport>().Should().NotBeNull();
         sp.GetRequiredService<ITransferSessionCertificateStore>().Should().NotBeNull();
+        sp.GetRequiredService<ITransferSessionTransportStore>().Should().NotBeNull();
         sp.GetRequiredService<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>().Should().NotBeNull();
         sp.GetRequiredService<IDesktopFileStorage>().Should().NotBeNull();
         sp.GetRequiredService<ITransferRateLimiter>().Should().NotBeNull();

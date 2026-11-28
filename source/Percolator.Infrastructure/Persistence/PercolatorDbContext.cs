@@ -65,6 +65,12 @@ public class PercolatorDbContext : DbContext
     public DbSet<TransferBitfieldEntity> TransferBitfields => Set<TransferBitfieldEntity>();
     public DbSet<FilterPolicyEntity> FilterPolicies => Set<FilterPolicyEntity>();
     public DbSet<TransferSessionCertificateEntity> TransferSessionCertificates => Set<TransferSessionCertificateEntity>();
+    public DbSet<TransferSessionRecipientEntity> TransferSessionRecipients => Set<TransferSessionRecipientEntity>();
+    public DbSet<TransferSessionSelectedFileEntity> TransferSessionSelectedFiles => Set<TransferSessionSelectedFileEntity>();
+    public DbSet<TransferSessionTransportContextEntity> TransferSessionTransportContexts => Set<TransferSessionTransportContextEntity>();
+    public DbSet<TransferSessionDirectCandidateEntity> TransferSessionDirectCandidates => Set<TransferSessionDirectCandidateEntity>();
+    public DbSet<FilterPolicyBlockedPeerEntity> FilterPolicyBlockedPeers => Set<FilterPolicyBlockedPeerEntity>();
+    public DbSet<FilterPolicyBlockedRelayEntity> FilterPolicyBlockedRelays => Set<FilterPolicyBlockedRelayEntity>();
     public DbSet<IdentitySettingsEntity> IdentitySettings => Set<IdentitySettingsEntity>();
     public DbSet<AppSettingEntity> AppSettings => Set<AppSettingEntity>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -463,15 +469,9 @@ public class PercolatorDbContext : DbContext
         {
             entity.ToTable("ft_transfer_sessions");
             entity.HasKey(e => e.TransferId);
-            entity.Property(e => e.LocalIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.InitiatorId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.MerkleRoot).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
             entity.Property(e => e.ConcatenatedLeaves).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.SwarmRendezvousId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.EphemeralPeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
-            entity.Property(e => e.SenderCertSha256).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
         // 35. File Transfer Manifest Files (Chunk 4.4)
         modelBuilder.Entity<ManifestFileEntity>(entity =>
@@ -494,6 +494,49 @@ public class PercolatorDbContext : DbContext
                 .HasForeignKey<TransferBitfieldEntity>(e => e.TransferId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+        // 37a. File Transfer Session Recipients
+        modelBuilder.Entity<TransferSessionRecipientEntity>(entity =>
+        {
+            entity.ToTable("ft_session_recipients");
+            entity.HasKey(e => new { e.TransferId, e.RecipientIdentityId });
+            entity.Property(e => e.RecipientIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<TransferSessionEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.TransferId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 37b. File Transfer Session Selected Files
+        modelBuilder.Entity<TransferSessionSelectedFileEntity>(entity =>
+        {
+            entity.ToTable("ft_session_selected_files");
+            entity.HasKey(e => new { e.TransferId, e.FileIndex });
+            entity.HasOne<TransferSessionEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.TransferId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 37c. File Transfer Session Transport Contexts (Independent table, matching ft_session_certificates)
+        modelBuilder.Entity<TransferSessionTransportContextEntity>(entity =>
+        {
+            entity.ToTable("ft_session_transport_contexts");
+            entity.HasKey(e => e.TransferId);
+            entity.Property(e => e.LocalIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.SwarmRendezvousId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.EphemeralPeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.SenderCertSha256).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+        });
+        // 37d. File Transfer Session Direct Candidates
+        modelBuilder.Entity<TransferSessionDirectCandidateEntity>(entity =>
+        {
+            entity.ToTable("ft_session_direct_candidates");
+            entity.HasKey(e => new { e.TransferId, e.Host, e.Port });
+            entity.HasOne<TransferSessionTransportContextEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.TransferId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         // 38. File Transfer Filter Policies (Chunk 4.4)
         modelBuilder.Entity<FilterPolicyEntity>(entity =>
         {
@@ -501,7 +544,30 @@ public class PercolatorDbContext : DbContext
             entity.HasKey(e => e.OwnerId);
             entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
         });
-        // 38b. File Transfer Ephemeral Session Certificates
+        // 38a. File Transfer Filter Policy Blocked Peers
+        modelBuilder.Entity<FilterPolicyBlockedPeerEntity>(entity =>
+        {
+            entity.ToTable("ft_filter_policy_blocked_peers");
+            entity.HasKey(e => new { e.OwnerId, e.BlockedPeerId });
+            entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.Property(e => e.BlockedPeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<FilterPolicyEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.OwnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 38b. File Transfer Filter Policy Blocked Relays
+        modelBuilder.Entity<FilterPolicyBlockedRelayEntity>(entity =>
+        {
+            entity.ToTable("ft_filter_policy_blocked_relays");
+            entity.HasKey(e => new { e.OwnerId, e.RelayEndpointUri });
+            entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+            entity.HasOne<FilterPolicyEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.OwnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // 38c. File Transfer Ephemeral Session Certificates
         modelBuilder.Entity<TransferSessionCertificateEntity>(entity =>
         {
             entity.ToTable("ft_session_certificates");

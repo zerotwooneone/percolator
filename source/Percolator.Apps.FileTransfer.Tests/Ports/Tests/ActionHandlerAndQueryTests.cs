@@ -20,6 +20,7 @@ public sealed class ActionHandlerAndQueryTests
 {
     private FakeDateTimeProvider _clock = null!;
     private InMemoryTransferSessionRepository _sessionRepo = null!;
+    private InMemoryTransferSessionTransportStore _transportStore = null!;
     private InMemoryDesktopFileStorage _fileStorage = null!;
     private RecordingPayloadSender _payloadSender = null!;
     private RecordingTrackerPort _trackerPort = null!;
@@ -38,6 +39,7 @@ public sealed class ActionHandlerAndQueryTests
     {
         _clock = new FakeDateTimeProvider();
         _sessionRepo = new InMemoryTransferSessionRepository();
+        _transportStore = new InMemoryTransferSessionTransportStore();
         _fileStorage = new InMemoryDesktopFileStorage();
         _payloadSender = new RecordingPayloadSender();
         _trackerPort = new RecordingTrackerPort();
@@ -67,7 +69,8 @@ public sealed class ActionHandlerAndQueryTests
             _blobStorage,
             _endpointDiscovery,
             _runtime,
-            _certStore);
+            _certStore,
+            _transportStore);
 
         _queryService = new FileTransferQueryService(_sessionRepo);
         _reaperService = new TransferOfferReaperService(_sessionRepo, _clock);
@@ -126,7 +129,7 @@ public sealed class ActionHandlerAndQueryTests
 
         SwarmRendezvousId rendezvousId = SwarmRendezvousId.Generate();
         EphemeralSwarmPeerId ephemeralPeerId = EphemeralSwarmPeerId.Generate();
-        await _sessionRepo.SaveTransportContextAsync(new TransferSessionTransportContext(
+        await _transportStore.SaveTransportContextAsync(new TransferSessionTransportContext(
             sessionId,
             ChannelId.New(),
             initiator,
@@ -178,7 +181,7 @@ public sealed class ActionHandlerAndQueryTests
         sentOffer.AppId.Should().Be(AppId.FileTransferControl);
 
         // Verify transport context was persisted with blinded rendezvous/peer IDs and tracker announced Seeder role
-        TransferSessionTransportContext? transportCtx = await _sessionRepo.GetTransportContextAsync(sessionId);
+        TransferSessionTransportContext? transportCtx = await _transportStore.GetTransportContextAsync(sessionId);
         transportCtx.Should().NotBeNull();
         _trackerPort.Announced.Should().ContainSingle(a =>
             a.Rendezvous == transportCtx!.SwarmRendezvousId &&
@@ -233,6 +236,7 @@ public sealed class ActionHandlerAndQueryTests
 
         // Dispatch the offer payload on the recipient's FileTransferPayloadHandler
         InMemoryTransferSessionRepository recipientRepo = new();
+        InMemoryTransferSessionTransportStore recipientTransportStore = new();
         InMemoryFilterPolicyRepository policyRepo = new();
         var payloadHandler = new FileTransferPayloadHandler(
             recipientRepo,
@@ -242,7 +246,8 @@ public sealed class ActionHandlerAndQueryTests
             _blobStorage,
             _runtime,
             new DirectBackgroundPayloadDispatcher(_payloadSender),
-            _certStore);
+            _certStore,
+            recipientTransportStore);
 
         var inboundCtx = new InboundPayloadContext(
             channelId,
@@ -308,6 +313,7 @@ public sealed class ActionHandlerAndQueryTests
             new InMemoryEventBusForTests(),
             new TransferSessionRuntimeOptions());
 
+        InMemoryTransferSessionTransportStore recipientTransportStore = new();
         var payloadHandler = new FileTransferPayloadHandler(
             recipientRepo,
             policyRepo,
@@ -316,7 +322,8 @@ public sealed class ActionHandlerAndQueryTests
             _blobStorage,
             recipientRuntime,
             new DirectBackgroundPayloadDispatcher(recipientSender),
-            recipientCertStore);
+            recipientCertStore,
+            recipientTransportStore);
 
         await payloadHandler.HandleInboundAsync(new InboundPayloadContext(
             channelId,
@@ -338,7 +345,8 @@ public sealed class ActionHandlerAndQueryTests
             _blobStorage,
             _endpointDiscovery,
             recipientRuntime,
-            recipientCertStore);
+            recipientCertStore,
+            recipientTransportStore);
 
         DomainResult acceptResult = await recipientActionHandler.AcceptTransferAsync(
             sessionId,
@@ -352,7 +360,7 @@ public sealed class ActionHandlerAndQueryTests
         acceptedSession.LocalBitfield.HasChunk(ChunkIndex.FromInt(1)).Should().BeFalse();
 
         // 2. Verify Leecher announced to tracker using blinded EphemeralSwarmPeerId
-        TransferSessionTransportContext? recipientCtx = await recipientRepo.GetTransportContextAsync(sessionId);
+        TransferSessionTransportContext? recipientCtx = await recipientTransportStore.GetTransportContextAsync(sessionId);
         recipientCtx.Should().NotBeNull();
         recipientTracker.Announced.Should().ContainSingle(a =>
             a.Rendezvous == recipientCtx!.SwarmRendezvousId &&
