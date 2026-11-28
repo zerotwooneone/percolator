@@ -2018,184 +2018,717 @@ Peer introductions live inside **`Percolator.Apps.Chat`** as a standard E2E Doub
 
 ---
 
-### 16.5 Part E — File Transfer DDD & Hexagonal Architecture Hardening (`FT-007` to `FT-009`)
+### 16.5 Part E — File Transfer DDD, Hexagonal Architecture & High-Throughput Hardening (`FT-007` to `FT-012`)
 
-#### Ticket `FT-007` — Normalized SQLite Relational Child Tables & `ITransferSessionTransportStore` Application Port Decoupling
+#### Ticket `FT-007` — Normalized SQLite Relational Tables, Bulk Persistence & Dedicated `ITransferSessionTransportStore` Port
 - **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Infrastructure.Tests`, `Percolator.Apps.FileTransfer.Tests`
 - **Dependencies:** `FT-006`
-- **Architectural Rationale:**
-  - `ITransferSessionRepository` currently persists non-aggregate transport parameters alongside `TransferSession` via side-door methods (`SaveTransportContextAsync`, `GetTransportContextAsync`) and uses an in-memory `ConcurrentDictionary` fallback in `SqliteTransferSessionRepository`.
-  - Collections of sub-entities (`SelectedFilesJson`, `RecipientsJson`, `DirectCandidatesJson`) are stored as serialized JSON strings in `TransferSessionEntity` columns instead of normalized relational child tables with foreign keys.
-- **Implementation Details:**
-  1. **Extract Application Port:**
-     - Create `Percolator.Apps.FileTransfer/Ports/ITransferSessionTransportStore.cs`:
-       ```csharp
-       namespace Percolator.Apps.FileTransfer.Ports;
-       using System.Threading;
-       using System.Threading.Tasks;
-       using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
-       using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+- **Architectural Defects Addressed:**
+  - `ITransferSessionRepository` leaks non-aggregate transport columns onto `ft_transfer_sessions`, declares a `private static readonly ConcurrentDictionary` fallback + Default Interface Methods inside the port interface, and forces `SqliteTransferSessionRepository` to maintain an in-memory `_transportContexts` cache.
+  - Five relational collections are stored as JSON columns (`TransferSessionEntity.RecipientsJson`, `SelectedFilesJson`, `DirectCandidatesJson`; `FilterPolicyEntity.BlockedPeersJson`, `BlockedRelaysJson`).
+  - `SqliteTransferSessionRepository.GetActiveSessionsAsync` executes an N+1 query loop per session, contains an unused orphan `SaveBitfieldAsync` method, and inserts `ft_manifest_files` one EF-tracked entity at a time (stalls for ~15 s on 50k-file bundles like `node_modules`).
+  - `TransferOfferReaperService` calls `GetActiveSessionsAsync()` on every sweep, loading 50k `ManifestFileEntity` rows per active session just to check `PendingConsent` expiration timestamps.
+  - `SqlCipherPragmaInterceptor.StandardWalPragmas` omits `PRAGMA busy_timeout`, causing immediate `SQLITE_BUSY` failures when multiple concurrent transfers checkpoint alongside chat/outbox writes.
+  - `SqliteDatabaseMigrator` contains two broken PascalCase file-transfer schema-upgrade DDL blocks that mismatch `PercolatorDbContext`'s `ToSnakeCase` convention: `ApplyFileTransferSchemaUpgradesAsync` (lines 71–120, adding PascalCase transport columns to `ft_transfer_sessions`) and lines 193–201 inside `ApplyPreKeySchemaUpgradesAsync` (creating `"ft_session_certificates"` with PascalCase columns).
+  - **Schema Policy (Zero EF Migrations):** There are zero live clients; the SQLite database file will be deleted before running the app. `FT-007`–`FT-012` MUST introduce **zero EF Core migrations** and **zero manual `ALTER TABLE` / `CREATE TABLE` upgrade DDL** — fresh schema creation relies exclusively on `PercolatorDbContext` + `Database.GenerateCreateScript()`.
+- **Exact Implementation Specification:**
+  1. **Create `Percolator.Apps.FileTransfer/Ports/ITransferSessionTransportStore.cs`:**
+     ```csharp
+     using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+     using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
-       public interface ITransferSessionTransportStore
+     namespace Percolator.Apps.FileTransfer.Ports;
+
+     public interface ITransferSessionTransportStore
+     {
+         ValueTask SaveTransportContextAsync(TransferSessionTransportContext context, CancellationToken ct = default);
+         ValueTask<TransferSessionTransportContext?> GetTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default);
+         ValueTask DeleteTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default);
+     }
+     ```
+  2. **Clean `Percolator.Apps.FileTransfer/Ports/ITransferSessionRepository.cs` & Optimize `TransferOfferReaperService`:**
+     - Delete `using System.Collections.Concurrent;`, `using Percolator.Apps.FileTransfer.Features.TransferNegotiation;`, `FallbackContexts`, `SaveTransportContextAsync`, and `GetTransportContextAsync`. Retain/declare:
+       - `ValueTask SaveSessionAsync(TransferSession session, CancellationToken ct = default);`
+       - `ValueTask<TransferSession?> GetSessionByIdAsync(TransferSessionId sessionId, CancellationToken ct = default);`
+       - `ValueTask<IReadOnlyList<TransferSession>> GetActiveSessionsAsync(CancellationToken ct = default);`
+       - `ValueTask<IReadOnlyList<TransferSessionId>> GetExpiredPendingOfferIdsAsync(DateTimeOffset createdBeforeUtc, CancellationToken ct = default);`
+     - In `Percolator.Apps.FileTransfer/Features/TransferNegotiation/TransferOfferReaperService.cs`: query `GetExpiredPendingOfferIdsAsync(_clock.UtcNow - retentionWindow, ct)` and only load & expire matching sessions via `GetSessionByIdAsync` + `ExpireOffer` + `SaveSessionAsync`, avoiding loading 50k-row manifests for active non-expired transfers.
+  3. **Normalize `Percolator.Infrastructure/Persistence/Entities/FileTransferEntities.cs`:**
+     - `TransferSessionEntity` (aggregate table `ft_transfer_sessions` — remove all 11 transport columns `ChannelId`, `LocalIdentityId`, `LocalRootPath`, `WanPolicy`, `SwarmRendezvousId`, `EphemeralPeerId`, `StreamAuthToken`, `RelayEndpointUri`, `RelayPipeToken`, `IsGroupTransfer`, `SenderCertSha256` AND remove `RecipientsJson`, `SelectedFilesJson`, `DirectCandidatesJson`; add `bool AllFilesSelected` so full-bundle transfers store **0 rows** in `ft_session_selected_files`):
+       ```csharp
+       public sealed class TransferSessionEntity
        {
-           ValueTask SaveTransportContextAsync(TransferSessionTransportContext context, CancellationToken ct = default);
-           ValueTask<TransferSessionTransportContext?> GetTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default);
-           ValueTask DeleteTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default);
+           public Guid TransferId { get; set; }
+           public byte[] InitiatorId { get; set; } = Array.Empty<byte>();
+           public int TopologyType { get; set; }
+           public int Role { get; set; }
+           public int State { get; set; }
+           public string RootName { get; set; } = string.Empty;
+           public long TotalSizeBytes { get; set; }
+           public int ChunkSizeBytes { get; set; }
+           public byte[] MerkleRoot { get; set; } = Array.Empty<byte>();
+           public byte[] ConcatenatedLeaves { get; set; } = Array.Empty<byte>();
+           public bool AllFilesSelected { get; set; }
+           public double TargetSeedRatio { get; set; }
+           public long UploadedSizeBytes { get; set; }
+           public DateTimeOffset CreatedAtUtc { get; set; }
+           public DateTimeOffset? CompletedAtUtc { get; set; }
        }
        ```
-     - Remove `SaveTransportContextAsync` and `GetTransportContextAsync` from `Percolator.Apps.FileTransfer/Ports/ITransferSessionRepository.cs`.
-  2. **Create Normalized SQLite Entity Tables:**
-     - In `Percolator.Infrastructure/Persistence/Entities/FileTransferEntities.cs`:
-       - Remove `SelectedFilesJson`, `RecipientsJson`, and `DirectCandidatesJson` from `TransferSessionEntity`.
-       - Add child entities:
-         ```csharp
-         public sealed class TransferSessionRecipientEntity
-         {
-             public Guid TransferId { get; set; }
-             public byte[] RecipientIdentityId { get; set; } = Array.Empty<byte>();
-         }
-
-         public sealed class TransferSessionSelectedFileEntity
-         {
-             public Guid TransferId { get; set; }
-             public int FileIndex { get; set; }
-         }
-
-         public sealed class TransferSessionDirectCandidateEntity
-         {
-             public Guid TransferId { get; set; }
-             public string Host { get; set; } = string.Empty;
-             public int Port { get; set; }
-             public int Kind { get; set; }
-         }
-         ```
-     - In `PercolatorDbContext.cs`, add `DbSet` properties and configure composite primary keys and cascading delete foreign keys:
+     - `FilterPolicyEntity` (remove `BlockedPeersJson` and `BlockedRelaysJson`):
        ```csharp
-       modelBuilder.Entity<TransferSessionRecipientEntity>(b => {
-           b.ToTable("ft_session_recipients");
-           b.HasKey(r => new { r.TransferId, r.RecipientIdentityId });
-           b.HasOne<TransferSessionEntity>().WithMany().HasForeignKey(r => r.TransferId).OnDelete(DeleteBehavior.Cascade);
+       public sealed class FilterPolicyEntity
+       {
+           public byte[] OwnerId { get; set; } = Array.Empty<byte>();
+           public DateTimeOffset UpdatedAtUtc { get; set; }
+       }
+       ```
+     - Add dedicated transport context entity and 5 normalized child entities:
+       ```csharp
+       public sealed class TransferSessionRecipientEntity
+       {
+           public Guid TransferId { get; set; }
+           public byte[] RecipientIdentityId { get; set; } = Array.Empty<byte>();
+       }
+
+       public sealed class TransferSessionSelectedFileEntity
+       {
+           public Guid TransferId { get; set; }
+           public int FileIndex { get; set; }
+       }
+
+       public sealed class TransferSessionTransportContextEntity
+       {
+           public Guid TransferId { get; set; }
+           public Guid ChannelId { get; set; }
+           public byte[] LocalIdentityId { get; set; } = Array.Empty<byte>();
+           public byte[] SwarmRendezvousId { get; set; } = Array.Empty<byte>();
+           public byte[] EphemeralPeerId { get; set; } = Array.Empty<byte>();
+           public byte[] StreamAuthToken { get; set; } = Array.Empty<byte>();
+           public int WanPolicy { get; set; }
+           public string? LocalRootPath { get; set; }
+           public string? RelayEndpointUri { get; set; }
+           public byte[]? RelayPipeToken { get; set; }
+           public bool IsGroupTransfer { get; set; }
+           public byte[]? SenderCertSha256 { get; set; }
+       }
+
+       public sealed class TransferSessionDirectCandidateEntity
+       {
+           public Guid TransferId { get; set; }
+           public string Host { get; set; } = string.Empty;
+           public int Port { get; set; }
+           public int Kind { get; set; }
+       }
+
+       public sealed class FilterPolicyBlockedPeerEntity
+       {
+           public byte[] OwnerId { get; set; } = Array.Empty<byte>();
+           public byte[] BlockedPeerId { get; set; } = Array.Empty<byte>();
+       }
+
+       public sealed class FilterPolicyBlockedRelayEntity
+       {
+           public byte[] OwnerId { get; set; } = Array.Empty<byte>();
+           public string RelayEndpointUri { get; set; } = string.Empty;
+       }
+       ```
+  4. **Configure `Percolator.Infrastructure/Persistence/PercolatorDbContext.cs` & `SqlCipherPragmaInterceptor.cs`:**
+     - In `Percolator.Infrastructure/Vault/SqlCipherPragmaInterceptor.cs` (line 14): append `PRAGMA busy_timeout = 5000;` to `StandardWalPragmas` so concurrent transfer checkpoints + chat/outbox writes wait cleanly instead of failing with immediate `SQLITE_BUSY`.
+     - Add `DbSet` properties in `PercolatorDbContext`:
+       - `TransferSessionRecipients`, `TransferSessionSelectedFiles`, `TransferSessionTransportContexts`, `TransferSessionDirectCandidates`, `FilterPolicyBlockedPeers`, `FilterPolicyBlockedRelays`.
+     - Update `TransferSessionEntity` mapping (remove BLOB configurations for columns moved to `TransferSessionTransportContextEntity`; keep `InitiatorId`, `MerkleRoot`, `ConcatenatedLeaves` with `.HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer)`).
+     - Add mappings (all column names are auto-converted to `snake_case` by the loop at lines 582–588; EVERY `byte[]` property MUST attach `byteArrayComparer`):
+       ```csharp
+       modelBuilder.Entity<TransferSessionRecipientEntity>(entity =>
+       {
+           entity.ToTable("ft_session_recipients");
+           entity.HasKey(e => new { e.TransferId, e.RecipientIdentityId });
+           entity.Property(e => e.RecipientIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.HasOne<TransferSessionEntity>()
+               .WithMany()
+               .HasForeignKey(e => e.TransferId)
+               .OnDelete(DeleteBehavior.Cascade);
        });
-       modelBuilder.Entity<TransferSessionSelectedFileEntity>(b => {
-           b.ToTable("ft_session_selected_files");
-           b.HasKey(f => new { f.TransferId, f.FileIndex });
-           b.HasOne<TransferSessionEntity>().WithMany().HasForeignKey(f => f.TransferId).OnDelete(DeleteBehavior.Cascade);
+       modelBuilder.Entity<TransferSessionSelectedFileEntity>(entity =>
+       {
+           entity.ToTable("ft_session_selected_files");
+           entity.HasKey(e => new { e.TransferId, e.FileIndex });
+           entity.HasOne<TransferSessionEntity>()
+               .WithMany()
+               .HasForeignKey(e => e.TransferId)
+               .OnDelete(DeleteBehavior.Cascade);
        });
-       modelBuilder.Entity<TransferSessionDirectCandidateEntity>(b => {
-           b.ToTable("ft_session_direct_candidates");
-           b.HasKey(c => new { c.TransferId, c.Host, c.Port });
-           b.HasOne<TransferSessionEntity>().WithMany().HasForeignKey(c => c.TransferId).OnDelete(DeleteBehavior.Cascade);
+       // Independent table (no FK to ft_transfer_sessions, matching ft_session_certificates) so write order is unconstrained.
+       modelBuilder.Entity<TransferSessionTransportContextEntity>(entity =>
+       {
+           entity.ToTable("ft_session_transport_contexts");
+           entity.HasKey(e => e.TransferId);
+           entity.Property(e => e.LocalIdentityId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.Property(e => e.SwarmRendezvousId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.Property(e => e.EphemeralPeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.Property(e => e.StreamAuthToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.Property(e => e.RelayPipeToken).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.Property(e => e.SenderCertSha256).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+       });
+       modelBuilder.Entity<TransferSessionDirectCandidateEntity>(entity =>
+       {
+           entity.ToTable("ft_session_direct_candidates");
+           entity.HasKey(e => new { e.TransferId, e.Host, e.Port });
+           entity.HasOne<TransferSessionTransportContextEntity>()
+               .WithMany()
+               .HasForeignKey(e => e.TransferId)
+               .OnDelete(DeleteBehavior.Cascade);
+       });
+       modelBuilder.Entity<FilterPolicyBlockedPeerEntity>(entity =>
+       {
+           entity.ToTable("ft_filter_policy_blocked_peers");
+           entity.HasKey(e => new { e.OwnerId, e.BlockedPeerId });
+           entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.Property(e => e.BlockedPeerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.HasOne<FilterPolicyEntity>()
+               .WithMany()
+               .HasForeignKey(e => e.OwnerId)
+               .OnDelete(DeleteBehavior.Cascade);
+       });
+       modelBuilder.Entity<FilterPolicyBlockedRelayEntity>(entity =>
+       {
+           entity.ToTable("ft_filter_policy_blocked_relays");
+           entity.HasKey(e => new { e.OwnerId, e.RelayEndpointUri });
+           entity.Property(e => e.OwnerId).HasColumnType("BLOB").Metadata.SetValueComparer(byteArrayComparer);
+           entity.HasOne<FilterPolicyEntity>()
+               .WithMany()
+               .HasForeignKey(e => e.OwnerId)
+               .OnDelete(DeleteBehavior.Cascade);
        });
        ```
-  3. **SQLite Schema Migration:**
-     - In `Percolator.Infrastructure/Persistence/SqliteDatabaseMigrator.cs`:
-       - Execute idempotent `CREATE TABLE IF NOT EXISTS "ft_session_recipients" ...`, `CREATE TABLE IF NOT EXISTS "ft_session_selected_files" ...`, `CREATE TABLE IF NOT EXISTS "ft_session_direct_candidates" ...`.
-  4. **Implement Repositories:**
-     - Create `Percolator.Infrastructure/Persistence/Repositories/SqliteTransferSessionTransportStore.cs` implementing `ITransferSessionTransportStore` with pure relational queries against `TransferSessionEntity` and `TransferSessionDirectCandidateEntity`.
-     - In `Percolator.Infrastructure/Persistence/Repositories/SqliteTransferSessionRepository.cs`:
-       - Delete the `ConcurrentDictionary<TransferSessionId, TransferSessionTransportContext> _transportContexts` cache.
-       - Reconstitute and persist `Recipients` and `SelectedFiles` strictly via child entities (`_dbContext.TransferSessionRecipients` and `_dbContext.TransferSessionSelectedFiles`), eliminating all `System.Text.Json` usage.
-  5. **Call-Site & DI Wiring:**
-     - In `FileTransferActionHandler.cs` and `FileTransferPayloadHandler.cs`: inject `ITransferSessionTransportStore` for transport context operations.
-     - In `InfrastructureServiceCollectionExtensions.cs` and `DesktopSessionServiceCollectionExtensions.cs`: register `services.AddScoped<ITransferSessionTransportStore, SqliteTransferSessionTransportStore>();`.
-     - Update `SqliteTransferSessionRepositoryTests.cs`, `TestDoubles.cs`, and `ActionHandlerAndQueryTests.cs`.
+  5. **Update `Percolator.Infrastructure/Persistence/SqliteDatabaseMigrator.cs` (Zero EF Migrations, Zero Legacy File-Transfer DDL):**
+     - Delete `ApplyFileTransferSchemaUpgradesAsync` (lines 71–120) and its call on line 51.
+     - Delete lines 193–201 inside `ApplyPreKeySchemaUpgradesAsync` (the hardcoded PascalCase `CREATE TABLE IF NOT EXISTS "ft_session_certificates"` block, which conflicts with `PercolatorDbContext`'s `ToSnakeCase` convention).
+     - Do NOT add any EF Core migrations and do NOT add manual `CREATE TABLE` / `ALTER TABLE` DDL: `MigrateAsync` lines 42–47 already execute `_dbContext.Database.GenerateCreateScript()` with `CREATE TABLE IF NOT EXISTS` for every entity in `PercolatorDbContext` using exact `snake_case` columns.
+  6. **Create `Percolator.Infrastructure/Persistence/Repositories/SqliteTransferSessionTransportStore.cs`:**
+     - Constructor: `public SqliteTransferSessionTransportStore(IDbContextFactory<PercolatorDbContext> dbContextFactory)` (thread-safe singleton, matching `SqliteTransferSessionCertificateStore` and `SqliteFilterPolicyRepository`).
+     - `SaveTransportContextAsync`: open `await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct)`, upsert `TransferSessionTransportContextEntity` by `TransferId`, remove existing `TransferSessionDirectCandidates` rows for `TransferId`, insert deduplicated `(Host, Port)` rows from `context.DirectCandidates`, `await db.SaveChangesAsync(ct)`.
+     - `GetTransportContextAsync`: open short-lived `PercolatorDbContext`, query `TransferSessionTransportContexts.AsNoTracking()` + `TransferSessionDirectCandidates.AsNoTracking()` for `sessionId.Value`; validate lengths (`SwarmRendezvousId == 32`, `EphemeralPeerId == 32`, `StreamAuthToken == 32`, `LocalIdentityId == 16`) and reconstruct `TransferSessionTransportContext`.
+     - `DeleteTransportContextAsync`: open short-lived `PercolatorDbContext`, delete matching `TransferSessionTransportContextEntity` (cascade deletes `ft_session_direct_candidates`). Note: do NOT call `DeleteTransportContextAsync` from `CancelTransferAsync` / `HandleCancelAsync` because `SqlFileTransferQueryService` needs `ChannelId` so cancelled transfers stay visible in their chat thread; reserve `DeleteTransportContextAsync` for explicit transfer deletion/pruning.
+  7. **Refactor `Percolator.Infrastructure/Persistence/Repositories/SqliteTransferSessionRepository.cs`:**
+     - Delete `using System.Collections.Concurrent;`, `using System.Text.Json;`, `_transportContexts`, `SaveTransportContextAsync`, `GetTransportContextAsync`, `ApplyTransportContext`, `PersistedCandidateDto`, and the unused orphan `SaveBitfieldAsync` method.
+     - In `SaveSessionAsync`:
+       - Wrap writes in a single DB transaction (`await using var tx = await _dbContext.Database.BeginTransactionAsync(ct)`).
+       - Set `existing.AllFilesSelected = session.SelectedFiles != null && session.SelectedFiles.SelectedCount == session.Manifest.TotalFiles.Count;`.
+       - Replace `TransferSessionRecipients` rows for `transferGuid` (load tracked existing rows -> `RemoveRange` -> insert distinct recipient `byte[]` for `OneToOne` or `MultiPeer`, none for `IncomingStaged`).
+       - Upsert `TransferBitfields` and `await _dbContext.SaveChangesAsync(ct)`.
+       - **High-file-count bulk persistence (using the active `DbConnection` + `tx.GetDbTransaction()` — zero EF `ChangeTracker` bloat on 50k+ files):**
+         - `ft_manifest_files` (insert-once when `!hasFiles`): execute a single reused parameterized `INSERT INTO ft_manifest_files (transfer_id, file_index, relative_path, file_size_bytes, start_offset, last_modified_unix_seconds) VALUES (@tid, @idx, @path, @size, @offset, @mtime)` command across `session.Manifest.Files` (formats `transferGuid` identically to EF Core's SQLite `Guid` text representation via `transferGuid.ToString().ToUpperInvariant()` — verify against EF Core's `GuidToStringConverter` output in `SqliteTransferSessionRepositoryTests`).
+         - `ft_session_selected_files`: execute `DELETE FROM ft_session_selected_files WHERE transfer_id = @tid;`, then **ONLY if `session.SelectedFiles != null && !existing.AllFilesSelected`** (partial selection), bulk-insert the subset using a single reused parameterized `INSERT INTO ft_session_selected_files (transfer_id, file_index) VALUES (@tid, @idx)` command. Full-bundle transfers (`AllFilesSelected == true`) and `PendingConsent` (`SelectedFiles == null`) write **0 rows**!
+       - Commit `await tx.CommitAsync(ct)`.
+     - Implement `GetExpiredPendingOfferIdsAsync(DateTimeOffset createdBeforeUtc, CancellationToken ct)`: query ONLY `TransferId` where `State == (int)TransferSessionState.PendingConsent` (filtering `CreatedAtUtc < createdBeforeUtc` in memory since EF SQLite stores `DateTimeOffset` as ISO-8601 text), returning `IReadOnlyList<TransferSessionId>` without touching `ft_manifest_files`.
+     - In `GetActiveSessionsAsync`: batch-load `ManifestFiles`, `TransferBitfields`, `TransferSessionRecipients`, and `TransferSessionSelectedFiles` (only for sessions with `!e.AllFilesSelected`) in 4 flat `AsNoTracking()` `.Where(x => transferIds.Contains(x.TransferId))` queries and reconstitute via a pure in-memory `ReconstituteSession(entity, files, bitfield, recipients, selectedFileIndices)` helper (shared with `GetSessionByIdAsync`), where `entity.AllFilesSelected == true` reconstitutes `SelectedFileIndices.All(manifest.TotalFiles)`.
+  8. **Refactor `Percolator.Infrastructure/Persistence/Repositories/SqliteFilterPolicyRepository.cs`:**
+     - Delete `using System.Text.Json;`.
+     - In `SavePolicyAsync`: upsert `FilterPolicyEntity` (`OwnerId`, `UpdatedAtUtc`), load existing `FilterPolicyBlockedPeers` and `FilterPolicyBlockedRelays` for `ownerBytes`, `RemoveRange` existing child rows, add current `policy.BlockedPeers` (`BlockedPeerId = p.ToByteArray()`) and `policy.BlockedRelays` (`RelayEndpointUri = r.Value`), `SaveChangesAsync(ct)`.
+     - In `GetPolicyAsync`: load `FilterPolicyEntity`, `FilterPolicyBlockedPeers`, and `FilterPolicyBlockedRelays` with `AsNoTracking()`, reconstruct `FileTransferFilterPolicy` using `PublicIdentityId.FromBytes(r.BlockedPeerId)` and `RelayPipeEndpointUri.Parse(r.RelayEndpointUri)`.
+  9. **Keep `SqlFileTransferQueryService.cs` compiling in `FT-007`** (full singleton + batch refactor follows in `FT-008`):
+     - Replace removed `SelectedFilesJson`, `RecipientsJson`, `LocalRootPath`, `ChannelId` reads on `TransferSessionEntity` with `AllFilesSelected` + queries to `TransferSessionSelectedFiles`, `TransferSessionRecipients`, and `TransferSessionTransportContexts`.
+  10. **Update Call Sites & DI:**
+      - `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs` (`AddFileTransferInfrastructure()`): add `services.AddSingleton<ITransferSessionTransportStore, SqliteTransferSessionTransportStore>();`. (Automatically wires Desktop via `DesktopStage2SessionFactory`, Simulator via `AddAuthenticatedInfrastructure`, Integration tests via `TestPersonaNode`, and `DependencyInjectionTests`.)
+      - `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferActionHandler.cs`: inject `ITransferSessionTransportStore transportStore` (append to constructor parameter list, non-null guard); migrate all 7 calls (lines 183, 342, 359, 456, 481, 603, 625) from `_sessionRepository.*TransportContextAsync` to `_transportStore.*TransportContextAsync`.
+      - `Percolator.Apps.FileTransfer/Features/IngressControl/FileTransferPayloadHandler.cs`: inject `ITransferSessionTransportStore transportStore` (append to constructor parameter list, non-null guard); migrate all 4 calls (lines 122, 213, 256, 360) from `_sessionRepository.*TransportContextAsync` to `_transportStore.*TransportContextAsync`.
+  11. **Tests to Update / Add:**
+      - `Percolator.Apps.FileTransfer.Tests/TestDoubles/TestDoubles.cs`: remove transport context fields/methods from `InMemoryTransferSessionRepository`, implement `GetExpiredPendingOfferIdsAsync`, and add `InMemoryTransferSessionTransportStore : ITransferSessionTransportStore`.
+      - Update constructor call sites in:
+        - `Percolator.Apps.FileTransfer.Tests/Features/IngressControl/Tests/IngressControlTests.cs` (lines 104, 130, and any other `new FileTransferPayloadHandler`)
+        - `Percolator.Apps.FileTransfer.Tests/Features/TransferNegotiation/Tests/TransferNegotiationTests.cs` (lines 55, 331, 373)
+        - `Percolator.Apps.FileTransfer.Tests/Ports/Tests/ActionHandlerAndQueryTests.cs` (lines 59, 237, 311, 330)
+        - `Percolator.Apps.FileTransfer.Tests/Features/Runtime/TransferSessionRuntimeTests.cs` (lines 455 register `ITransferSessionTransportStore`, lines 502, 515)
+      - `Percolator.Infrastructure.Tests/Plugins/FileTransfer/SqliteTransferSessionRepositoryTests.cs`: instantiate `SqliteTransferSessionTransportStore(_db.ContextFactory)`, test `SaveTransportContextAsync`/`GetTransportContextAsync`/`DeleteTransportContextAsync` (including `DirectCandidates` round-trip and overwrite), test `SaveSessionAsync` with full selection (`ft_session_selected_files` row count == 0 and `AllFilesSelected == true`) vs partial selection + `AuthorizeGroupPeer` without PK collisions, test bulk manifest insert + `GetSessionByIdAsync` round-trip with 1,000+ files, test `GetExpiredPendingOfferIdsAsync`, and test `FilterPolicyRepository` blocking then unblocking peers and relays.
+      - `Percolator.Infrastructure.Tests/Composition/DependencyInjectionTests.cs`: assert `sp.GetRequiredService<ITransferSessionTransportStore>().Should().NotBeNull();`.
 - **Acceptance Criteria:**
-  - Zero `JsonSerializer` in `SqliteTransferSessionRepository` or file transfer persistence.
-  - Zero in-memory `ConcurrentDictionary` fallback in `SqliteTransferSessionRepository`.
-  - All unit and integration tests pass with normalized child tables.
+  - Zero EF Core migrations added; zero manual file-transfer DDL left in `SqliteDatabaseMigrator.cs`.
+  - `PRAGMA busy_timeout = 5000;` enabled in `SqlCipherPragmaInterceptor`.
+  - Full-bundle sessions store `AllFilesSelected = true` and **0 rows** in `ft_session_selected_files`; `ft_manifest_files` uses bulk parameterized SQL insert inside a transaction.
+  - Zero `System.Text.Json` imports or calls across `SqliteTransferSessionRepository.cs`, `SqliteTransferSessionTransportStore.cs`, `SqliteFilterPolicyRepository.cs`, `SqlFileTransferQueryService.cs`, and `FileTransferEntities.cs`.
+  - Zero `ConcurrentDictionary` or Default Interface Methods on `ITransferSessionRepository` or `SqliteTransferSessionRepository`.
+  - Zero N+1 queries in `SqliteTransferSessionRepository.GetActiveSessionsAsync`.
+  - All test suites build and pass 100%.
 
-#### Ticket `FT-008` — CQRS Read Purity, N+1 Query Elimination & Streamlined DI Registration
-- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Infrastructure.Tests`
+---
+
+#### Ticket `FT-008` — CQRS Read Purity, Singleton `IDbContextFactory` Lifetime, N+1 Elimination & Paginated Read-Model Fixes
+- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`
 - **Dependencies:** `FT-007`
-- **Architectural Rationale:**
-  - `FileTransferQueryService` in `Percolator.Apps.FileTransfer` violates CQRS Rule 8 by injecting the write-side `ITransferSessionRepository` and rehydrating domain aggregates to construct read models.
-  - `SqlFileTransferQueryService` in `Percolator.Infrastructure` suffers from an N+1 query loop fetching `TransferBitfields` individually inside a `foreach` loop.
-  - Dual DI registration exists where `Apps.FileTransfer` registers `FileTransferQueryService` and `Infrastructure` registers `SqlFileTransferQueryService`.
-- **Implementation Details:**
-  1. **Delete Aggregate-Rehydrating Query Service:**
+- **Architectural Defects Addressed:**
+  - `FileTransferQueryService` in `Percolator.Apps.FileTransfer` violates CQRS Rule 8 by injecting `ITransferSessionRepository` and rehydrating domain aggregates, and causes dual DI registration with `SqlFileTransferQueryService`.
+  - `SqlFileTransferQueryService` violates Anti-Shortcut Rule 16 (captured scoped `PercolatorDbContext`): it injects scoped `PercolatorDbContext` and is registered `AddScoped`, yet `ChatViewModel` (cached across scopes in `SessionScopeFactory` LRU cache) holds `IFileTransferQueryService` and polls it on a timer. Every other Desktop UI query service (`SqlChatMessageQueryService`, `SqlConversationListQueryService`, `SqlPeerContactQueryService`, `SqlPersonaRelayQueryService`) uses `IDbContextFactory<PercolatorDbContext>` and is registered `AddSingleton`.
+  - `SqlFileTransferQueryService.GetAllTransfersAsync` executes an N+1 query loop per session.
+  - `SqlFileTransferQueryService.cs:163` calls `SeedRatio.FromMultiplier(entity.TargetSeedRatio)` unconditionally, which throws `ArgumentOutOfRangeException` on `SeedRatio.Unlimited` (stored as `-1.0`).
+  - `SqlFileTransferQueryService.GetManifestFilesAsync` (lines 89–101) queries `TransferBitfields` and discards it, faking per-file `IsCompleted` via session-level completion instead of checking the file's chunk range bits, and offers no pagination for large multi-thousand-file bundles.
+  - `SqlFileTransferQueryService.cs:127` computes `downloadedBytes = verifiedPieces * chunkSizeBytes`, which overcounts when the final partial chunk is verified before earlier chunks.
+- **Exact Implementation Specification:**
+  1. **Delete Aggregate-Rehydrating Query Service & Add Optional Pagination to Port:**
      - Delete `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferQueryService.cs`.
-     - In `Percolator.Apps.FileTransfer/DependencyInjection/ServiceCollectionExtensions.cs`: remove `collection.AddScoped<IFileTransferQueryService, FileTransferQueryService>();`.
-  2. **Eliminate N+1 Queries in `SqlFileTransferQueryService.cs`:**
-     - In `SqlFileTransferQueryService.GetAllTransfersAsync()`:
-       - Query all sessions in single batch: `List<TransferSessionEntity> entities = await _dbContext.TransferSessions.AsNoTracking().ToListAsync(ct);`
-       - Extract list of IDs: `List<Guid> transferIds = entities.Select(e => e.TransferId).ToList();`
-       - Batch-load bitfields:
-         ```csharp
-         Dictionary<Guid, TransferBitfieldEntity> bitfieldMap = await _dbContext.TransferBitfields
-             .AsNoTracking()
-             .Where(b => transferIds.Contains(b.TransferId))
-             .ToDictionaryAsync(b => b.TransferId, ct)
-             .ConfigureAwait(false);
-         ```
-       - Batch-load recipients:
-         ```csharp
-         ILookup<Guid, byte[]> recipientsLookup = (await _dbContext.TransferSessionRecipients
-             .AsNoTracking()
-             .Where(r => transferIds.Contains(r.TransferId))
-             .ToListAsync(ct)
-             .ConfigureAwait(false))
-             .ToLookup(r => r.TransferId, r => r.RecipientIdentityId);
-         ```
-       - Project read models purely synchronously in memory from the batched maps.
-  3. **Add Dedicated Unit Tests:**
-     - Create `Percolator.Infrastructure.Tests/Persistence/Repositories/SqlFileTransferQueryServiceTests.cs` testing `GetAllTransfersAsync`, `GetTransferByIdAsync`, and `GetManifestFilesAsync` against in-memory SQLite, asserting single-query execution and accurate projection.
+     - In `Percolator.Apps.FileTransfer/DependencyInjection/ServiceCollectionExtensions.cs`: remove line 25 (`collection.AddScoped<IFileTransferQueryService, FileTransferQueryService>();`).
+     - In `Percolator.Apps.FileTransfer/Ports/IFileTransferQueryService.cs` (line 9): update signature to:
+       `ValueTask<IReadOnlyList<ManifestFileReadModel>> GetManifestFilesAsync(TransferSessionId sessionId, int skip = 0, int? take = null, CancellationToken ct = default);`
+  2. **Refactor `Percolator.Infrastructure/Persistence/Repositories/SqlFileTransferQueryService.cs`:**
+     - Change constructor to `public SqlFileTransferQueryService(IDbContextFactory<PercolatorDbContext> dbContextFactory)` and register `services.AddSingleton<IFileTransferQueryService, SqlFileTransferQueryService>();` in `InfrastructureServiceCollectionExtensions.AddFileTransferInfrastructure()` (replacing `AddScoped`).
+     - In `GetAllTransfersAsync(CancellationToken ct)`:
+       - Open `await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);`.
+       - Execute 4 flat `AsNoTracking()` batch queries (return `Array.Empty<TransferSessionReadModel>()` early if `entities.Count == 0`):
+         1. `List<TransferSessionEntity> entities = await db.TransferSessions.AsNoTracking().ToListAsync(ct);`
+         2. `Dictionary<Guid, TransferBitfieldEntity> bitfieldMap = await db.TransferBitfields.AsNoTracking().Where(b => transferIds.Contains(b.TransferId)).ToDictionaryAsync(b => b.TransferId, ct);`
+         3. `ILookup<Guid, byte[]> recipientsLookup = (await db.TransferSessionRecipients.AsNoTracking().Where(r => transferIds.Contains(r.TransferId)).ToListAsync(ct)).ToLookup(r => r.TransferId, r => r.RecipientIdentityId);`
+         4. `Dictionary<Guid, TransferSessionTransportContextEntity> transportMap = await db.TransferSessionTransportContexts.AsNoTracking().Where(t => transferIds.Contains(t.TransferId)).ToDictionaryAsync(t => t.TransferId, ct);`
+       - Project synchronously in memory via `ProjectReadModel(entity, bitfield, recipients, transportCtx)`.
+     - In `GetTransferByIdAsync(TransferSessionId sessionId, CancellationToken ct)`:
+       - Open short-lived `PercolatorDbContext`, query the 4 tables for `sessionId.Value` with `AsNoTracking()`, and delegate to the same synchronous `ProjectReadModel(...)`.
+     - In `ProjectReadModel(...)`:
+       - Compute `totalPieces`: `bitfield?.TotalPieces ?? (entity.TotalSizeBytes == 0 ? 1 : (int)((entity.TotalSizeBytes + entity.ChunkSizeBytes - 1) / entity.ChunkSizeBytes))`.
+       - Compute exact `downloadedBytes` and `verifiedPieces`: if `bitfield is { BitfieldBytes.Length: > 0 }`, parse `Bitfield parsed = Bitfield.FromBytes(bitfield.BitfieldBytes, ChunkCount.FromInt(totalPieces))`; if `parsed.IsComplete`, `downloadedBytes = entity.TotalSizeBytes`, else sum `Math.Min((long)entity.ChunkSizeBytes, Math.Max(0, entity.TotalSizeBytes - (long)i * entity.ChunkSizeBytes))` for each verified chunk `i` (fast path: when `i < totalPieces - 1`, chunk size is always `entity.ChunkSizeBytes`, so `downloadedBytes = (long)(parsed.PopCount - (hasLastChunk ? 1 : 0)) * entity.ChunkSizeBytes + (hasLastChunk ? lastChunkBytes : 0)` in **O(1)** instead of looping up to 1,000,000 chunks!).
+       - Fix `targetSeedRatio`: `entity.TargetSeedRatio < 0 ? SeedRatio.Unlimited : SeedRatio.FromMultiplier(entity.TargetSeedRatio)`.
+       - Reconstruct `TransferTopology` from `recipients` (`PublicIdentityId.FromBytes`): `1` -> `OneToOne` (guard empty with fallback `IncomingStaged`), `2` -> `MultiPeer`, `_` -> `IncomingStaged`.
+       - Project `localRoot` from `transportCtx?.LocalRootPath` and `channelId` from `transportCtx is { ChannelId: var cid } && cid != Guid.Empty ? ChannelId.FromGuid(cid) : null`.
+     - In `GetManifestFilesAsync(TransferSessionId sessionId, int skip = 0, int? take = null, CancellationToken ct = default)`:
+       - Open short-lived `PercolatorDbContext`; load `TransferSessionEntity` and `TransferBitfieldEntity` with `AsNoTracking()`.
+       - Query `ManifestFiles` with `.Where(f => f.TransferId == sessionId.Value).OrderBy(f => f.FileIndex)`, applying `.Skip(skip)` when `skip > 0` and `.Take(take.Value)` when `take.HasValue`.
+       - Only query `TransferSessionSelectedFiles` when `!sessionEntity.AllFilesSelected`:
+         - If `sessionEntity.AllFilesSelected` is `true`, every file has `isSelected = true` (zero `ft_session_selected_files` query).
+         - Else load `HashSet<int> selectedIndices` for `sessionId.Value` (if `selectedIndices.Count == 0` AND `sessionEntity.State == (int)TransferSessionState.PendingConsent`, treat all as unselected/selectable preview; otherwise `isSelected = selectedIndices.Contains(file.FileIndex)`).
+       - Parse `Bitfield? localBitfield = bitfieldEntity is { BitfieldBytes.Length: > 0 } ? Bitfield.FromBytes(bitfieldEntity.BitfieldBytes, ChunkCount.FromInt(bitfieldEntity.TotalPieces)) : null;`.
+       - Compute per-file `isCompleted`:
+         - If `file.FileSizeBytes == 0` -> `true`.
+         - Else if `!isSelected || localBitfield == null` -> `false`.
+         - Else compute `firstChunk = (int)(file.StartOffset / sessionEntity.ChunkSizeBytes)` and `lastChunk = (int)((file.StartOffset + file.FileSizeBytes - 1) / sessionEntity.ChunkSizeBytes)`, returning `true` iff every chunk `c` in `[firstChunk..lastChunk]` satisfies `localBitfield.HasChunk(ChunkIndex.FromInt(c))`.
+  3. **Update / Add Unit Tests:**
+     - `Percolator.Apps.FileTransfer.Tests/Ports/Tests/ActionHandlerAndQueryTests.cs`: delete `_queryService` field (line 33), initialization (line 72), and `UT_QRY_01_TransferSessionQueryProjectionAccuracy` (lines 413–445).
+     - Create `Percolator.Infrastructure.Tests/Persistence/Repositories/SqlFileTransferQueryServiceTests.cs` against `SqliteTestDb`:
+       - `GetAllTransfersAsync`: verifies `OneToOne`, `MultiPeer`, `IncomingStaged`, `SeedRatio.Unlimited` (`-1.0`, no throw), `ChannelId`, and `LocalRootPath` projection across multiple sessions.
+       - `GetTransferByIdAsync`: verifies exact O(1) `DownloadedBytes` when only the final partial chunk is verified (e.g., 98,304-byte bundle with 65,536-byte chunks where only chunk 1 is set -> `DownloadedBytes == 32,768`, NOT `65,536`), `UploadedBytes`, and `CurrentSeedRatio`.
+       - `GetManifestFilesAsync`: verifies partial completion (file 0 chunk complete -> `IsCompleted == true`; file 1 chunk missing -> `IsCompleted == false`; unselected file -> `IsSelected == false, IsCompleted == false`; 0-byte file -> `IsCompleted == true`), `AllFilesSelected = true` with 0 child rows, and `skip`/`take` pagination.
+       - Verifies concurrent `Task.WhenAll(svc.GetAllTransfersAsync().AsTask(), svc.GetTransferByIdAsync(id).AsTask())` succeeds safely on the singleton instance.
 - **Acceptance Criteria:**
-  - `FileTransferQueryService` is deleted.
-  - `SqlFileTransferQueryService` executes zero unbatched queries in loops.
-  - Dedicated unit tests verify CQRS read projection integrity.
+  - `FileTransferQueryService.cs` is deleted and `IFileTransferQueryService` is registered solely in `AddFileTransferInfrastructure()` as `Singleton`.
+  - Zero queries inside loops in `SqlFileTransferQueryService`; `DownloadedBytes` is O(1); `GetManifestFilesAsync` supports `skip`/`take` pagination and skips `ft_session_selected_files` when `AllFilesSelected == true`.
+  - `SeedRatio.Unlimited`, partial-chunk byte counts, pagination, and per-file bitfield completion all verified by `SqlFileTransferQueryServiceTests`.
 
-#### Ticket `FT-009` — Reactive Transport Signals, Synthetic ID Elimination & Desktop Discovery DI
-- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Desktop`
+---
+
+#### Ticket `FT-009` — Application Event Bus ICE Trickling, Control Framing Deduplication, Synthetic `ChannelId` Removal & DI Hygiene
+- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Desktop`, `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.ApplicationIntegrationTests`
 - **Dependencies:** `FT-008`
-- **Architectural Rationale:**
-  - `ITransferPeerConnection` exposes a raw C# `event Action<IceSignalOutboundEvent>? SignalProduced;` delegate, leading to unanchored subscriptions and fire-and-forget `_ = Task.Run(...)` tasks in `TransferSessionRuntime`.
-  - `FileTransferActionHandler.CancelTransferAsync()` synthesizes a fake `ChannelId.FromGuid(sessionId.Value)` when `transportContext` is null.
-  - `DesktopNetworkEndpointDiscoveryPort` directly instantiates `new NetworkInterfaceEndpointDiscoveryPort(...)` rather than using dependency injection.
-- **Implementation Details:**
-  1. **Reactive Transport Signals Port:**
+- **Architectural Defects Addressed:**
+  - `ITransferPeerConnection` exposes a raw C# `event Action<IceSignalOutboundEvent>? SignalProduced;`, forcing `TransferSessionRuntime.WireIceCandidateForwarder` to spawn untracked fire-and-forget `_ = Task.Run(...)` tasks on every ICE candidate and forcing `FileTransferPayloadHandler` to synthesize `Func<FileTransferIceSignalPayload, CancellationToken, ValueTask>` closures (`CreateIceSignalDispatcher`, lines 405–446) plus a SQLite lookup on every inbound ICE candidate. Trickle ICE candidates are low-frequency point-in-time lifecycle facts that fit the existing Application Event Bus (`IEventPublisher` / `IEventSubscriber`, `INV-APP-EVENT-BUS-DECOUPLING`), NOT custom channels on application ports.
+  - `WebRtcPeerConnectionAdapter.OnLocalDescription` (lines 389–399) writes dead `SdpOffer`/`SdpAnswer` events into `_signalQueue` even though `CreateOfferAsync`/`AcceptOfferAndCreateAnswerAsync` already return SDP directly via `_localDescriptionTcs` and every consumer ignores non-`IceCandidate` events.
+  - Control opcode framing + `RelayedGroup`/`RelayedOneToOne` `OutboundPayloadContext` construction is copy-pasted 6 times across `FileTransferActionHandler` (4x) and `FileTransferPayloadHandler` (2x).
+  - `FileTransferActionHandler.CancelTransferAsync` (line 627) fabricates a synthetic `ChannelId.FromGuid(sessionId.Value)` when `transportContext` is missing, violating Anti-Shortcut Rule 3 (no synthetic entities/IDs).
+  - Dead/duplicate DI wiring: `NullTransferStreamPool.cs` has zero production callers; `ServiceCollectionExtensions.cs` (lines 26–30) registers 5 per-session stateful coordinators never resolved from DI; `InfrastructureServiceCollectionExtensions.cs:408` duplicates `ITransferOfferReaperService`; `DesktopNetworkEndpointDiscoveryPort` manually `new`s `NetworkInterfaceEndpointDiscoveryPort` per call; `DesktopSessionServiceCollectionExtensions.cs` (lines 97–113) duplicates `AddFileTransferApp()`.
+- **Exact Implementation Specification:**
+  1. **Publish Trickle ICE Candidates via Application Event Bus (`IEventPublisher` / `IEventSubscriber`):**
+     - Create `Percolator.Apps.FileTransfer/Ports/TransferIceCandidateDiscoveredEvent.cs`:
+       ```csharp
+       using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+       using Percolator.PluginSdk.Events;
+       using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+
+       namespace Percolator.Apps.FileTransfer.Ports;
+
+       public sealed record TransferIceCandidateDiscoveredEvent(
+           Guid EventId,
+           DateTimeOffset OccurredOnUtc,
+           TransferSessionId SessionId,
+           PublicIdentityId RemotePeerId,
+           string Candidate,
+           string? CandidateMid,
+           CertSha256Fingerprint? LocalDtlsFingerprint) : IApplicationEvent;
+       ```
      - In `Percolator.Apps.FileTransfer/Ports/ITransferPeerTransport.cs`:
-       - Replace `event Action<IceSignalOutboundEvent>? SignalProduced;` on `ITransferPeerConnection` with:
-         ```csharp
-         Observable<IceSignalOutboundEvent> Signals { get; }
-         ```
-     - In `Percolator.Infrastructure/Plugins/FileTransfer/WebRtc/WebRtcPeerConnectionAdapter.cs` and test doubles:
-       - Implement `Signals` using `Subject<IceSignalOutboundEvent> _signals = new();`.
+       - Delete `event Action<IceSignalOutboundEvent>? SignalProduced;` from `ITransferPeerConnection` and delete `public sealed record IceSignalOutboundEvent(...)`. Zero custom events or `ChannelReader` members remain on `ITransferPeerConnection`.
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/WebRtc/WebRtcPeerConnectionAdapter.cs`:
+       - Add constructor parameters `IEventPublisher eventPublisher, IDateTimeProvider clock` (non-null guards):
+         `public WebRtcPeerConnectionAdapter(DirectPeerConnectionOptions options, IEventPublisher eventPublisher, IDateTimeProvider clock, Action onDisposed)`.
+       - Delete `public event Action<IceSignalOutboundEvent>? SignalProduced;`.
+       - Keep private `_candidateQueue` (`Channel<TransferIceCandidateDiscoveredEvent>`) strictly as an internal libdatachannel native-callback offload buffer (so C++ callback threads never execute async managed code or contend on managed locks), paired with `private readonly CancellationTokenSource _disposeCts = new();`.
+       - In `OnLocalDescription` (lines 389–399): delete the dead `SdpOffer`/`SdpAnswer` queue write; keep `_localDescriptionTcs.TrySetResult(sdp)`.
+       - In `OnLocalCandidate` (lines 409–415): write `new TransferIceCandidateDiscoveredEvent(Guid.NewGuid(), _clock.UtcNow, SessionId, RemotePeerId, candidate.Content, candidate.Mid, LocalDtlsFingerprint)` to `_candidateQueue`.
+       - Replace `PumpOutboundSignalsAsync()` with `PumpOutboundCandidatesAsync()`: read `await foreach (TransferIceCandidateDiscoveredEvent evt in _candidateQueue.Reader.ReadAllAsync(_disposeCts.Token).ConfigureAwait(false))` and dispatch via `await _eventPublisher.PublishAsync(evt, _disposeCts.Token).ConfigureAwait(false)` (catch `OperationCanceledException` to break; catch `Exception` so a single dispatch fault never terminates candidate trickling).
+       - In `DisposeAsync()`: call `_disposeCts.Cancel();`, `_candidateQueue.Writer.TryComplete();`, `await _candidatePumpTask.ConfigureAwait(false);` (catching `OperationCanceledException`), `_disposeCts.Dispose();`, then run off-thread native `_peerConnection.Dispose()`.
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/TransferPipeTlsStreamTransport.cs` (`TransferPeerTransport`, lines 625–652):
+       - Update constructor to `public TransferPeerTransport(PeerGrpcChannelFactory channelFactory, ITransferSessionCertificateStore certificateStore, IEventPublisher eventPublisher, IDateTimeProvider clock)` (all 4 are Singletons registered in every host DI container; `InfrastructureServiceCollectionExtensions.cs:402` auto-resolves without change).
+       - Pass `_eventPublisher, _clock` into `new WebRtcPeerConnectionAdapter(options, _eventPublisher, _clock, () => UnregisterConnection(options.SessionId, adapter!))`.
+  2. **Extract Shared `FileTransferControlFraming` & Eliminate `CreateIceSignalDispatcher` Closures:**
+     - Create `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferControlFraming.cs`:
+       ```csharp
+       using Percolator.Domain.Channels.ValueObjects;
+       using Percolator.Domain.Identities.ValueObjects;
+       using Percolator.PluginSdk;
+       using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
+
+       namespace Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+
+       internal static class FileTransferControlFraming
+       {
+           public static byte[] FramePayload<TPayload>(
+               IPayloadSerializer serializer,
+               FileTransferControlOpcode opcode,
+               TPayload payload)
+           {
+               ReadOnlyMemory<byte> serialized = serializer.Serialize(payload);
+               byte[] framed = new byte[1 + serialized.Length];
+               framed[0] = (byte)opcode;
+               serialized.Span.CopyTo(framed.AsSpan(1));
+               return framed;
+           }
+
+           public static OutboundPayloadContext BuildOutboundContext(
+               ChannelId channelId,
+               PublicIdentityId localIdentityId,
+               PublicIdentityId? directRecipientId,
+               bool isGroupTransfer,
+               byte[] framedPayload)
+           {
+               return isGroupTransfer
+                   ? new OutboundPayloadContext(
+                       channelId,
+                       localIdentityId,
+                       RecipientIdentityId: null,
+                       DeviceId.Primary,
+                       AppId.FileTransferControl,
+                       framedPayload,
+                       DeliveryRoute.RelayedGroup)
+                   : new OutboundPayloadContext(
+                       channelId,
+                       localIdentityId,
+                       directRecipientId ?? throw new ArgumentNullException(nameof(directRecipientId)),
+                       DeviceId.Primary,
+                       AppId.FileTransferControl,
+                       framedPayload,
+                       DeliveryRoute.RelayedOneToOne);
+           }
+       }
+       ```
+     - In `Percolator.Apps.FileTransfer/Ports/ITransferSessionRuntime.cs`:
+       - Remove the `Func<FileTransferIceSignalPayload, CancellationToken, ValueTask>` parameter from BOTH `HandleInboundIceSignalAsync` (line 56) and `InitiateDirectConnectionAsync` (line 62).
      - In `Percolator.Apps.FileTransfer/Features/Runtime/TransferSessionRuntime.cs`:
-       - In `WireIceCandidateForwarder`:
-         ```csharp
-         connection.Signals
-             .Where(evt => evt.Kind == IceSignalKind.IceCandidate)
-             .Subscribe(async evt =>
-             {
-                 try
-                 {
-                     var payload = new FileTransferIceSignalPayload(
-                         evt.SessionId,
-                         evt.Kind,
-                         evt.SdpOrCandidate,
-                         evt.CandidateMid,
-                         evt.LocalDtlsFingerprint);
-                     await sendSignalAsync(payload, handle.SessionCts.Token).ConfigureAwait(false);
-                 }
-                 catch (OperationCanceledException) { }
-                 catch (Exception ex)
-                 {
-                     _logger.LogWarning(ex, "Failed to send ICE candidate for session {SessionId}", evt.SessionId);
-                 }
-             })
-             .AddTo(handle.SessionDisposables);
-         ```
-  2. **Eliminate Synthetic `ChannelId` Fallback:**
-     - In `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferActionHandler.cs` line 627:
-       - Remove `ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);`.
-       - If `transportContext == null` or `!transportContext.ChannelId.IsValid`: do not dispatch a network cancel payload; simply terminate local runtime and session state. If `transportContext != null && transportContext.ChannelId.IsValid`: dispatch `FileTransferCancelPayload` on `transportContext.ChannelId`.
-  3. **Desktop Discovery Port DI Cleanliness:**
+       - Inject `IPayloadSerializer serializer` and `IBackgroundPayloadDispatcher payloadDispatcher` (non-null guards; both are already Singletons in DI).
+       - Subscribe in constructor: `_iceCandidateSubscription = eventSubscriber.Subscribe<TransferIceCandidateDiscoveredEvent>(OnLocalIceCandidateDiscoveredAsync);`, and call `_iceCandidateSubscription.Dispose();` in `DisposeAsync()`.
+       - Delete `WireIceCandidateForwarder` (lines 795–825) and its call sites (lines 216, 390).
+       - Add `OnLocalIceCandidateDiscoveredAsync(TransferIceCandidateDiscoveredEvent ev, CancellationToken ct)`:
+         - Return immediately if `Volatile.Read(ref _disposed) != 0`, or `!_sessions.TryGetValue(ev.SessionId, out ActiveTransferHandle? handle)`, or `handle.SessionCts.IsCancellationRequested`, or `!handle.PeerConnections.ContainsKey(ev.RemotePeerId)`, or `!handle.PinnedPeerCerts.ContainsKey(ev.RemotePeerId)`.
+         - Build `new FileTransferIceSignalPayload(ev.SessionId, IceSignalKind.IceCandidate, ev.Candidate, ev.CandidateMid, ev.LocalDtlsFingerprint)`, link `(ct, handle.SessionCts.Token)`, and `await DispatchIceSignalAsync(handle, ev.RemotePeerId, payload, linkedCts.Token)` (catching `OperationCanceledException` / `ObjectDisposedException`).
+       - Add `DispatchIceSignalAsync(ActiveTransferHandle handle, PublicIdentityId remotePeerId, FileTransferIceSignalPayload signalPayload, CancellationToken ct)`:
+         - Apply `TargetPeerId = remotePeerId` when `handle.TransportContext.IsGroupTransfer` is true; frame via `FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.IceSignal, wirePayload)` and `FileTransferControlFraming.BuildOutboundContext(ctx.ChannelId, ctx.LocalIdentityId, ctx.IsGroupTransfer ? null : remotePeerId, ctx.IsGroupTransfer, framed)`; return `_payloadDispatcher.DispatchAsync(outbound, ct)`.
+       - Replace `sendSignalReplyAsync` / `sendSignalAsync` calls on lines 250 (`SdpAnswer`), 400 (`SdpOffer`), and 419 (`PipeRendezvous`) with `DomainResult sendResult = await DispatchIceSignalAsync(...)`. If `sendResult.IsFailure`: for `SdpAnswer`/`SdpOffer`, remove & dispose the newly created peer connection and return `sendResult`; for `PipeRendezvous`, return `sendResult` without spawning `pipeConnectTask`.
+     - In `Percolator.Apps.FileTransfer/Features/IngressControl/FileTransferPayloadHandler.cs`:
+       - Delete `CreateIceSignalDispatcher(...)` (lines 405–446).
+       - Update `HandleAcceptAsync` (line 225) and `HandlePeerJoinAsync` (line 323) to call `_runtime.InitiateDirectConnectionAsync(sessionId, senderId, ct)`.
+       - Update `HandlePeerJoinAsync` (lines 303–317) to use `FileTransferControlFraming`.
+       - Simplify `HandleIceSignalAsync` (lines 340–377): remove the unused `channelId` parameter and the redundant `_transportStore.GetTransportContextAsync(...)` DB read on every inbound ICE candidate, calling `return _runtime.HandleInboundIceSignalAsync(signal.TransferSessionId, senderId, signal, ct);` directly.
+  3. **Eliminate Synthetic `ChannelId` Fallback:**
+     - In `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferActionHandler.cs` (`CancelTransferAsync`, lines 625–668):
+       - Delete `ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);`.
+       - Always save cancelled session state, stop runtime (`deleteCertificate: true`), and unregister tracker (when `!wasActiveInRuntime && transportContext != null`).
+       - Guard network cancel dispatch strictly with `if (transportContext != null && transportContext.ChannelId.IsValid)`: construct and send `FileTransferCancelPayload` via `FileTransferControlFraming` using `transportContext.ChannelId` and `transportContext.LocalIdentityId` only when a real persisted `ChannelId` exists.
+       - Add unit test in `ActionHandlerAndQueryTests.cs` verifying `CancelTransferAsync` without a transport context transitions session to `Cancelled` and sends zero wire payloads (no synthetic `ChannelId`).
+  4. **Delete Dead Code & Deduplicate FileTransfer DI:**
+     - Delete dead `Percolator.Apps.FileTransfer/Ports/NullTransferStreamPool.cs` (zero production callers).
      - In `Percolator.Infrastructure/Plugins/FileTransfer/NetworkInterfaceEndpointDiscoveryPort.cs`:
-       - Extract factory delegate `Func<int?, bool, INetworkEndpointDiscoveryPort>` or interface in Stage-1/Stage-2 DI.
-     - In `Percolator.Desktop/Common/Services/DesktopNetworkEndpointDiscoveryPort.cs`:
-       - Inject the factory / provider and invoke it cleanly instead of directly `new`ing concrete infrastructure classes.
+       - Replace `private readonly PortNumber? _listenPort;` with `private readonly Func<int?> _listenPortProvider;`.
+       - Keep existing `public NetworkInterfaceEndpointDiscoveryPort(int? listenPort = null, bool allowLoopback = false)` (validates `listenPort` eagerly if non-null so `NetworkInterfaceEndpointDiscoveryPortTests` stay 100% compatible, then sets `_listenPortProvider = () => listenPort`).
+       - Add `public NetworkInterfaceEndpointDiscoveryPort(Func<int?> listenPortProvider, bool allowLoopback = false)` (null guard on `listenPortProvider`).
+       - In `DiscoverLocalCandidatesAsync`: read `int? currentPort = _listenPortProvider();`; if `!currentPort.HasValue || currentPort.Value is < 1 or > 65535` return empty; otherwise use `PortNumber.FromInt(currentPort.Value)`.
+     - Delete `Percolator.Desktop/Common/Services/DesktopNetworkEndpointDiscoveryPort.cs`.
+     - In `Percolator.Apps.FileTransfer/DependencyInjection/ServiceCollectionExtensions.cs`:
+       - Change signature to `public static IServiceCollection AddFileTransferApp(this IServiceCollection collection, bool enableIngressByDefault = false)`.
+       - Register `FileTransferIngressFilter` as:
+         ```csharp
+         collection.AddSingleton<FileTransferIngressFilter>(sp =>
+             new FileTransferIngressFilter(sp.GetRequiredService<IFileTransferFilterPolicyRepository>())
+             {
+                 IsEnabled = enableIngressByDefault
+             });
+         ```
+       - Delete the 5 unused per-session `AddScoped` registrations (lines 26–30: `TransferSessionCoordinator`, `DiskChunkAssembler`, `ChunkPipelineScheduler`, `SwarmCoordinator`, `EndgameCoordinator` — always constructed per-session inside `TransferSessionRuntime.CreateHandle` and never resolved from DI).
+     - In `Percolator.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs`:
+       - Delete duplicate line 408 (`services.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();` — already registered in `AddFileTransferApp()`).
+     - In `Percolator.Desktop/Common/Session/DesktopSessionServiceCollectionExtensions.cs`:
+       - Line 57: replace `DesktopNetworkEndpointDiscoveryPort` registration with:
+         ```csharp
+         services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort>(sp =>
+         {
+             var currentPersona = sp.GetRequiredService<ICurrentPersonaService>();
+             return new Percolator.Infrastructure.Plugins.FileTransfer.NetworkInterfaceEndpointDiscoveryPort(
+                 () => currentPersona.CurrentPersona?.BoundPort,
+                 allowLoopback: true);
+         });
+         ```
+       - Lines 97–113: replace the 17 manually duplicated FileTransfer registrations (and fix the stale comment on lines 93–95) with `services.AddFileTransferApp(enableIngressByDefault: true);`.
+  5. **Exact Test & Call-Site Updates:**
+     - `Percolator.Apps.FileTransfer.Tests/TestDoubles/TestDoubles.cs`: delete `SignalProduced` and `EmitIceCandidate` from `FakeTransferPeerConnection`.
+     - Pass `IPayloadSerializer` + `IBackgroundPayloadDispatcher` (`new DirectBackgroundPayloadDispatcher(payloadSender)`) to every `new TransferSessionRuntime(...)` call site:
+       - `Percolator.Apps.FileTransfer.Tests/Features/IngressControl/Tests/IngressControlTests.cs` (line 35)
+       - `Percolator.Apps.FileTransfer.Tests/Features/TransferNegotiation/Tests/TransferNegotiationTests.cs` (line 44)
+       - `Percolator.Apps.FileTransfer.Tests/Ports/Tests/ActionHandlerAndQueryTests.cs` (lines 47, 309)
+       - `Percolator.Apps.FileTransfer.Tests/Features/Runtime/TransferSessionRuntimeTests.cs` (line 492; also remove line 440's stale `NullTransferStreamPool` check while keeping line 439 asserting `ITransferStreamPool` is unregistered, and update line 167 `HandleInboundIceSignalAsync` to drop the lambda parameter).
+     - Add unit test in `TransferSessionRuntimeTests.cs` verifying publishing `TransferIceCandidateDiscoveredEvent` on `node.EventBus` dispatches a framed `IceSignal` via `IBackgroundPayloadDispatcher` (with `TargetPeerId` + `RelayedGroup` for group sessions, `RelayedOneToOne` for 1:1 sessions, and silently ignored after session stop or peer eviction).
+     - `Percolator.Infrastructure.Tests/Plugins/FileTransfer/WebRtcPeerTransportTests.cs`:
+       - Create `InMemoryEventBus _eventBusA = new(NullLogger<InMemoryEventBus>.Instance);` and `_eventBusB` (disposed in `TearDownAsync`), pass `(_channelFactory, certStoreA, _eventBusA, clock)` / `(_channelFactory, certStoreB, _eventBusB, clock)` to `new TransferPeerTransport(...)` (lines 46–47).
+       - Replace `SignalProduced +=` lambdas (lines 102–122 and 253–266) with `using IDisposable subA = _eventBusA.Subscribe<TransferIceCandidateDiscoveredEvent>(async (evt, ct) => { if (evt.SessionId == sessionId) { try { await connB.AddRemoteIceCandidateAsync(evt.Candidate, evt.CandidateMid ?? string.Empty, ct); } catch { } } });` (and symmetric `subB` on `_eventBusB`), eliminating all `_ = Task.Run` fire-and-forget lambdas in the test.
+     - `Percolator.ApplicationIntegrationTests/Scenarios/TransferPipeTls13FallbackIntegrationTests.cs` (lines 55–56): pass `new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance)` (disposed in `TearDownAsync`) and `clock` to `new TransferPeerTransport(...)`.
+     - `Percolator.ApplicationIntegrationTests/Scenarios/FileTransferEndToEndIntegrationTests.cs` (lines 361 and 517): drop the `(_, _) => ValueTask.CompletedTask` lambda argument from `HandleInboundIceSignalAsync` and `InitiateDirectConnectionAsync`.
 - **Acceptance Criteria:**
-  - Zero raw C# event delegates on transport ports; all subscriptions anchored to `handle.SessionDisposables`.
-  - Zero synthetic `ChannelId.FromGuid(...)` fabrications.
-  - `DesktopNetworkEndpointDiscoveryPort` resolves discovery implementation via DI.
-  - All test suites (Desktop, Simulator, Apps, Infrastructure, Integration) pass 100%.
+  - Zero `event Action<...>` delegates or `ChannelReader` members on `ITransferPeerConnection`; zero `_ = Task.Run` fire-and-forget tasks in `TransferSessionRuntime` or `WebRtcPeerTransportTests`.
+  - Zero `CreateIceSignalDispatcher` closures or `Func<FileTransferIceSignalPayload, ...>` callback parameters on `ITransferSessionRuntime`.
+  - Zero `R3` package references added to `Percolator.Apps.FileTransfer` or `Percolator.Infrastructure`.
+  - Zero `ChannelId.FromGuid(sessionId.Value)` in `FileTransferActionHandler`.
+  - `NullTransferStreamPool.cs` and `DesktopNetworkEndpointDiscoveryPort.cs` deleted; `DesktopSessionServiceCollectionExtensions.cs` calls `services.AddFileTransferApp(enableIngressByDefault: true)`.
+  - All test suites pass 100%.
+
+---
+
+#### Ticket `FT-010` — Ingress Policy Owner-Scoping Fix, Outbound Failure Propagation, 2-Member Group Support & Serialized Runtime Checkpointing
+- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.ApplicationIntegrationTests`
+- **Dependencies:** `FT-009`
+- **Architectural Defects Addressed:**
+  - **Security Bug (Blocked Peers/Relays Never Enforced in Production):** Both `FileTransferIngressFilter` (`EvaluateAsync` line 32, `Evaluate` line 46) and `FileTransferPayloadHandler` (`HandleInboundAsync` line 56) call `_policyRepository.GetPolicyAsync(context.SenderIdentityId, ...)`. `FilterPolicyEntity.OwnerId` is the **local recipient persona's** ID; querying by the remote sender's ID always returns `DefaultPermissive` in SQLite. This was masked in unit tests because `InMemoryFilterPolicyRepository` ignored its `ownerId` parameter and returned a single `Policy` field.
+  - **Swallowed Outbound Send Failures:** `FileTransferActionHandler` ignores the `DomainResult` returned by every `_payloadSender.SendPayloadAsync(...)` call (`InitiateTransferAsync` lines 250/263, `AcceptTransferAsync` lines 412/435, `ResumeTransferAsync` lines 547/571, `CancelTransferAsync` lines 652/666), returning `Success` and leaving orphaned active runtime handles when outbox/ratchet dispatch fails.
+  - **2-Member Group Chat Misclassification:** `FileTransferActionHandler.cs:152` infers `bool isGroupTransfer = recipients.Count > 1;`, misclassifying any 2-member group chat (`recipients.Count == 1`) as 1:1 (`DeliveryRoute.RelayedOneToOne` instead of `DeliveryRoute.RelayedGroup`).
+  - **Persistence Gap & Concurrent Checkpoint Ordering Race:** `TransferSessionRuntime` mutates `LocalBitfield`, `UploadedBytes`, `State` (`InFlight -> Seeding/Completed`), and `CompletedAtUtc` exclusively in RAM. Because `SqlFileTransferQueryService` is strictly DB-driven, `ChatViewModel` sees 0% progress and stale `InFlight` even after download completion, and app restart loses verified chunk progress. Furthermore, multiple concurrent `PumpChannelAsync` peer tasks in a swarm must serialize checkpoint writes so an older async SQLite write can never overwrite a newer verified bitfield.
+- **Exact Implementation Specification:**
+  1. **Fix Filter Policy Owner-ID Lookup:**
+     - In `Percolator.Apps.FileTransfer/Features/IngressControl/FileTransferIngressFilter.cs`:
+       - Line 32 (`EvaluateAsync`): change `context.SenderIdentityId` to `context.RecipientIdentityId` in `GetPolicyAsync(...)`. Keep `policy.EvaluatePeer(context.SenderIdentityId)`.
+       - Line 46 (`Evaluate`): change `context.SenderIdentityId` to `context.RecipientIdentityId` in `GetPolicyAsync(...)`. Keep `policy.EvaluatePeer(context.SenderIdentityId)`.
+     - In `Percolator.Apps.FileTransfer/Features/IngressControl/FileTransferPayloadHandler.cs`:
+       - Line 56 (`HandleInboundAsync`): change `context.SenderIdentityId` to `context.RecipientIdentityId` in `GetPolicyAsync(...)`. Keep `policy.EvaluatePeer(context.SenderIdentityId)`.
+     - In `Percolator.Apps.FileTransfer.Tests/TestDoubles/TestDoubles.cs` (`InMemoryFilterPolicyRepository`):
+       - Replace `public FileTransferFilterPolicy Policy { get; set; }` with `private readonly ConcurrentDictionary<PublicIdentityId, FileTransferFilterPolicy> _policies = new();`.
+       - `SavePolicyAsync`: `_policies[policy.OwnerId] = policy;`.
+       - `GetPolicyAsync(PublicIdentityId ownerId, CancellationToken ct = default)`: return `_policies.TryGetValue(ownerId, out var p) ? p : FileTransferFilterPolicy.DefaultPermissive(ownerId)`.
+     - Update `Percolator.Apps.FileTransfer.Tests/Features/IngressControl/Tests/IngressControlTests.cs` (`UT_ING_02`, `UT_ING_03`) and `TransferSessionRuntimeTests.cs` (line 486) to save policies via `SavePolicyAsync` keyed to `recipientId` / `localId`, and add `UT_ING_09_PolicyLookupIsScopedToRecipientOwnerNotSender` verifying a policy stored under `senderId` does NOT drop messages to `recipientId`, while a policy stored under `recipientId` DOES drop `senderId` and blocked relays.
+  2. **Propagate `SendPayloadAsync` Failures, Support 2-Member Group Transfers & Use `FileTransferControlFraming` in `FileTransferActionHandler`:**
+     - In `Percolator.Apps.FileTransfer/Ports/IFileTransferActionHandler.cs` (lines 14–23) and `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferActionHandler.cs` (lines 60–68):
+       - Add optional parameter `bool isGroupTransfer = false` before `CancellationToken ct = default` on `InitiateTransferAsync`.
+       - Replace line 152 (`bool isGroupTransfer = recipients.Count > 1;`) with `bool effectiveIsGroup = isGroupTransfer || recipients.Count > 1;` and use `effectiveIsGroup` throughout `InitiateTransferAsync`.
+     - Replace all 4 duplicated `PrependOpcode` + `OutboundPayloadContext` blocks in `FileTransferActionHandler.cs` with `FileTransferControlFraming.FramePayload` / `FileTransferControlFraming.BuildOutboundContext` and delete private `PrependOpcode` (lines 685–691).
+     - Inspect the `DomainResult` returned by EVERY `_payloadSender.SendPayloadAsync(...)` call:
+       - `InitiateTransferAsync` (lines 250, 263): if `sendResult.IsFailure`, call `await _runtime.StopSessionAsync(sessionId, deleteCertificate: true, ct);` so no orphaned active runtime handle or certificate leaks, and return `DomainResult<TransferSessionId>.Failure(sendResult.Error)`.
+       - `AcceptTransferAsync` (lines 412, 435): if `sendResult.IsFailure`, call `await _runtime.StopSessionAsync(sessionId, deleteCertificate: false, ct);` and return `sendResult`.
+       - `ResumeTransferAsync` (lines 547, 571): if `sendResult.IsFailure`, return `sendResult`.
+       - `CancelTransferAsync` (lines 652, 666): if `sendResult.IsFailure`, return `sendResult` (session is already persisted as `Cancelled` and stopped locally).
+     - Add unit tests in `ActionHandlerAndQueryTests.cs`:
+       - Verify `InitiateTransferAsync(..., isGroupTransfer: true)` with a single recipient creates `MultiPeer` topology and sends `DeliveryRoute.RelayedGroup` with `RecipientIdentityId == null`.
+       - Verify `InitiateTransferAsync` propagates `_payloadSender` failure and stops the runtime handle (`runtime.HasActiveSession(...) == false`).
+  3. **Add `ITransferSessionCheckpointStore` Port & SQLite Adapter:**
+     - Create `Percolator.Apps.FileTransfer/Ports/ITransferSessionCheckpointStore.cs`:
+       ```csharp
+       using Percolator.Apps.FileTransfer.Domain.Common;
+       using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+
+       namespace Percolator.Apps.FileTransfer.Ports;
+
+       public interface ITransferSessionCheckpointStore
+       {
+           ValueTask SaveCheckpointAsync(
+               TransferSessionId sessionId,
+               Bitfield localBitfield,
+               TransferSessionState state,
+               TotalBundleBytes uploadedBytes,
+               DateTimeOffset? completedAtUtc,
+               CancellationToken ct = default);
+       }
+       ```
+     - Create `Percolator.Infrastructure/Persistence/Repositories/SqliteTransferSessionCheckpointStore.cs` (singleton, injecting `IDbContextFactory<PercolatorDbContext>`):
+       - Opens short-lived `PercolatorDbContext`; loads `TransferSessionEntity? session` by `sessionId.Value` — if `null`, returns without error.
+       - Updates `session.State = (int)state`, `session.UploadedSizeBytes = uploadedBytes.Bytes`, `session.CompletedAtUtc = completedAtUtc`.
+       - Upserts `TransferBitfieldEntity` for `sessionId.Value` (`BitfieldBytes = localBitfield.ToByteArray()`, `VerifiedPieces = localBitfield.PopCount`, `TotalPieces = localBitfield.TotalChunks.Count`).
+       - Calls `await db.SaveChangesAsync(ct).ConfigureAwait(false)`.
+     - Register `services.AddSingleton<ITransferSessionCheckpointStore, SqliteTransferSessionCheckpointStore>();` in `InfrastructureServiceCollectionExtensions.AddFileTransferInfrastructure()`.
+  4. **Wire Serialized Checkpointing into `TransferSessionRuntime`:**
+     - In `Percolator.Apps.FileTransfer/Ports/ITransferSessionRuntime.cs` (`TransferSessionRuntimeOptions`, lines 10–17):
+       - Add optional parameters `TimeSpan? CheckpointInterval = null` (property `EffectiveCheckpointInterval => CheckpointInterval ?? TimeSpan.FromMilliseconds(500)`) and `int CheckpointChunkBatchSize = 16`.
+     - In `Percolator.Apps.FileTransfer/Features/Runtime/TransferSessionRuntime.cs`:
+       - Add required non-null constructor parameter `ITransferSessionCheckpointStore checkpointStore`.
+       - On `ActiveTransferHandle`, add `public SemaphoreSlim CheckpointLock { get; } = new(1, 1);`, `public bool HasUnpersistedChanges { get; set; }`, `public int ChunksSinceCheckpoint { get; set; }`, and `public DateTimeOffset LastCheckpointUtc { get; set; }`.
+       - Add helper `PersistCheckpointIfNeededAsync(ActiveTransferHandle handle, bool force, CancellationToken ct)`:
+         1. Fast check under `lock (handle.SyncRoot)`: return early unless `(force && handle.HasUnpersistedChanges)` OR `handle.ChunksSinceCheckpoint >= _options.CheckpointChunkBatchSize` OR `(handle.HasUnpersistedChanges && (_clock.UtcNow - handle.LastCheckpointUtc) >= _options.EffectiveCheckpointInterval)`.
+         2. `await handle.CheckpointLock.WaitAsync(ct).ConfigureAwait(false);` (guarantees strictly monotonic SQLite writes when multiple peer `PumpChannelAsync` tasks verify chunks concurrently).
+         3. Inside `try { ... } finally { handle.CheckpointLock.Release(); }`: re-check the due condition and snapshot the latest `(Id, LocalBitfield, State, UploadedBytes, CompletedAtUtc)` under `lock (handle.SyncRoot)`, resetting `HasUnpersistedChanges = false`, `ChunksSinceCheckpoint = 0`, `LastCheckpointUtc = _clock.UtcNow`; then `await _checkpointStore.SaveCheckpointAsync(...)` while holding `CheckpointLock`. If `SaveCheckpointAsync` throws a non-cancellation exception, restore `HasUnpersistedChanges = true` under `lock (handle.SyncRoot)` so the next interval retries.
+       - Call sites in `TransferSessionRuntime`:
+         1. `PumpChannelAsync` after `HandleIncomingChunkDataAsync` succeeds: increment `ChunksSinceCheckpoint`, set `HasUnpersistedChanges = true`, and call `PersistCheckpointIfNeededAsync(handle, force: transitionedToSeeding || isTerminal, ct)`.
+         2. `PumpChannelAsync` after `HandleRequestChunkAsync` serves a chunk: set `HasUnpersistedChanges = true`, and call `PersistCheckpointIfNeededAsync(handle, force: false, ct)`.
+         3. `EvaluateSeedingRetentionAsync` when `stopped == true`: set `HasUnpersistedChanges = true` and call `PersistCheckpointIfNeededAsync(handle, force: true, ct)` prior to `StopSessionInternalAsync`.
+         4. `StopSessionInternalAsync` and `StopAllSessionsAsync`: AFTER `WaitBoundedAsync(Task.WhenAll(handle.PeerPumpTasks.Values), boundedCt)` finishes, invoke `PersistCheckpointIfNeededAsync(handle, force: true, boundedCt)` (catching `OperationCanceledException`/transient storage exceptions so teardown never stalls), then call `handle.CheckpointLock.Dispose();` and `handle.SessionCts.Dispose();`.
+     - Update test doubles & call sites:
+       - Add `InMemoryTransferSessionCheckpointStore : ITransferSessionCheckpointStore` in `Percolator.Apps.FileTransfer.Tests/TestDoubles/TestDoubles.cs`.
+       - Pass `ITransferSessionCheckpointStore` to all `new TransferSessionRuntime(...)` sites (`IngressControlTests.cs:35`, `TransferNegotiationTests.cs:44`, `ActionHandlerAndQueryTests.cs:47,309`, `TransferSessionRuntimeTests.cs:492`, plus DI registration in `TransferSessionRuntimeTests.cs:455`).
+       - Add unit tests in `TransferSessionRuntimeTests.cs` verifying batched chunk checkpointing and immediate checkpoint on `InFlight -> Seeding` transition, a SQLite round-trip test in `SqliteTransferSessionRepositoryTests.cs` for `SqliteTransferSessionCheckpointStore`, and an assertion in `FileTransferEndToEndIntegrationTests.cs` confirming `IFileTransferQueryService.GetTransferByIdAsync(sessionId)` reports `Seeding`/`Completed` and 100% verified chunks in SQLite after download completion.
+- **Acceptance Criteria:**
+  - `FileTransferIngressFilter` and `FileTransferPayloadHandler` query policies strictly by `context.RecipientIdentityId` and evaluate against `context.SenderIdentityId`.
+  - `InMemoryFilterPolicyRepository` keys policies strictly by `OwnerId`.
+  - Every `_payloadSender.SendPayloadAsync` call in `FileTransferActionHandler` checks and propagates failures (with runtime cleanup on `InitiateTransferAsync` / `AcceptTransferAsync` send failure); 2-member group chats can be initiated via `isGroupTransfer: true`.
+  - `TransferSessionRuntime` persists verified bitfield progress, uploaded bytes, and terminal/seeding state transitions monotonically via `ITransferSessionCheckpointStore` serialized by `CheckpointLock`.
+  - `SqlFileTransferQueryService` reflects live chunk progress and `Seeding`/`Completed` status from SQLite without reading runtime RAM.
+  - All test suites (`Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.Desktop.Tests`, `Percolator.Simulator.Tests`, `Percolator.ApplicationIntegrationTests`) pass 100%.
+
+---
+
+#### Ticket `FT-011` — Hot-Path Concurrency Correctness, `O(1)` Scheduling & Zero-Copy Buffer Pooling
+- **Layer / Scope:** `Percolator.Apps.FileTransfer.Domain`, `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Apps.FileTransfer.Domain.Tests`, `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`
+- **Dependencies:** `FT-010`
+- **Architectural Defects Addressed:**
+  - **Split-Lock Data Race on `TransferSession`:** `TransferSessionRuntime` locks `handle.SyncRoot`, `TransferSessionCoordinator` locks a separate private `_sessionSync`, and `DiskChunkAssembler.AssembleChunkAsync` calls `session.VerifyAndRecordChunk(...)` with **no lock at all** — AND flips `LocalBitfield` before writing to disk (allowing concurrent uploaders to read unwritten zeros).
+  - **Quadratic Bitfield & Required-Mask Allocations:** `TransferSessionRuntime.ScheduleAndRequestMissingChunksAsync` recomputes `Manifest.GetRequiredChunks(SelectedFiles)` (which clones the entire `byte[]` on every bit set), copies `Scheduler.InFlightChunks` into a new `HashSet` per iteration, and runs an `O(TotalChunks × ActivePeers)` linear scan under `lock (handle.SyncRoot)`. `ApplyResumptionBitfield` and `ScanAndComputeBitfieldAsync` also call `bitfield.WithChunk` inside a chunk loop (`O(C² / 8)` allocations). `SelectedFileIndices.All(50_000)` allocates a 50k-element `HashSet`.
+  - **Unbounded `_domainEvents` Memory Leak:** `TransferSession.VerifyAndRecordChunk` appends `ChunkVerifiedDomainEvent` and `FileCompletedDomainEvent` on every chunk, and `TransferSessionRuntime` never clears `_domainEvents` (leaking 500k+ objects per large transfer).
+  - **Redundant Binary Search & LOH Churn:** `ChunkBoundaryCalculator.CalculateSlicesFromEntries` binary-searches on every tiny file inside a chunk (~350 binary searches per 1 MB chunk in `node_modules`) and is called twice per received chunk. `TransferSessionCoordinator.HandleRequestChunkAsync` (line 126) allocates `new byte[length]` defeating `ArrayPool`; `SwarmFrameCodec.DecodeChunkData` (line 350) allocates a fresh LOH `byte[]` on every received chunk.
+  - **`TokenBucketRateLimiter` Lock Contention & Leak:** Shares a single `_syncLock` between global download and upload, and never evicts stopped sessions from `_sessionCaps`/`_sessionDownloadBuckets`/`_sessionUploadBuckets`.
+- **Exact Implementation Specification:**
+  1. **Eliminate Quadratic Domain Allocations (`Percolator.Apps.FileTransfer.Domain`):**
+     - In `Percolator.Apps.FileTransfer.Domain/TransferNegotiation/Bitfield.cs`:
+       - Add `public sealed class BitfieldBuilder` (`private readonly byte[] _bytes;`, `Set(ChunkIndex index)`, `SetRange(int firstChunk, int lastChunk)`, `Build() -> Bitfield` computing `PopCount` once).
+       - Add `public Bitfield Union(Bitfield other)` (single-pass bitwise OR returning one `Bitfield`).
+       - Add `public bool HasAnyBitIn(Bitfield requiredMask, Bitfield excludeMask)` checking `(_bytes[i] & requiredMask._bytes[i] & ~excludeMask._bytes[i]) != 0` with zero allocations.
+       - Add `internal ReadOnlySpan<byte> AsSpan() => _bytes;` (for fast word-level scanning in domain/app selectors without cloning).
+     - In `Percolator.Apps.FileTransfer.Domain/TransferNegotiation/SelectedFileIndices.cs`:
+       - Represent `SelectedFileIndices.All(FileCount totalFiles)` in `O(1)` memory (`public bool IsAll { get; }`, `private readonly int _totalFileCount;`, `private readonly HashSet<FileIndex>? _indices;`).
+       - `Contains(FileIndex index)`: when `IsAll`, return `index.Value >= 0 && index.Value < _totalFileCount`; `SelectedCount`: return `IsAll ? _totalFileCount : _indices!.Count`.
+       - `Indices`: when `IsAll`, lazily materialize or return a lightweight `IReadOnlySet<FileIndex>` backed by `[0.._totalFileCount)` so existing callers/tests iterating `Indices` remain 100% compatible without allocating a 50k `HashSet` on creation.
+     - In `Percolator.Apps.FileTransfer.Domain/ManifestManagement/TransferManifest.cs` (`GetRequiredChunks`, lines 118–137):
+       - Fast-path `if (selectedFiles.IsAll || selectedFiles.SelectedCount == Files.Count) return Bitfield.Full(TotalChunks);`.
+       - For partial selections, use `BitfieldBuilder` (`builder.SetRange(firstChunk, lastChunk)`) -> single `Build()`.
+     - In `Percolator.Apps.FileTransfer.Domain/ManifestManagement/ChunkBoundaryCalculator.cs` (lines 16–47):
+       - Binary-search ONCE via `FindFirstFileIndexForOffset(files, chunkStart)` returning `int fileIdx`, then advance `fileIdx++` linearly across contiguous non-empty files until `remainingChunkBytes.Bytes == 0`.
+     - In `Percolator.Apps.FileTransfer.Domain/TransferNegotiation/TransferSession.cs`:
+       - Cache `private Bitfield? _cachedRequiredChunks;` exposed via `public Bitfield RequiredChunksMask => _cachedRequiredChunks ??= (SelectedFiles != null ? Manifest.GetRequiredChunks(SelectedFiles) : Bitfield.Full(Manifest.TotalChunks));`; invalidate `_cachedRequiredChunks = null;` whenever `SelectedFiles` changes (`AcceptTransfer`).
+       - Update `IsDownloadComplete` (line 30) and `GetMissingRequiredChunks()` (line 188) to use `RequiredChunksMask`.
+       - Update `UpdatePeerInterestAndCheckStallRecovery` (line 496) and `ReevaluateAllPeerInterests` (line 511) to use `member.Bitfield.HasAnyBitIn(RequiredChunksMask, LocalBitfield)` (zero allocations!).
+       - Update `ApplyResumptionBitfield` (lines 598–605) to `LocalBitfield = LocalBitfield.Union(scannedBitfield);` (single allocation instead of O(C²)).
+       - Add `public DomainResult<IReadOnlyList<FileEntry>> RecordPreVerifiedChunk(ChunkIndex chunkIndex, IReadOnlyList<FileChunkSlice> slices, IDateTimeProvider clock)`:
+         - Assumes Merkle hash was already verified off-lock; validates `State == InFlight` and chunk bounds; if `LocalBitfield.HasChunk(chunkIndex)` returns `Success([])`; flips `LocalBitfield`, calls `ReevaluateAllPeerInterests()`, raises `ChunkVerifiedDomainEvent`, inspects the passed `slices` (no second `CalculateSlices` call!) collecting completed `FileEntry` items + raising `FileCompletedDomainEvent`, handles `IsDownloadComplete -> Seeding/Completed`, and returns `newlyCompletedFiles`. Keep `VerifyAndRecordChunk` calling `VerifyLeaf` + `CalculateSlices` + `RecordPreVerifiedChunk` so all existing domain unit tests pass unchanged.
+  2. **Unify Session Locking, Off-Lock Hash Verification & Write-Before-Bitfield Order:**
+     - In `Percolator.Apps.FileTransfer/Features/Storage/DiskChunkAssembler.cs`:
+       - Add optional `object? sessionSync = null` parameter to `AssembleChunkAsync`:
+         1. Off-lock: check chunk bounds, expected byte length, and `session.Manifest.MerkleTree.VerifyLeaf(chunkIndex, plaintextData.Span)` (if mismatch -> return `Transfer.CryptographicVerificationFailed` without touching disk!).
+         2. Compute `IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlices(...)` ONCE.
+         3. Write verified slices to disk (outside `sessionSync`, so concurrent peers/transfers never block on disk I/O while holding the session lock).
+         4. Acquire `lock (sync)` ONLY for the fast memory commit: `DomainResult<IReadOnlyList<FileEntry>> commitResult = session.RecordPreVerifiedChunk(chunkIndex, slices, clock);` (guarantees peers can never read unwritten bytes from disk after seeing `LocalBitfield` / `HaveFrame`!).
+         5. Outside `lock (sync)`: call `_fileStorage.FinalizeFileAsync(...)` for each entry in `commitResult.Value`.
+     - In `Percolator.Apps.FileTransfer/Features/MultiStreamEngine/TransferSessionCoordinator.cs`:
+       - Accept optional `object? sessionSync = null` in constructor (`_sessionSync = sessionSync ?? new object();`).
+       - Pass `_sessionSync` into `_assembler.AssembleChunkAsync(..., _sessionSync, ct)`.
+       - In `TransferSessionRuntime.CreateHandle`: pass `handle.SyncRoot` into `new TransferSessionCoordinator(scheduler, assembler, _clock, _rateLimiter, handle.SyncRoot)` so `Runtime`, `Coordinator`, and `DiskChunkAssembler` share ONE lock.
+       - In `TransferSessionRuntime` after `HandleIncomingChunkDataAsync` succeeds: call `handle.Session.ClearDomainEvents();` under `lock (handle.SyncRoot)` so `_domainEvents` stays bounded at `O(1)`.
+  3. **Incremental Piece Availability Index & Allocation-Free Scheduling:**
+     - Create `Percolator.Apps.FileTransfer/Features/SwarmCoordination/PieceAvailabilityIndex.cs`:
+       - Holds `int[] _availability` (length `totalChunks`) and `Dictionary<PublicIdentityId, Bitfield> _peerBitfields`.
+       - Methods (called under `handle.SyncRoot`): `SetPeerBitfield(PublicIdentityId peerId, Bitfield newBitfield)`, `RecordPeerHave(PublicIdentityId peerId, ChunkIndex chunkIndex)`, `RemovePeer(PublicIdentityId peerId)`, and `ChunkIndex? SelectRarestForPeer(PublicIdentityId peerId, Bitfield localBitfield, Bitfield requiredMask, Func<ChunkIndex, bool> isInFlight)`.
+       - `SelectRarestForPeer` scans `requiredMask`, `localBitfield`, and `peerBitfield` byte-by-byte (using `byte candidateMask = (byte)(req & ~loc & peer); if (candidateMask == 0) continue;`, iterating set bits via `BitOperations.LeadingZeroCount`) — skipping 8 already-owned/unavailable chunks per iteration and looking up `_availability[chunkIdx]` in **O(1)** instead of looping all peers per chunk!
+     - In `Percolator.Apps.FileTransfer/Features/MultiStreamEngine/ChunkPipelineScheduler.cs`:
+       - Keep `InFlightChunks` for existing tests, and rely on `IsChunkInFlight(ChunkIndex)` (or `TryScheduleRarest(PublicIdentityId peerId, Func<Func<ChunkIndex, bool>, ChunkIndex?> selector)` holding `_sync` cleanly without allocating a `HashSet` copy per request!).
+     - Wire `PieceAvailabilityIndex` into `ActiveTransferHandle` in `TransferSessionRuntime.cs` (update on `BitfieldFrame`, `HaveFrame`, `RegisterSwarmMember`, peer disconnect, and peer eviction; call from `ScheduleAndRequestMissingChunksAsync`).
+  4. **Zero-Copy Pooled Buffers & `TokenBucketRateLimiter` Hygiene:**
+     - In `Percolator.Apps.FileTransfer/Features/MultiStreamEngine/StreamFramePayloads.cs`:
+       - On `ChunkDataFrame`, add optional `IDisposable? BufferOwner = null` (excluded from value equality or implemented with `public void ReleaseBuffer() => BufferOwner?.Dispose();`).
+     - In `Percolator.Apps.FileTransfer/Ports/IDesktopFileStorage.cs`:
+       - Add default-implemented zero-copy read methods (overridden by `PortableDesktopFileStore` in `FT-012`):
+         ```csharp
+         async ValueTask<int> ReadChunkIntoAsync(ResolvedFilePath sourcePath, FileByteOffset fileOffset, Memory<byte> destination, CancellationToken ct = default)
+         {
+             PlaintextChunkData data = await ReadChunkAsync(sourcePath, fileOffset, TransferByteLength.FromBytes(destination.Length), ct).ConfigureAwait(false);
+             data.Span.CopyTo(destination.Span);
+             return data.Length;
+         }
+         ```
+     - In `Percolator.Apps.FileTransfer/Features/MultiStreamEngine/TransferSessionCoordinator.cs` (`HandleRequestChunkAsync`, lines 106–130):
+       - Use `ReadChunkIntoAsync` directly into `rentedPlaintext.AsMemory(slice.BufferOffset, slice.SliceLength.Bytes)` (falling back to `ReadBoundarySliceAsync` for unselected boundary slices).
+       - Delete `byte[] chunkBuffer = new byte[length];` (line 126)! Construct `PlaintextChunkData.FromMemory(rentedPlaintext.AsMemory(0, length))` directly and `await stream.SendFrameAsync(new ChunkDataFrame(chunkIdx, plaintextChunk), ct);` while `rentedPlaintext` stays rented until `finally` returns it.
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/SwarmFrameCodec.cs` (`DecodeChunkData`, line 350):
+       - Rent `IMemoryOwner<byte> owner = MemoryPool<byte>.Shared.Rent(dataLen);`, copy `payload.Slice(4)` into `owner.Memory.Span.Slice(0, dataLen)`, and return `new ChunkDataFrame(ChunkIndex.FromInt(chunkIndex), PlaintextChunkData.FromMemory(owner.Memory.Slice(0, dataLen)), owner)`.
+       - In `TransferSessionRuntime` (and `TransferSessionCoordinator.PumpSingleStreamAsync`): wrap `ChunkDataFrame` processing in `try { ... } finally { chunkData.ReleaseBuffer(); }`.
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/PortableDesktopFileStore.cs` (`ScanAndComputeBitfieldAsync`, lines 291–382):
+       - Replace `bitfield = bitfield.WithChunk(chunkIndex)` with `BitfieldBuilder` (`builder.Set(chunkIndex)` -> `builder.Build()`).
+     - In `Percolator.Apps.FileTransfer/Ports/ITransferRateLimiter.cs` & `Percolator.Infrastructure/Plugins/FileTransfer/TokenBucketRateLimiter.cs`:
+       - Add `void RemoveSession(TransferSessionId sessionId) { }` (default empty for stubs); in `TokenBucketRateLimiter`, split `_syncLock` into `_globalDownloadLock` and `_globalUploadLock`, and implement `RemoveSession` to remove entries from `_sessionCaps`, `_sessionDownloadBuckets`, and `_sessionUploadBuckets` (disposing bucket `SemaphoreSlim`s). Call `_rateLimiter.RemoveSession(sessionId)` in `TransferSessionRuntime.StopSessionInternalAsync` and `StopAllSessionsAsync`.
+  5. **Tests to Add / Update:**
+     - `Percolator.Apps.FileTransfer.Domain.Tests`: test `BitfieldBuilder`, `Bitfield.Union`, `Bitfield.HasAnyBitIn`, `SelectedFileIndices.All(50_000)` O(1) creation, `ChunkBoundaryCalculator` spanning 500 tiny files + 0-byte files in one chunk, and `RecordPreVerifiedChunk`.
+     - `Percolator.Apps.FileTransfer.Tests`: test `PieceAvailabilityIndex` rarest-first selection & peer removal, concurrent 4-peer chunk verification + upload against a single `TransferSessionRuntime` verifying zero lost bits / zero unwritten reads / `session.DomainEvents.Count == 0`, and `TokenBucketRateLimiter.RemoveSession`.
+- **Acceptance Criteria:**
+  - Single lock (`handle.SyncRoot`) shared across `TransferSessionRuntime`, `TransferSessionCoordinator`, and `DiskChunkAssembler`; SHA-256 verification and disk writes run off-lock; `LocalBitfield` flips only after disk write succeeds.
+  - Zero `Bitfield.WithChunk` loops in `GetRequiredChunks`, `ApplyResumptionBitfield`, and `ScanAndComputeBitfieldAsync`; zero `new HashSet` copies per request in `ScheduleAndRequestMissingChunksAsync`; zero `new byte[length]` chunk copies in `HandleRequestChunkAsync` or `SwarmFrameCodec.DecodeChunkData`.
+  - `_domainEvents` never accumulates unboundedly on active sessions in `TransferSessionRuntime`.
+  - All test suites pass 100%.
+
+---
+
+#### Ticket `FT-012` — Concurrent Multi-Transfer Pipeline, `SafeFileHandle` LRU Storage Engine & WebRTC 64 KB Block Sub-Framing
+- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.ApplicationIntegrationTests`
+- **Dependencies:** `FT-011`
+- **Architectural Defects Addressed:**
+  - **Single-Loop Full-Duplex Head-of-Line Blocking:** `TransferSessionRuntime.PumpChannelAsync` runs inbound receive, disk write, sequential `BroadcastHaveAsync` to all peers, and outbound disk read + send in one loop per peer. One slow peer or slow disk write stalls the entire swarm and triggers `WebRtcDataChannelAdapter` queue overflow disconnects.
+  - **Unbounded Multi-Transfer Memory & Disk Thrashing:** `WebRtcDataChannelAdapter` uses a fixed 128-frame queue (up to 512 MB RAM per peer at 4 MB chunks -> 8 GB RAM across 4 concurrent 4-peer transfers), and there is no global cap on concurrent disk/hash workers across simultaneous transfers.
+  - **WebRTC SCTP Oversized-Message Cliff:** `WebRtcPeerConnectionAdapter` (line 86) sets `MaxMessageSize = 4 MB + 64` and sends entire 1–4 MB chunks as single SCTP messages, exceeding standard 64 KB–256 KB WebRTC SCTP limits and causing WAN head-of-line stalls.
+  - **`node_modules` Syscall & Initiation Collapse:** `IngressTransferOfferValidator.MaxFilesPerBundle` caps at 50,000; `PortableDesktopFileStore` opens/seeks/flushes/closes a new `FileStream` on every file slice (~350k syscalls for 45k tiny files); `AcceptTransferAsync` runs upfront 45k-file `ScanAndComputeBitfieldAsync` + synchronous `PreAllocateFilesAsync` on brand-new folders; `InitiateTransferAsync` hashes chunk-by-chunk single-threaded, re-opening boundary files across chunks.
+- **Exact Implementation Specification:**
+  1. **WebRTC 64 KB SCTP Sub-Framing & Byte-Budgeted Pooled Reassembly:**
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/WebRtc/WebRtcPeerConnectionAdapter.cs` (line 86):
+       - Change `MaxMessageSize` to `WebRtcDataChannelAdapter.MaxSctpMessageBytes` (`65_536`).
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/WebRtc/WebRtcDataChannelAdapter.cs`:
+       - Define constants:
+         - `internal const int MaxSctpMessageBytes = 65_536;`
+         - `private const byte FragmentOpcode = 0xFF;` (disjoint from `StreamFrameType` `0x01..0x0C`)
+         - `private const int FragmentHeaderBytes = 13;` (`[0xFF (1B) | uint32 msgId (4B) | uint32 totalLen (4B) | uint32 offset (4B)]`)
+         - `private const int MaxFragmentPayloadBytes = MaxSctpMessageBytes - FragmentHeaderBytes;` (`65_523`)
+         - `private const int MaxConcurrentReassemblies = 4;`
+         - `private const long MaxBufferedInboundBytes = 8L * 1024 * 1024;` (8 MB cap per channel instead of 128 × 4 MB = 512 MB!)
+       - Replace `Channel<byte[]> _inboundFrames` with `Channel<PooledWireFrame> _inboundFrames` (where `PooledWireFrame` holds `byte[] RentedBuffer, int Length` and implements `IDisposable` returning to `ArrayPool<byte>.Shared` + decrementing `Interlocked.Add(ref _bufferedInboundBytes, -Length)`).
+       - `SendFrameAsync`:
+         - If `encoded.Length <= MaxSctpMessageBytes`, send directly via `_channel.Send(encoded.Span)`.
+         - Else allocate monotonic `uint msgId = Interlocked.Increment(ref _nextFragmentMsgId);`, rent a single `MaxSctpMessageBytes` scratch buffer from `ArrayPool<byte>.Shared`, and under `_sendLock` send consecutive slices of size `Math.Min(MaxFragmentPayloadBytes, encoded.Length - offset)` with the 13-byte header (`FragmentOpcode`, `msgId`, `encoded.Length`, `offset`), returning the scratch buffer in `finally`.
+       - `OnBinaryReceived`:
+         - If `data.Length > 0 && data[0] == FragmentOpcode`: validate `data.Length > FragmentHeaderBytes`, parse `(msgId, totalLen, offset)`, validate `totalLen >= SwarmFrameCodec.FrameHeaderSizeBytes && totalLen <= SwarmFrameCodec.MaxWireFrameSizeBytes`, validate `offset + payloadLen <= totalLen`, reject if active reassemblies exceed `MaxConcurrentReassemblies` (or duplicate/overlapping range exceeds `totalLen`), copy fragment payload directly into the single rented `ArrayPool` buffer for `msgId`. When `receivedBytes == totalLen`, remove from `_reassemblies` and enqueue as `PooledWireFrame`.
+         - Else (unfragmented frame): rent `ArrayPool<byte>.Shared.Rent(data.Length)`, copy `data`, enqueue as `PooledWireFrame`.
+         - Enforce `MaxBufferedInboundBytes` via `Interlocked.Add(ref _bufferedInboundBytes, frame.Length)`: if exceeded, return rented buffer, fail channel cleanly, and dispose off-thread.
+       - In `ReceiveFrameAsync`: `using PooledWireFrame rawFrame = await _inboundFrames.Reader.ReadAsync(ct); return SwarmFrameCodec.DecodeFramed(rawFrame.Span);` (returns the rented wire buffer immediately after decode!).
+       - In `DisposeAsync`: drain remaining queued `PooledWireFrame`s and `_reassemblies` buffers back to `ArrayPool<byte>.Shared` so zero pooled buffers leak on teardown.
+  2. **Decoupled Full-Duplex Peer Pipeline with Global Disk/Hash Concurrency Gate:**
+     - In `Percolator.Apps.FileTransfer/Ports/ITransferSessionRuntime.cs` (`TransferSessionRuntimeOptions`):
+       - Add optional parameters `int MaxConcurrentIoWorkers = 6` and `int OutboundPeerQueueCapacity = 64`.
+     - In `Percolator.Apps.FileTransfer/Features/Runtime/TransferSessionRuntime.cs`:
+       - Add runtime-wide `private readonly SemaphoreSlim _globalIoWorkerGate;` initialized to `Math.Max(1, _options.MaxConcurrentIoWorkers)` (shared across ALL simultaneous transfers on this node; disposed in `DisposeAsync()`).
+       - Per attached peer channel (`PeerChannelPipe` stored in `handle.PeerPipes`), run TWO lightweight coordinated tasks:
+         - **Writer Task:** reads from bounded `Channel<IStreamFramePayload>` (`OutboundQueue`, capacity `_options.OutboundPeerQueueCapacity`, `SingleReader = true`) and calls `await channel.SendFrameAsync(frame, ct)` (calling `ReleaseBuffer()` on `ChunkDataFrame` if applicable). `BroadcastHaveAsync` becomes non-blocking `pipe.OutboundQueue.Writer.TryWrite(haveFrame)` — a slow peer never blocks the swarm!
+         - **Reader Task:** continuously reads `channel.ReceiveFrameAsync(ct)`; handles lightweight control frames (`BitfieldFrame`, `HaveFrame`, `InterestedFrame`, `NotInterestedFrame`, `UnchokeFrame`, `ChokeFrame`, `CancelChunkFrame`, `KeepAliveFrame`) inline; dispatches `ChunkDataFrame` (verify + disk write + checkpoint) and `RequestChunkFrame` (disk read + enqueue reply onto `pipe.OutboundQueue`) via bounded worker tasks gated by `_globalIoWorkerGate.WaitAsync(ct)` (and tracked in `handle.PeerPumpTasks` for bounded teardown).
+         - Wait on `ChunkDataFrame`: ensure `chunkData.ReleaseBuffer()` ALWAYS runs in `finally` even on cancellation or failure.
+  3. **`SafeFileHandle` LRU Handle Cache + `RandomAccess` + Lazy Allocation in `PortableDesktopFileStore`:**
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/PortableDesktopFileStore.cs`:
+       - Implement `IDisposable` and add an internal thread-safe LRU open-handle pool (`MaxOpenFileHandles = 256`, configurable via optional constructor parameter `int maxOpenHandles = 256`).
+       - Cache entry: `(SafeFileHandle Handle, int RefCount, bool MarkedForEviction, LinkedListNode<HandleKey> LruNode)` keyed by `(string NormalizedPath, FileAccess Access)` using `File.OpenHandle(path, mode, access, FileShare.ReadWrite, FileOptions.Asynchronous | FileOptions.RandomAccess)`.
+       - `AcquireHandle(path, mode, access)` increments `RefCount` and moves to MRU; `ReleaseHandle(entry)` decrements `RefCount` and disposes `SafeFileHandle` only when `MarkedForEviction && RefCount == 0` (evicting LRU entries when cache exceeds `maxOpenHandles`).
+       - Add `EvictPath(string path)` (closes/disposes cached handles for both `path` and `GetPartFilePath(path)`, waiting briefly if `RefCount > 0`) called immediately at the start of `FinalizeFileAsync` before `File.Move(partPath, targetPath)` so Windows never throws sharing violations on rename.
+       - Add a `ConcurrentDictionary<string, byte> _createdDirectories` cache in `EnsureParentDirectoryExists` so repeated slices into the same directory avoid redundant `Directory.Exists` syscalls.
+       - Refactor `WriteChunkAsync`: acquire cached write `SafeFileHandle` for `.percolator-part` (creating lazily on first write if absent — setting length via `RandomAccess.SetLength` only when file is created for large files), call `await RandomAccess.WriteAsync(handle, data.Memory, fileOffset.Offset, ct).ConfigureAwait(false)` — **remove per-slice `FlushAsync()`**!
+       - Implement `ReadChunkIntoAsync` (and refactor `ReadChunkAsync` to delegate to it): acquire cached read `SafeFileHandle` and call `await RandomAccess.ReadAsync(handle, destination, fileOffset.Offset, ct).ConfigureAwait(false)` in a loop until full or EOF.
+       - Refactor `PreAllocateFilesAsync`: create 0-byte files immediately, and pre-allocate `.percolator-part` files ONLY for files `>= 1 * 1024 * 1024` (1 MB) so 50,000 tiny `node_modules` files are created lazily on first chunk write instead of blocking `AcceptTransferAsync` with 50,000 upfront `CreateFile` + `SetLength` syscalls.
+       - Add `ValueTask<bool> HasAnyExistingTransferFilesAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices selectedIndices, CancellationToken ct = default)` on `IDesktopFileStorage` (default returns `true` for test doubles): `PortableDesktopFileStore` returns `false` immediately if `!Directory.Exists(rootPath.Value)` or `Directory.EnumerateFileSystemEntries(rootPath.Value)` is empty.
+       - In `FileTransferActionHandler.AcceptTransferAsync` (line 308): call `HasAnyExistingTransferFilesAsync`; if `false`, skip `ScanAndComputeBitfieldAsync` and use `Bitfield.Empty(session.Manifest.TotalChunks)` directly!
+       - Register `PortableDesktopFileStore` as `Singleton` (already singleton) and ensure `Dispose()` runs when the Stage-2 DI container disposes.
+  4. **File-Sequential Parallel Hashing & Raised `MaxFilesPerBundle` (`node_modules` Initiation):**
+     - In `Percolator.Apps.FileTransfer/Features/IngressControl/IngressTransferOfferValidator.cs` (line 13): raise `MaxFilesPerBundle` from `50_000` to `250_000`.
+     - Create `Percolator.Apps.FileTransfer/Features/TransferNegotiation/TransferPreparationProgress.cs`:
+       `public readonly record struct TransferPreparationProgress(int FilesScanned, int TotalFiles, int ChunksHashed, int TotalChunks);`
+     - In `Percolator.Apps.FileTransfer/Ports/IFileTransferActionHandler.cs` & `FileTransferActionHandler.cs` (`InitiateTransferAsync`):
+       - Add optional `IProgress<TransferPreparationProgress>? preparationProgress = null` parameter before `CancellationToken ct = default`.
+       - Replace the chunk-by-chunk loop (`FileTransferActionHandler.cs:111-140`) with a **file-sequential streaming reader + bounded parallel SHA-256 pipeline**:
+         - Open each non-empty file ONCE sequentially via `_fileStorage.ReadChunkIntoAsync` (in `chunkSize.Bytes` slices or file remainder), filling rented `ArrayPool<byte>.Shared.Rent(chunkSize.Bytes)` chunk buffers across file boundaries without re-opening boundary files.
+         - Dispatch each completed chunk buffer to a bounded parallel hashing stage (`MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 8)`, bounded in-flight buffer count = `maxWorkers * 2` so hashing RAM stays <= `16 × chunkSize`) computing `MerkleTreeBuilder.HashLeaf(buf.AsSpan(0, expectedBytes))`, storing into `ChunkHash[] leafHashes` at `chunkIdx`, returning the buffer with `clearArray: true`, and reporting `preparationProgress?.Report(...)`.
+         - Use `.ConfigureAwait(false)` throughout so Desktop UI threads are never blocked on hashing continuations.
+  5. **Tests to Add / Verify:**
+     - `Percolator.Infrastructure.Tests/Plugins/FileTransfer/WebRtcPeerTransportTests.cs`: add loopback test transferring a **2 MB single chunk** (>64 KB `MaxSctpMessageBytes`) over live `WebRtcDataChannelAdapter` verifying transparent 64 KB SCTP fragmentation, reassembly, exact byte equality, and zero leaked buffers on close; add test rejecting forged/oversized `0xFF` fragment headers.
+     - `Percolator.Infrastructure.Tests/Plugins/FileTransfer/PortableDesktopFileStoreTests.cs`: test LRU eviction under `maxOpenHandles: 8` writing & finalizing **500 small files** concurrently (verifying zero Windows sharing violations on `FinalizeFileAsync` rename and exact byte integrity across all 500 files), plus `HasAnyExistingTransferFilesAsync` fast-path on empty folder.
+     - `Percolator.Apps.FileTransfer.Tests/Features/TransferNegotiation/Tests/TransferNegotiationTests.cs`: verify file-sequential parallel hashing in `InitiateTransferAsync` produces byte-identical `MerkleRoot` and leaves across multi-file boundary-spanning bundles (including 0-byte files and 1,000 tiny files) and reports `TransferPreparationProgress`.
+     - `Percolator.ApplicationIntegrationTests/Scenarios/FileTransferEndToEndIntegrationTests.cs`: add a concurrent stress test running **3 simultaneous transfers** (including one multi-hundred-file bundle) over live WebRTC + SQLite checkpointing, verifying 100% SHA-256 integrity, zero `SQLITE_BUSY` errors, and clean teardown.
+- **Acceptance Criteria:**
+  - `WebRtcPeerConnectionAdapter` uses `MaxMessageSize = 65_536`; 1–4 MB chunks transfer reliably over WebRTC via transparent 64 KB SCTP sub-framing with bounded 8 MB/channel receive memory.
+  - `TransferSessionRuntime` separates per-peer reader/writer loops and caps global disk/hash concurrency via `_globalIoWorkerGate`; slow peers never stall `BroadcastHaveAsync`.
+  - `PortableDesktopFileStore` uses `SafeFileHandle` LRU cache + `RandomAccess.ReadAsync`/`WriteAsync` (zero per-slice `FlushAsync`, lazy `.percolator-part` allocation for files `< 1 MB`, skipped initial scan on empty destination folders).
+  - `InitiateTransferAsync` opens each file once and hashes chunks in bounded parallel with optional `IProgress<TransferPreparationProgress>`; `MaxFilesPerBundle = 250_000`.
+  - All test suites (`Percolator.Apps.FileTransfer.Domain.Tests`, `Percolator.Apps.FileTransfer.Tests`, `Percolator.Infrastructure.Tests`, `Percolator.Desktop.Tests`, `Percolator.Simulator.Tests`, `Percolator.ApplicationIntegrationTests`) pass 100%.
