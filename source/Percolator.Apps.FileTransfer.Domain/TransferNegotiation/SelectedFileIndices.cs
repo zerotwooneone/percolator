@@ -1,3 +1,4 @@
+using System.Collections;
 using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.Exceptions;
 
@@ -5,28 +6,42 @@ namespace Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 
 public sealed record SelectedFileIndices
 {
-    private readonly HashSet<FileIndex> _indices;
-    public IReadOnlySet<FileIndex> Indices => _indices;
-    public int SelectedCount => _indices.Count;
+    public bool IsAll { get; }
+    private readonly int _totalFileCount;
+    private readonly HashSet<FileIndex>? _indices;
+
+    private IReadOnlySet<FileIndex>? _cachedAllSet;
+
+    public IReadOnlySet<FileIndex> Indices => IsAll
+        ? (_cachedAllSet ??= new AllFileIndicesReadOnlySet(_totalFileCount))
+        : _indices!;
+
+    public int SelectedCount => IsAll ? _totalFileCount : _indices!.Count;
+
+    private SelectedFileIndices(int totalFileCount)
+    {
+        IsAll = true;
+        _totalFileCount = totalFileCount;
+        _indices = null;
+    }
 
     private SelectedFileIndices(HashSet<FileIndex> indices)
     {
+        IsAll = false;
+        _totalFileCount = indices.Count;
         _indices = indices;
     }
 
-    public bool Contains(FileIndex index) => _indices.Contains(index);
+    public bool Contains(FileIndex index) => IsAll
+        ? (index.Value >= 0 && index.Value < _totalFileCount)
+        : _indices!.Contains(index);
 
     public static SelectedFileIndices All(FileCount fileCount)
     {
         if (fileCount.Count <= 0)
             throw new DomainValidationException("FileCount must be greater than zero.");
 
-        HashSet<FileIndex> set = new(fileCount.Count);
-        for (int i = 0; i < fileCount.Count; i++)
-        {
-            set.Add(FileIndex.FromInt(i));
-        }
-        return new SelectedFileIndices(set);
+        return new SelectedFileIndices(fileCount.Count);
     }
 
     public static SelectedFileIndices FromIndices(IEnumerable<FileIndex> indices, FileCount fileCount)
@@ -56,16 +71,53 @@ public sealed record SelectedFileIndices
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        return _indices.SetEquals(other._indices);
+        if (IsAll && other.IsAll) return _totalFileCount == other._totalFileCount;
+        if (IsAll) return other.SelectedCount == _totalFileCount && other.Indices.All(Contains);
+        if (other.IsAll) return SelectedCount == other._totalFileCount && Indices.All(other.Contains);
+        return _indices!.SetEquals(other._indices!);
     }
 
     public override int GetHashCode()
     {
+        if (IsAll) return HashCode.Combine(true, _totalFileCount);
         int hash = 0;
-        foreach (FileIndex index in _indices)
+        foreach (FileIndex index in _indices!)
         {
             hash ^= index.GetHashCode();
         }
-        return HashCode.Combine(_indices.Count, hash);
+        return HashCode.Combine(false, _indices.Count, hash);
+    }
+
+    private sealed class AllFileIndicesReadOnlySet : IReadOnlySet<FileIndex>
+    {
+        private readonly int _total;
+
+        public AllFileIndicesReadOnlySet(int total) => _total = total;
+
+        public int Count => _total;
+
+        public bool Contains(FileIndex item) => item.Value >= 0 && item.Value < _total;
+
+        public bool IsProperSubsetOf(IEnumerable<FileIndex> other) => IsSubsetOf(other) && other.Any(x => !Contains(x));
+
+        public bool IsProperSupersetOf(IEnumerable<FileIndex> other) => IsSupersetOf(other) && other.Distinct().Count() < _total;
+
+        public bool IsSubsetOf(IEnumerable<FileIndex> other) => other.Distinct().Count() >= _total && other.All(Contains);
+
+        public bool IsSupersetOf(IEnumerable<FileIndex> other) => other.All(Contains);
+
+        public bool Overlaps(IEnumerable<FileIndex> other) => other.Any(Contains);
+
+        public bool SetEquals(IEnumerable<FileIndex> other)
+        {
+            if (other is AllFileIndicesReadOnlySet all) return all._total == _total;
+            if (other is IReadOnlyCollection<FileIndex> coll && coll.Count != _total) return false;
+            HashSet<FileIndex> set = other is HashSet<FileIndex> s ? s : [.. other];
+            return set.Count == _total && set.All(Contains);
+        }
+
+        public IEnumerator<FileIndex> GetEnumerator() => Enumerable.Range(0, _total).Select(FileIndex.FromInt).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

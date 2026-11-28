@@ -35,9 +35,23 @@ public sealed record RequestChunkFrame(ChunkIndex ChunkIndex) : IStreamFramePayl
     public StreamFrameType FrameType => StreamFrameType.RequestChunk;
 }
 
-public sealed record ChunkDataFrame(ChunkIndex ChunkIndex, PlaintextChunkData Data) : IStreamFramePayload
+public sealed record ChunkDataFrame(
+    ChunkIndex ChunkIndex,
+    PlaintextChunkData Data,
+    IDisposable? BufferOwner = null) : IStreamFramePayload
 {
     public StreamFrameType FrameType => StreamFrameType.ChunkData;
+
+    public void ReleaseBuffer() => BufferOwner?.Dispose();
+
+    public bool Equals(ChunkDataFrame? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return ChunkIndex == other.ChunkIndex && Data.Equals(other.Data);
+    }
+
+    public override int GetHashCode() => HashCode.Combine(ChunkIndex, Data);
 }
 
 public sealed record CancelChunkFrame(ChunkIndex ChunkIndex) : IStreamFramePayload

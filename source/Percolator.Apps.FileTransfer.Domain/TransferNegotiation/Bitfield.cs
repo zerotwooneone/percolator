@@ -131,6 +131,80 @@ public sealed record Bitfield
         return new Bitfield(result, TotalChunks, CountBits(result));
     }
 
+    public Bitfield Union(Bitfield other)
+    {
+        if (other.TotalChunks != TotalChunks)
+            throw new DomainValidationException("Cannot compute union of bitfields with differing total chunk counts.");
+        byte[] result = new byte[_bytes.Length];
+        for (int i = 0; i < _bytes.Length; i++) result[i] = (byte)(_bytes[i] | other._bytes[i]);
+        return new Bitfield(result, TotalChunks, CountBits(result));
+    }
+
+    public bool HasAnyBitIn(Bitfield requiredMask, Bitfield excludeMask)
+    {
+        ArgumentNullException.ThrowIfNull(requiredMask);
+        ArgumentNullException.ThrowIfNull(excludeMask);
+        if (requiredMask.TotalChunks != TotalChunks || excludeMask.TotalChunks != TotalChunks)
+            throw new DomainValidationException("Cannot check bits across bitfields with differing total chunk counts.");
+
+        for (int i = 0; i < _bytes.Length; i++)
+        {
+            if ((_bytes[i] & requiredMask._bytes[i] & ~excludeMask._bytes[i]) != 0)
+                return true;
+        }
+        return false;
+    }
+
+    public ReadOnlySpan<byte> AsSpan() => _bytes;
+
+    public sealed class BitfieldBuilder
+    {
+        private readonly byte[] _bytes;
+        private readonly ChunkCount _totalChunks;
+
+        public BitfieldBuilder(ChunkCount totalChunks)
+        {
+            _totalChunks = totalChunks;
+            int len = (totalChunks.Count + 7) / 8;
+            _bytes = new byte[len];
+        }
+
+        public void Set(ChunkIndex index)
+        {
+            if (index.Value < 0 || index.Value >= _totalChunks.Count)
+                throw new DomainValidationException($"Chunk index {index.Value} is out of bounds for {_totalChunks.Count} total chunks.");
+
+            int byteIdx = index.Value / 8;
+            int bitIdx = 7 - (index.Value % 8);
+            _bytes[byteIdx] |= (byte)(1 << bitIdx);
+        }
+
+        public void SetRange(int firstChunk, int lastChunk)
+        {
+            if (firstChunk < 0 || lastChunk >= _totalChunks.Count || firstChunk > lastChunk)
+                throw new DomainValidationException($"Invalid chunk range [{firstChunk}, {lastChunk}] for {_totalChunks.Count} total chunks.");
+
+            for (int i = firstChunk; i <= lastChunk; i++)
+            {
+                int byteIdx = i / 8;
+                int bitIdx = 7 - (i % 8);
+                _bytes[byteIdx] |= (byte)(1 << bitIdx);
+            }
+        }
+
+        public Bitfield Build()
+        {
+            int remainder = _totalChunks.Count % 8;
+            if (remainder != 0 && _bytes.Length > 0)
+            {
+                byte mask = (byte)(0xFF << (8 - remainder));
+                _bytes[^1] &= mask;
+            }
+            int count = CountBits(_bytes);
+            return new Bitfield((byte[])_bytes.Clone(), _totalChunks, count);
+        }
+    }
+
     public byte[] ToByteArray() => (byte[])_bytes.Clone();
 
     public bool Equals(Bitfield? other)

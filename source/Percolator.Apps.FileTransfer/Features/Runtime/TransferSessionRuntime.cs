@@ -765,8 +765,10 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             await WaitBoundedAsync(Task.WhenAll(pumpTasks), boundedCt).ConfigureAwait(false);
         }
 
-        foreach ((TransferSessionId _, ActiveTransferHandle handle) in snapshot)
+        foreach ((TransferSessionId sessionId, ActiveTransferHandle handle) in snapshot)
         {
+            _rateLimiter.RemoveSession(sessionId);
+
             try
             {
                 await PersistCheckpointIfNeededAsync(handle, force: true, boundedCt).ConfigureAwait(false);
@@ -813,9 +815,10 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         bool exchangeSupportsTransferPipe,
         RelayEndpoint? exchangeEndpoint)
     {
+        object syncRoot = new();
         var scheduler = new ChunkPipelineScheduler();
         var assembler = new DiskChunkAssembler(_fileStorage);
-        var coordinator = new TransferSessionCoordinator(scheduler, assembler, _clock, _rateLimiter);
+        var coordinator = new TransferSessionCoordinator(scheduler, assembler, _clock, _rateLimiter, syncRoot);
         var swarmCoordinator = new SwarmCoordinator(_clock);
 
         var handle = new ActiveTransferHandle(
@@ -828,7 +831,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             exchangeSupportsTransferPipe,
             exchangeEndpoint,
             session.State == TransferSessionState.Seeding ? _clock.UtcNow : null,
-            _clock.UtcNow);
+            _clock.UtcNow,
+            syncRoot);
 
         if (transportContext.SenderCertSha256 != null &&
             session.InitiatorId != transportContext.LocalIdentityId)
@@ -1021,6 +1025,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                         bool peerHasNeeded;
                         lock (handle.SyncRoot)
                         {
+                            handle.PieceAvailability.SetPeerBitfield(remotePeerId, bitfieldFrame.Bitfield);
                             handle.Session.RecordPeerBitfield(remotePeerId, bitfieldFrame.Bitfield);
                             SwarmMember? member = handle.Session.SwarmMembers.FirstOrDefault(m => m.PeerId == remotePeerId);
                             peerHasNeeded = member != null && member.WeInterestedInPeer == PeerInterestStatus.Interested;
@@ -1037,6 +1042,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                     {
                         lock (handle.SyncRoot)
                         {
+                            handle.PieceAvailability.RecordPeerHave(remotePeerId, haveFrame.ChunkIndex);
                             handle.Session.RecordPeerHave(remotePeerId, haveFrame.ChunkIndex);
                         }
                         break;
@@ -1122,60 +1128,68 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
                     case ChunkDataFrame chunkData:
                     {
-                        bool wasSeedingBefore;
-                        lock (handle.SyncRoot)
+                        try
                         {
-                            wasSeedingBefore = handle.Session.State == TransferSessionState.Seeding;
-                        }
-
-                        DomainResult result = await handle.Coordinator.HandleIncomingChunkDataAsync(
-                            handle.Session,
-                            remotePeerId,
-                            chunkData,
-                            channel,
-                            handle.LocalRootPath,
-                            streamPool: null,
-                            ct).ConfigureAwait(false);
-
-                        if (result.IsFailure)
-                        {
-                            if (result.Error.Code == "MultiStream.CorruptedChunk")
+                            bool wasSeedingBefore;
+                            lock (handle.SyncRoot)
                             {
-                                return;
+                                wasSeedingBefore = handle.Session.State == TransferSessionState.Seeding;
                             }
+
+                            DomainResult result = await handle.Coordinator.HandleIncomingChunkDataAsync(
+                                handle.Session,
+                                remotePeerId,
+                                chunkData,
+                                channel,
+                                handle.LocalRootPath,
+                                streamPool: null,
+                                ct).ConfigureAwait(false);
+
+                            if (result.IsFailure)
+                            {
+                                if (result.Error.Code == "MultiStream.CorruptedChunk")
+                                {
+                                    return;
+                                }
+                                break;
+                            }
+
+                            await BroadcastHaveAsync(handle, chunkData.ChunkIndex, ct).ConfigureAwait(false);
+
+                            bool transitionedToSeeding = false;
+                            isTerminal = false;
+                            lock (handle.SyncRoot)
+                            {
+                                handle.Session.ClearDomainEvents();
+                                if (!wasSeedingBefore && handle.Session.State == TransferSessionState.Seeding)
+                                {
+                                    handle.SeedingStartedAtUtc ??= _clock.UtcNow;
+                                    transitionedToSeeding = true;
+                                }
+
+                                isTerminal = handle.Session.State == TransferSessionState.Completed ||
+                                             handle.Session.State == TransferSessionState.Cancelled ||
+                                             handle.Session.State == TransferSessionState.Failed;
+                                handle.ChunksSinceCheckpoint++;
+                                handle.HasUnpersistedChanges = true;
+                            }
+
+                            if (transitionedToSeeding)
+                            {
+                                await AnnounceSeederBestEffortAsync(
+                                    handle.TransportContext.SwarmRendezvousId,
+                                    handle.TransportContext.EphemeralPeerId,
+                                    handle.ExchangeEndpoint,
+                                    ct).ConfigureAwait(false);
+                            }
+
+                            await PersistCheckpointIfNeededAsync(handle, force: transitionedToSeeding || isTerminal, ct).ConfigureAwait(false);
                             break;
                         }
-
-                        await BroadcastHaveAsync(handle, chunkData.ChunkIndex, ct).ConfigureAwait(false);
-
-                        bool transitionedToSeeding = false;
-                        isTerminal = false;
-                        lock (handle.SyncRoot)
+                        finally
                         {
-                            if (!wasSeedingBefore && handle.Session.State == TransferSessionState.Seeding)
-                            {
-                                handle.SeedingStartedAtUtc ??= _clock.UtcNow;
-                                transitionedToSeeding = true;
-                            }
-
-                            isTerminal = handle.Session.State == TransferSessionState.Completed ||
-                                         handle.Session.State == TransferSessionState.Cancelled ||
-                                         handle.Session.State == TransferSessionState.Failed;
-                            handle.ChunksSinceCheckpoint++;
-                            handle.HasUnpersistedChanges = true;
+                            chunkData.ReleaseBuffer();
                         }
-
-                        if (transitionedToSeeding)
-                        {
-                            await AnnounceSeederBestEffortAsync(
-                                handle.TransportContext.SwarmRendezvousId,
-                                handle.TransportContext.EphemeralPeerId,
-                                handle.ExchangeEndpoint,
-                                ct).ConfigureAwait(false);
-                        }
-
-                        await PersistCheckpointIfNeededAsync(handle, force: transitionedToSeeding || isTerminal, ct).ConfigureAwait(false);
-                        break;
                     }
 
                     case KeepAliveFrame:
@@ -1185,6 +1199,10 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         }
         finally
         {
+            lock (handle.SyncRoot)
+            {
+                handle.PieceAvailability.RemovePeer(remotePeerId);
+            }
             handle.Coordinator.Scheduler.ReleasePeer(remotePeerId);
             handle.PeerChannels.TryRemove(remotePeerId, out _);
             try
@@ -1215,18 +1233,18 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 }
                 else
                 {
-                    Bitfield required = handle.Session.SelectedFiles != null
-                        ? handle.Session.Manifest.GetRequiredChunks(handle.Session.SelectedFiles)
-                        : Bitfield.Full(handle.Session.Manifest.TotalChunks);
-
-                    nextChunk = RarestFirstChunkSelector.SelectNextChunkForPeer(
+                    if (handle.Coordinator.Scheduler.TryScheduleRarest(
                         remotePeerId,
-                        handle.Session.LocalBitfield,
-                        required,
-                        handle.Session.SwarmMembers,
-                        handle.Coordinator.Scheduler.InFlightChunks);
-
-                    if (nextChunk.HasValue && !handle.Coordinator.Scheduler.TrySchedule(remotePeerId, nextChunk.Value))
+                        predicate => handle.PieceAvailability.SelectRarestForPeer(
+                            remotePeerId,
+                            handle.Session.LocalBitfield,
+                            handle.Session.RequiredChunksMask,
+                            predicate),
+                        out ChunkIndex scheduled))
+                    {
+                        nextChunk = scheduled;
+                    }
+                    else
                     {
                         nextChunk = null;
                     }
@@ -1339,6 +1357,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             handle.CheckpointLock.Dispose();
             handle.SessionCts.Dispose();
         }
+
+        _rateLimiter.RemoveSession(sessionId);
 
         try
         {
@@ -1506,7 +1526,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
     private sealed class ActiveTransferHandle
     {
-        public object SyncRoot { get; } = new();
+        public object SyncRoot { get; }
+        public PieceAvailabilityIndex PieceAvailability { get; }
         public SemaphoreSlim CheckpointLock { get; } = new(1, 1);
         public bool HasUnpersistedChanges { get; set; }
         public int ChunksSinceCheckpoint { get; set; }
@@ -1541,8 +1562,11 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             bool exchangeSupportsTransferPipe,
             RelayEndpoint? exchangeEndpoint,
             DateTimeOffset? seedingStartedAtUtc,
-            DateTimeOffset lastCheckpointUtc)
+            DateTimeOffset lastCheckpointUtc,
+            object syncRoot)
         {
+            SyncRoot = syncRoot ?? throw new ArgumentNullException(nameof(syncRoot));
+            PieceAvailability = new PieceAvailabilityIndex(session.Manifest.TotalChunks);
             Session = session;
             TransportContext = transportContext;
             LocalRootPath = localRootPath;

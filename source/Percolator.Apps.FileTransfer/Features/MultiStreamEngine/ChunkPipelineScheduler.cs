@@ -100,6 +100,42 @@ public sealed class ChunkPipelineScheduler
         }
     }
 
+    public bool TryScheduleRarest(
+        PublicIdentityId peerId,
+        Func<Func<ChunkIndex, bool>, ChunkIndex?> selector,
+        out ChunkIndex scheduledChunk)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        lock (_sync)
+        {
+            int pending = _inFlightByPeer.TryGetValue(peerId, out var set) ? set.Count : 0;
+            if (pending >= MaxPendingRequestsPerPeer)
+            {
+                scheduledChunk = default;
+                return false;
+            }
+
+            ChunkIndex? candidate = selector(_allInFlight.Contains);
+            if (!candidate.HasValue)
+            {
+                scheduledChunk = default;
+                return false;
+            }
+
+            scheduledChunk = candidate.Value;
+            if (set == null)
+            {
+                set = [];
+                _inFlightByPeer[peerId] = set;
+            }
+
+            set.Add(scheduledChunk);
+            _allInFlight.Add(scheduledChunk);
+            return true;
+        }
+    }
+
     public void MarkCompleted(ChunkIndex chunkIndex)
     {
         lock (_sync)

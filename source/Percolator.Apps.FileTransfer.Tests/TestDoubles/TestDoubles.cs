@@ -670,6 +670,12 @@ public sealed class InMemoryPairedTransferDataChannel : ITransferDataChannel
         if (Volatile.Read(ref _disposed) != 0)
             throw new ObjectDisposedException(nameof(InMemoryPairedTransferDataChannel));
 
+        if (frame is ChunkDataFrame chunkData)
+        {
+            byte[] copy = chunkData.Data.Span.ToArray();
+            frame = new ChunkDataFrame(chunkData.ChunkIndex, PlaintextChunkData.FromBytes(copy));
+        }
+
         await _outbound.WriteAsync(frame, ct).ConfigureAwait(false);
     }
 

@@ -119,7 +119,12 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
     {
         ArgumentNullException.ThrowIfNull(selectedFiles);
 
-        Bitfield required = Bitfield.Empty(TotalChunks);
+        if (selectedFiles.IsAll || selectedFiles.SelectedCount == Files.Count)
+        {
+            return Bitfield.Full(TotalChunks);
+        }
+
+        Bitfield.BitfieldBuilder builder = new(TotalChunks);
         foreach (FileIndex index in selectedFiles.Indices)
         {
             FileEntry file = Files[index.Value];
@@ -128,11 +133,8 @@ public sealed class TransferManifest : IEntity<TransferSessionId>
             int firstChunk = (int)(file.StartOffset.Offset / ChunkSize.Bytes);
             int lastChunk = (int)((file.EndOffset.Offset - 1) / ChunkSize.Bytes);
 
-            for (int c = firstChunk; c <= lastChunk; c++)
-            {
-                required = required.WithChunk(ChunkIndex.FromInt(c));
-            }
+            builder.SetRange(firstChunk, lastChunk);
         }
-        return required;
+        return builder.Build();
     }
 }

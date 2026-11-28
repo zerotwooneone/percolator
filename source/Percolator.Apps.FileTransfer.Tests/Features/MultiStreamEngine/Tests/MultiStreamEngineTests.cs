@@ -465,4 +465,63 @@ public sealed class MultiStreamEngineTests
         sentFrame.Data.Span.ToArray().Should().Equal(chunk0Bytes);
         manifest.MerkleTree.VerifyLeaf(sentFrame.ChunkIndex, sentFrame.Data.Span).Should().BeTrue();
     }
+
+    private sealed class TrackingMemoryOwner : System.Buffers.IMemoryOwner<byte>
+    {
+        private readonly byte[] _buffer;
+        public bool IsDisposed { get; private set; }
+
+        public TrackingMemoryOwner(int size) => _buffer = new byte[size];
+
+        public Memory<byte> Memory => _buffer;
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+        }
+    }
+
+    [Test]
+    public void UT_MSE_08_ZeroCopyBufferOwner_ReleasesCleanly()
+    {
+        var owner = new TrackingMemoryOwner(1024);
+        var frame = new ChunkDataFrame(ChunkIndex.FromInt(5), PlaintextChunkData.FromMemory(owner.Memory), owner);
+
+        frame.BufferOwner.Should().BeSameAs(owner);
+        owner.IsDisposed.Should().BeFalse();
+
+        frame.ReleaseBuffer();
+        owner.IsDisposed.Should().BeTrue();
+
+        // ReleaseBuffer should be idempotent
+        Action act = () => frame.ReleaseBuffer();
+        act.Should().NotThrow();
+    }
+
+    [Test]
+    public async Task UT_MSE_09_AssembleChunkAsync_OffLockHashVerification_WithSessionSync()
+    {
+        TransferSessionId sessionId = TransferSessionId.New();
+        PublicIdentityId initiatorId = PublicIdentityId.New();
+        object sessionSync = new();
+
+        TransferSession session = CreateActiveSession(sessionId, initiatorId, chunkCount: 2);
+        RootDirectoryPath root = RootDirectoryPath.Parse(@"C:\Dest");
+        DiskChunkAssembler assembler = new(_fileStorage);
+
+        byte[] chunk0Bytes = new byte[session.Manifest.ChunkSize.Bytes];
+        BitConverter.GetBytes(0).CopyTo(chunk0Bytes, 0);
+
+        DomainResult result = await assembler.AssembleChunkAsync(
+            session,
+            root,
+            ChunkIndex.FromInt(0),
+            PlaintextChunkData.FromBytes(chunk0Bytes),
+            _clock,
+            sessionSync: sessionSync);
+
+        result.IsSuccess.Should().BeTrue();
+        session.LocalBitfield.HasChunk(ChunkIndex.FromInt(0)).Should().BeTrue();
+    }
 }
+

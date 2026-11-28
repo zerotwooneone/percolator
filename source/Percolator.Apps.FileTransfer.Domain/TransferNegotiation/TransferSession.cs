@@ -24,11 +24,14 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset? CompletedAtUtc { get; private set; }
 
+    private Bitfield? _cachedRequiredChunks;
+    public Bitfield RequiredChunksMask => _cachedRequiredChunks ??= (SelectedFiles != null ? Manifest.GetRequiredChunks(SelectedFiles) : Bitfield.Full(Manifest.TotalChunks));
+
     private readonly Dictionary<PublicIdentityId, SwarmMember> _swarmMembers = [];
     public IReadOnlyCollection<SwarmMember> SwarmMembers => _swarmMembers.Values;
 
     public bool IsDownloadComplete =>
-        SelectedFiles != null && LocalBitfield.HasAllChunks(Manifest.GetRequiredChunks(SelectedFiles));
+        SelectedFiles != null && LocalBitfield.HasAllChunks(RequiredChunksMask);
 
     public SeedRatio CurrentSeedRatio =>
         Manifest.TotalSize.Bytes > 0
@@ -187,10 +190,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     public Bitfield GetMissingRequiredChunks()
     {
-        Bitfield required = SelectedFiles != null
-            ? Manifest.GetRequiredChunks(SelectedFiles)
-            : Bitfield.Full(Manifest.TotalChunks);
-        return required.Difference(LocalBitfield);
+        return RequiredChunksMask.Difference(LocalBitfield);
     }
 
     public DomainResult AcceptTransfer(
@@ -214,6 +214,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         }
 
         SelectedFiles = selectedFiles;
+        _cachedRequiredChunks = null;
         DateTimeOffset now = clock.UtcNow;
 
         if (IsDownloadComplete)
@@ -422,6 +423,57 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         return DomainResult.Success();
     }
 
+    public DomainResult<IReadOnlyList<FileEntry>> RecordPreVerifiedChunk(
+        ChunkIndex chunkIndex,
+        IReadOnlyList<FileChunkSlice> slices,
+        IDateTimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(slices);
+        if (State != TransferSessionState.InFlight)
+            return DomainResult<IReadOnlyList<FileEntry>>.Failure(new DomainError("Transfer.InvalidState", $"Cannot record chunks in state '{State}'."));
+
+        if (chunkIndex.Value < 0 || chunkIndex.Value >= Manifest.TotalChunks.Count)
+            return DomainResult<IReadOnlyList<FileEntry>>.Failure(new DomainError("Transfer.InvalidChunkIndex", $"Chunk index {chunkIndex.Value} is out of bounds."));
+
+        if (LocalBitfield.HasChunk(chunkIndex))
+            return DomainResult<IReadOnlyList<FileEntry>>.Success([]);
+
+        LocalBitfield = LocalBitfield.WithChunk(chunkIndex);
+        ReevaluateAllPeerInterests();
+        DateTimeOffset now = clock.UtcNow;
+
+        AddDomainEvent(new ChunkVerifiedDomainEvent(Id, chunkIndex, Manifest.MerkleTree.GetLeaf(chunkIndex), now));
+
+        List<FileEntry> newlyCompletedFiles = [];
+        foreach (FileChunkSlice slice in slices)
+        {
+            FileEntry file = Manifest.Files[slice.FileIndex.Value];
+            if (IsFileComplete(file))
+            {
+                newlyCompletedFiles.Add(file);
+                AddDomainEvent(new FileCompletedDomainEvent(Id, file.Index, file.RelativePath, now));
+            }
+        }
+
+        if (IsDownloadComplete)
+        {
+            if (TargetSeedRatio.IsZero)
+            {
+                State = TransferSessionState.Completed;
+                CompletedAtUtc = now;
+                AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+            }
+            else
+            {
+                State = TransferSessionState.Seeding;
+                AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
+            }
+        }
+
+        return DomainResult<IReadOnlyList<FileEntry>>.Success(newlyCompletedFiles);
+    }
+
     public DomainResult VerifyAndRecordChunk(
         ChunkIndex chunkIndex,
         PlaintextChunkData data,
@@ -444,38 +496,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (!Manifest.MerkleTree.VerifyLeaf(chunkIndex, data.Span))
             return DomainResult.Failure(new DomainError("Transfer.CryptographicVerificationFailed", $"Leaf hash verification failed for chunk {chunkIndex.Value}."));
 
-        LocalBitfield = LocalBitfield.WithChunk(chunkIndex);
-        ReevaluateAllPeerInterests();
-        DateTimeOffset now = clock.UtcNow;
-
-        AddDomainEvent(new ChunkVerifiedDomainEvent(Id, chunkIndex, Manifest.MerkleTree.GetLeaf(chunkIndex), now));
-
         IReadOnlyList<FileChunkSlice> slices = ChunkBoundaryCalculator.CalculateSlices(Manifest, chunkIndex, expectedChunkSize);
-        foreach (FileChunkSlice slice in slices)
-        {
-            FileEntry file = Manifest.Files[slice.FileIndex.Value];
-            if (IsFileComplete(file))
-            {
-                AddDomainEvent(new FileCompletedDomainEvent(Id, file.Index, file.RelativePath, now));
-            }
-        }
-
-        if (IsDownloadComplete)
-        {
-            if (TargetSeedRatio.IsZero)
-            {
-                State = TransferSessionState.Completed;
-                CompletedAtUtc = now;
-                AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
-            }
-            else
-            {
-                State = TransferSessionState.Seeding;
-                AddDomainEvent(new TransferCompletedDomainEvent(Id, Manifest.TotalSize, now));
-            }
-        }
-
-        return DomainResult.Success();
+        DomainResult<IReadOnlyList<FileEntry>> recordResult = RecordPreVerifiedChunk(chunkIndex, slices, clock);
+        return recordResult.IsSuccess ? DomainResult.Success() : DomainResult.Failure(recordResult.Error);
     }
 
     public bool IsFileComplete(FileEntry file)
@@ -495,8 +518,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     private void UpdatePeerInterestAndCheckStallRecovery(SwarmMember member)
     {
-        Bitfield missingRequired = GetMissingRequiredChunks();
-        bool peerHasNeededChunk = !member.Bitfield.Intersect(missingRequired).IsEmpty;
+        bool peerHasNeededChunk = member.Bitfield.HasAnyBitIn(RequiredChunksMask, LocalBitfield);
 
         member.SetWeInterestedInPeer(peerHasNeededChunk
             ? PeerInterestStatus.Interested
@@ -510,10 +532,9 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
 
     private void ReevaluateAllPeerInterests()
     {
-        Bitfield missingRequired = GetMissingRequiredChunks();
         foreach (SwarmMember member in _swarmMembers.Values)
         {
-            bool peerHasNeededChunk = !member.Bitfield.Intersect(missingRequired).IsEmpty;
+            bool peerHasNeededChunk = member.Bitfield.HasAnyBitIn(RequiredChunksMask, LocalBitfield);
             member.SetWeInterestedInPeer(peerHasNeededChunk
                 ? PeerInterestStatus.Interested
                 : PeerInterestStatus.NotInterested);
@@ -595,14 +616,7 @@ public sealed class TransferSession : AggregateRoot<TransferSessionId>
         if (scannedBitfield.TotalChunks != Manifest.TotalChunks)
             return DomainResult.Failure(new DomainError("Transfer.MismatchedBitfield", "Scanned bitfield total chunk count does not match manifest."));
 
-        for (int i = 0; i < Manifest.TotalChunks.Count; i++)
-        {
-            ChunkIndex idx = ChunkIndex.FromInt(i);
-            if (scannedBitfield.HasChunk(idx) && !LocalBitfield.HasChunk(idx))
-            {
-                LocalBitfield = LocalBitfield.WithChunk(idx);
-            }
-        }
+        LocalBitfield = LocalBitfield.Union(scannedBitfield);
 
         if (Role == TransferRole.Recipient && IsDownloadComplete && State == TransferSessionState.InFlight)
         {

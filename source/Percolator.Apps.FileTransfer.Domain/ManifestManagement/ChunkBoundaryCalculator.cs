@@ -25,9 +25,17 @@ public static class ChunkBoundaryCalculator
         BundleByteOffset currentOffset = chunkStart;
         int bufferOffset = 0;
 
-        while (remainingChunkBytes.Bytes > 0)
+        int fileIdx = FindFirstFileIndexForOffset(files, chunkStart);
+
+        while (remainingChunkBytes.Bytes > 0 && fileIdx < files.Count)
         {
-            FileEntry file = FindFileForOffset(files, currentOffset);
+            FileEntry file = files[fileIdx];
+            if (file.FileSize.Bytes == 0)
+            {
+                fileIdx++;
+                continue;
+            }
+
             FileByteOffset offsetInFile = currentOffset.SubtractToFileOffset(file.StartOffset);
             TransferByteLength bytesForThisFile = file.FileSize.RemainingSlice(offsetInFile, remainingChunkBytes);
 
@@ -41,12 +49,17 @@ public static class ChunkBoundaryCalculator
             bufferOffset += bytesForThisFile.Bytes;
             currentOffset = currentOffset.Add(bytesForThisFile);
             remainingChunkBytes = remainingChunkBytes.Subtract(bytesForThisFile);
+
+            if (currentOffset.Offset >= file.EndOffset.Offset)
+            {
+                fileIdx++;
+            }
         }
 
         return slices;
     }
 
-    private static FileEntry FindFileForOffset(IReadOnlyList<FileEntry> files, BundleByteOffset offset)
+    private static int FindFirstFileIndexForOffset(IReadOnlyList<FileEntry> files, BundleByteOffset offset)
     {
         int low = 0;
         int high = files.Count - 1;
@@ -79,7 +92,7 @@ public static class ChunkBoundaryCalculator
             }
             else
             {
-                return candidate;
+                return mid;
             }
         }
 

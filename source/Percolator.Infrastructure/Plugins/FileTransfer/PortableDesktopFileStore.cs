@@ -288,7 +288,7 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
         ArgumentNullException.ThrowIfNull(rootPath);
         ArgumentNullException.ThrowIfNull(manifest);
 
-        Bitfield bitfield = Bitfield.Empty(manifest.TotalChunks);
+        Bitfield.BitfieldBuilder bitfieldBuilder = new(manifest.TotalChunks);
         byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(manifest.ChunkSize.Bytes);
 
         try
@@ -378,7 +378,7 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
                 ChunkHash computedHash = MerkleTreeBuilder.HashLeaf(rentedBuffer.AsSpan(0, expectedBytes));
                 if (computedHash == manifest.MerkleTree.Leaves[c])
                 {
-                    bitfield = bitfield.WithChunk(chunkIndex);
+                    bitfieldBuilder.Set(chunkIndex);
                 }
             }
         }
@@ -387,7 +387,7 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage
             ArrayPool<byte>.Shared.Return(rentedBuffer);
         }
 
-        return bitfield;
+        return bitfieldBuilder.Build();
     }
 
     public static ResolvedFilePath ResolveAndValidateContainedPath(RootDirectoryPath rootPath, SanitizedRelativePath relativePath)

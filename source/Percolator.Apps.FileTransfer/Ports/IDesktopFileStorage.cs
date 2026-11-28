@@ -10,6 +10,18 @@ public interface IDesktopFileStorage
     ValueTask PreAllocateFilesAsync(RootDirectoryPath rootPath, TransferManifest manifest, SelectedFileIndices selectedIndices, CancellationToken ct = default);
     ValueTask WriteChunkAsync(ResolvedFilePath targetPath, FileByteOffset fileOffset, PlaintextChunkData data, CancellationToken ct = default);
     ValueTask<PlaintextChunkData> ReadChunkAsync(ResolvedFilePath sourcePath, FileByteOffset fileOffset, TransferByteLength length, CancellationToken ct = default);
+
+    ValueTask<int> ReadChunkIntoAsync(ResolvedFilePath sourcePath, FileByteOffset fileOffset, Memory<byte> destination, CancellationToken ct = default)
+    {
+        return ReadChunkIntoFallbackAsync(sourcePath, fileOffset, destination, ct);
+
+        async ValueTask<int> ReadChunkIntoFallbackAsync(ResolvedFilePath path, FileByteOffset offset, Memory<byte> dest, CancellationToken token)
+        {
+            PlaintextChunkData data = await ReadChunkAsync(path, offset, TransferByteLength.FromBytes(dest.Length), token).ConfigureAwait(false);
+            data.Span.CopyTo(dest.Span);
+            return data.Length;
+        }
+    }
     ValueTask WriteBoundarySliceAsync(TransferSessionId sessionId, ChunkIndex chunkIndex, FileIndex fileIndex, PlaintextChunkData data, CancellationToken ct = default);
     ValueTask<PlaintextChunkData?> ReadBoundarySliceAsync(TransferSessionId sessionId, ChunkIndex chunkIndex, FileIndex fileIndex, TransferByteLength length, CancellationToken ct = default);
     ValueTask DeleteBoundaryPartsAsync(TransferSessionId sessionId, CancellationToken ct = default) => ValueTask.CompletedTask;

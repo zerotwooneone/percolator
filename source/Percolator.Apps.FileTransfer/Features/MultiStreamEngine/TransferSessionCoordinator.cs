@@ -20,7 +20,7 @@ public sealed class TransferSessionCoordinator
     private readonly DiskChunkAssembler _assembler;
     private readonly IDateTimeProvider _clock;
     private readonly ITransferRateLimiter _rateLimiter;
-    private readonly object _sessionSync = new();
+    private readonly object _sessionSync;
     private readonly Dictionary<PublicIdentityId, int> _peerOffenses = [];
 
     public ChunkPipelineScheduler Scheduler => _scheduler;
@@ -29,12 +29,14 @@ public sealed class TransferSessionCoordinator
         ChunkPipelineScheduler scheduler,
         DiskChunkAssembler assembler,
         IDateTimeProvider clock,
-        ITransferRateLimiter rateLimiter)
+        ITransferRateLimiter rateLimiter,
+        object? sessionSync = null)
     {
         _scheduler = scheduler;
         _assembler = assembler;
         _clock = clock;
         _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
+        _sessionSync = sessionSync ?? new object();
     }
 
     public int GetPeerOffenses(PublicIdentityId peerId)
@@ -112,21 +114,26 @@ public sealed class TransferSessionCoordinator
 
                 if (session.SelectedFiles != null && !session.SelectedFiles.Contains(slice.FileIndex))
                 {
-                    sliceData = await fileStorage.ReadBoundarySliceAsync(session.Id, chunkIdx, slice.FileIndex, slice.SliceLength, ct);
+                    sliceData = await fileStorage.ReadBoundarySliceAsync(session.Id, chunkIdx, slice.FileIndex, slice.SliceLength, ct).ConfigureAwait(false);
                 }
 
-                if (sliceData == null)
+                if (sliceData != null)
+                {
+                    sliceData.Span.CopyTo(rentedPlaintext.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
+                }
+                else
                 {
                     ResolvedFilePath filePath = ResolvedFilePath.Resolve(rootPath, entry.RelativePath);
-                    sliceData = await fileStorage.ReadChunkAsync(filePath, slice.OffsetInFile, slice.SliceLength, ct);
+                    await fileStorage.ReadChunkIntoAsync(
+                        filePath,
+                        slice.OffsetInFile,
+                        rentedPlaintext.AsMemory(slice.BufferOffset, slice.SliceLength.Bytes),
+                        ct).ConfigureAwait(false);
                 }
-                sliceData.Span.CopyTo(rentedPlaintext.AsSpan(slice.BufferOffset, slice.SliceLength.Bytes));
             }
 
-            byte[] chunkBuffer = new byte[length];
-            rentedPlaintext.AsSpan(0, length).CopyTo(chunkBuffer);
-            PlaintextChunkData plaintextChunk = PlaintextChunkData.FromBytes(chunkBuffer);
-            await stream.SendFrameAsync(new ChunkDataFrame(chunkIdx, plaintextChunk), ct);
+            PlaintextChunkData plaintextChunk = PlaintextChunkData.FromMemory(rentedPlaintext.AsMemory(0, length));
+            await stream.SendFrameAsync(new ChunkDataFrame(chunkIdx, plaintextChunk), ct).ConfigureAwait(false);
 
             lock (_sessionSync)
             {
@@ -168,6 +175,7 @@ public sealed class TransferSessionCoordinator
             chunkFrame.ChunkIndex,
             chunkFrame.Data,
             _clock,
+            _sessionSync,
             ct);
 
         if (assembleResult.IsSuccess)
@@ -340,26 +348,33 @@ public sealed class TransferSessionCoordinator
             {
                 case ChunkDataFrame chunkData:
                 {
-                    DomainResult result = await HandleIncomingChunkDataAsync(
-                        session,
-                        peerId,
-                        chunkData,
-                        stream,
-                        destinationFolder,
-                        streamPool,
-                        ct);
-
-                    if (result.IsFailure)
+                    try
                     {
-                        return result;
-                    }
+                        DomainResult result = await HandleIncomingChunkDataAsync(
+                            session,
+                            peerId,
+                            chunkData,
+                            stream,
+                            destinationFolder,
+                            streamPool,
+                            ct);
 
-                    if (session.Role == TransferRole.Recipient && session.IsDownloadComplete)
-                    {
-                        try { linkedCts.Cancel(); } catch (ObjectDisposedException) { }
-                        return DomainResult.Success();
+                        if (result.IsFailure)
+                        {
+                            return result;
+                        }
+
+                        if (session.Role == TransferRole.Recipient && session.IsDownloadComplete)
+                        {
+                            try { linkedCts.Cancel(); } catch (ObjectDisposedException) { }
+                            return DomainResult.Success();
+                        }
+                        break;
                     }
-                    break;
+                    finally
+                    {
+                        chunkData.ReleaseBuffer();
+                    }
                 }
 
                 case RequestChunkFrame reqFrame when fileStorage != null:

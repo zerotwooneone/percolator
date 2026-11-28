@@ -347,8 +347,11 @@ public static class SwarmFrameCodec
         }
 
         int chunkIndex = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(0, 4));
-        var plaintextData = PlaintextChunkData.FromBytes(payload.Slice(4).ToArray());
-        return new ChunkDataFrame(ChunkIndex.FromInt(chunkIndex), plaintextData);
+        int dataLen = payload.Length - 4;
+        IMemoryOwner<byte> owner = MemoryPool<byte>.Shared.Rent(dataLen);
+        payload.Slice(4).CopyTo(owner.Memory.Span.Slice(0, dataLen));
+        var plaintextData = PlaintextChunkData.FromMemory(owner.Memory.Slice(0, dataLen));
+        return new ChunkDataFrame(ChunkIndex.FromInt(chunkIndex), plaintextData, owner);
     }
 
     private static byte[] EncodePexPeers(PexPeersFrame frame)

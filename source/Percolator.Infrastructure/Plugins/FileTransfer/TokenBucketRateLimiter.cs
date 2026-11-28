@@ -13,7 +13,8 @@ using Percolator.Apps.FileTransfer.Ports;
 public sealed class TokenBucketRateLimiter : ITransferRateLimiter
 {
     private readonly TimeProvider _timeProvider;
-    private readonly SemaphoreSlim _syncLock = new(1, 1);
+    private readonly SemaphoreSlim _globalDownloadLock = new(1, 1);
+    private readonly SemaphoreSlim _globalUploadLock = new(1, 1);
 
     private BandwidthLimit _globalDownloadCap = BandwidthLimit.Unlimited;
     private BandwidthLimit _globalUploadCap = BandwidthLimit.Unlimited;
@@ -34,6 +35,19 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
         long now = _timeProvider.GetTimestamp();
         _lastGlobalDownloadTimestamp = now;
         _lastGlobalUploadTimestamp = now;
+    }
+
+    public void RemoveSession(TransferSessionId sessionId)
+    {
+        _sessionCaps.TryRemove(sessionId, out _);
+        if (_sessionDownloadBuckets.TryRemove(sessionId, out TokenBucketState? dlBucket))
+        {
+            dlBucket.Lock.Dispose();
+        }
+        if (_sessionUploadBuckets.TryRemove(sessionId, out TokenBucketState? ulBucket))
+        {
+            ulBucket.Lock.Dispose();
+        }
     }
 
     public ValueTask SetGlobalSpeedCapsAsync(
@@ -80,7 +94,7 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
         if (!_globalDownloadCap.IsUnlimited)
         {
             TimeSpan globalDelay = TimeSpan.Zero;
-            await _syncLock.WaitAsync(ct).ConfigureAwait(false);
+            await _globalDownloadLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 long now = _timeProvider.GetTimestamp();
@@ -103,7 +117,7 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
             }
             finally
             {
-                _syncLock.Release();
+                _globalDownloadLock.Release();
             }
 
             if (globalDelay > TimeSpan.Zero)
@@ -137,7 +151,7 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
         if (!_globalUploadCap.IsUnlimited)
         {
             TimeSpan globalDelay = TimeSpan.Zero;
-            await _syncLock.WaitAsync(ct).ConfigureAwait(false);
+            await _globalUploadLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 long now = _timeProvider.GetTimestamp();
@@ -160,7 +174,7 @@ public sealed class TokenBucketRateLimiter : ITransferRateLimiter
             }
             finally
             {
-                _syncLock.Release();
+                _globalUploadLock.Release();
             }
 
             if (globalDelay > TimeSpan.Zero)
