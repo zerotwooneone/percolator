@@ -2016,6 +2016,186 @@ Peer introductions live inside **`Percolator.Apps.Chat`** as a standard E2E Doub
   - `dotnet run --project Percolator.Simulator/Percolator.Simulator.csproj --framework net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator/Scenarios/08-swarm-file-transfer.json` (all 4 steps and 5 assertions passed).
   - `validate-qms-compliance.ps1` & `verify-code-integrity.ps1` passed 100%.
 
+---
 
+### 16.5 Part E — File Transfer DDD & Hexagonal Architecture Hardening (`FT-007` to `FT-009`)
 
+#### Ticket `FT-007` — Normalized SQLite Relational Child Tables & `ITransferSessionTransportStore` Application Port Decoupling
+- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Infrastructure.Tests`, `Percolator.Apps.FileTransfer.Tests`
+- **Dependencies:** `FT-006`
+- **Architectural Rationale:**
+  - `ITransferSessionRepository` currently persists non-aggregate transport parameters alongside `TransferSession` via side-door methods (`SaveTransportContextAsync`, `GetTransportContextAsync`) and uses an in-memory `ConcurrentDictionary` fallback in `SqliteTransferSessionRepository`.
+  - Collections of sub-entities (`SelectedFilesJson`, `RecipientsJson`, `DirectCandidatesJson`) are stored as serialized JSON strings in `TransferSessionEntity` columns instead of normalized relational child tables with foreign keys.
+- **Implementation Details:**
+  1. **Extract Application Port:**
+     - Create `Percolator.Apps.FileTransfer/Ports/ITransferSessionTransportStore.cs`:
+       ```csharp
+       namespace Percolator.Apps.FileTransfer.Ports;
+       using System.Threading;
+       using System.Threading.Tasks;
+       using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+       using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 
+       public interface ITransferSessionTransportStore
+       {
+           ValueTask SaveTransportContextAsync(TransferSessionTransportContext context, CancellationToken ct = default);
+           ValueTask<TransferSessionTransportContext?> GetTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default);
+           ValueTask DeleteTransportContextAsync(TransferSessionId sessionId, CancellationToken ct = default);
+       }
+       ```
+     - Remove `SaveTransportContextAsync` and `GetTransportContextAsync` from `Percolator.Apps.FileTransfer/Ports/ITransferSessionRepository.cs`.
+  2. **Create Normalized SQLite Entity Tables:**
+     - In `Percolator.Infrastructure/Persistence/Entities/FileTransferEntities.cs`:
+       - Remove `SelectedFilesJson`, `RecipientsJson`, and `DirectCandidatesJson` from `TransferSessionEntity`.
+       - Add child entities:
+         ```csharp
+         public sealed class TransferSessionRecipientEntity
+         {
+             public Guid TransferId { get; set; }
+             public byte[] RecipientIdentityId { get; set; } = Array.Empty<byte>();
+         }
+
+         public sealed class TransferSessionSelectedFileEntity
+         {
+             public Guid TransferId { get; set; }
+             public int FileIndex { get; set; }
+         }
+
+         public sealed class TransferSessionDirectCandidateEntity
+         {
+             public Guid TransferId { get; set; }
+             public string Host { get; set; } = string.Empty;
+             public int Port { get; set; }
+             public int Kind { get; set; }
+         }
+         ```
+     - In `PercolatorDbContext.cs`, add `DbSet` properties and configure composite primary keys and cascading delete foreign keys:
+       ```csharp
+       modelBuilder.Entity<TransferSessionRecipientEntity>(b => {
+           b.ToTable("ft_session_recipients");
+           b.HasKey(r => new { r.TransferId, r.RecipientIdentityId });
+           b.HasOne<TransferSessionEntity>().WithMany().HasForeignKey(r => r.TransferId).OnDelete(DeleteBehavior.Cascade);
+       });
+       modelBuilder.Entity<TransferSessionSelectedFileEntity>(b => {
+           b.ToTable("ft_session_selected_files");
+           b.HasKey(f => new { f.TransferId, f.FileIndex });
+           b.HasOne<TransferSessionEntity>().WithMany().HasForeignKey(f => f.TransferId).OnDelete(DeleteBehavior.Cascade);
+       });
+       modelBuilder.Entity<TransferSessionDirectCandidateEntity>(b => {
+           b.ToTable("ft_session_direct_candidates");
+           b.HasKey(c => new { c.TransferId, c.Host, c.Port });
+           b.HasOne<TransferSessionEntity>().WithMany().HasForeignKey(c => c.TransferId).OnDelete(DeleteBehavior.Cascade);
+       });
+       ```
+  3. **SQLite Schema Migration:**
+     - In `Percolator.Infrastructure/Persistence/SqliteDatabaseMigrator.cs`:
+       - Execute idempotent `CREATE TABLE IF NOT EXISTS "ft_session_recipients" ...`, `CREATE TABLE IF NOT EXISTS "ft_session_selected_files" ...`, `CREATE TABLE IF NOT EXISTS "ft_session_direct_candidates" ...`.
+  4. **Implement Repositories:**
+     - Create `Percolator.Infrastructure/Persistence/Repositories/SqliteTransferSessionTransportStore.cs` implementing `ITransferSessionTransportStore` with pure relational queries against `TransferSessionEntity` and `TransferSessionDirectCandidateEntity`.
+     - In `Percolator.Infrastructure/Persistence/Repositories/SqliteTransferSessionRepository.cs`:
+       - Delete the `ConcurrentDictionary<TransferSessionId, TransferSessionTransportContext> _transportContexts` cache.
+       - Reconstitute and persist `Recipients` and `SelectedFiles` strictly via child entities (`_dbContext.TransferSessionRecipients` and `_dbContext.TransferSessionSelectedFiles`), eliminating all `System.Text.Json` usage.
+  5. **Call-Site & DI Wiring:**
+     - In `FileTransferActionHandler.cs` and `FileTransferPayloadHandler.cs`: inject `ITransferSessionTransportStore` for transport context operations.
+     - In `InfrastructureServiceCollectionExtensions.cs` and `DesktopSessionServiceCollectionExtensions.cs`: register `services.AddScoped<ITransferSessionTransportStore, SqliteTransferSessionTransportStore>();`.
+     - Update `SqliteTransferSessionRepositoryTests.cs`, `TestDoubles.cs`, and `ActionHandlerAndQueryTests.cs`.
+- **Acceptance Criteria:**
+  - Zero `JsonSerializer` in `SqliteTransferSessionRepository` or file transfer persistence.
+  - Zero in-memory `ConcurrentDictionary` fallback in `SqliteTransferSessionRepository`.
+  - All unit and integration tests pass with normalized child tables.
+
+#### Ticket `FT-008` — CQRS Read Purity, N+1 Query Elimination & Streamlined DI Registration
+- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Infrastructure.Tests`
+- **Dependencies:** `FT-007`
+- **Architectural Rationale:**
+  - `FileTransferQueryService` in `Percolator.Apps.FileTransfer` violates CQRS Rule 8 by injecting the write-side `ITransferSessionRepository` and rehydrating domain aggregates to construct read models.
+  - `SqlFileTransferQueryService` in `Percolator.Infrastructure` suffers from an N+1 query loop fetching `TransferBitfields` individually inside a `foreach` loop.
+  - Dual DI registration exists where `Apps.FileTransfer` registers `FileTransferQueryService` and `Infrastructure` registers `SqlFileTransferQueryService`.
+- **Implementation Details:**
+  1. **Delete Aggregate-Rehydrating Query Service:**
+     - Delete `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferQueryService.cs`.
+     - In `Percolator.Apps.FileTransfer/DependencyInjection/ServiceCollectionExtensions.cs`: remove `collection.AddScoped<IFileTransferQueryService, FileTransferQueryService>();`.
+  2. **Eliminate N+1 Queries in `SqlFileTransferQueryService.cs`:**
+     - In `SqlFileTransferQueryService.GetAllTransfersAsync()`:
+       - Query all sessions in single batch: `List<TransferSessionEntity> entities = await _dbContext.TransferSessions.AsNoTracking().ToListAsync(ct);`
+       - Extract list of IDs: `List<Guid> transferIds = entities.Select(e => e.TransferId).ToList();`
+       - Batch-load bitfields:
+         ```csharp
+         Dictionary<Guid, TransferBitfieldEntity> bitfieldMap = await _dbContext.TransferBitfields
+             .AsNoTracking()
+             .Where(b => transferIds.Contains(b.TransferId))
+             .ToDictionaryAsync(b => b.TransferId, ct)
+             .ConfigureAwait(false);
+         ```
+       - Batch-load recipients:
+         ```csharp
+         ILookup<Guid, byte[]> recipientsLookup = (await _dbContext.TransferSessionRecipients
+             .AsNoTracking()
+             .Where(r => transferIds.Contains(r.TransferId))
+             .ToListAsync(ct)
+             .ConfigureAwait(false))
+             .ToLookup(r => r.TransferId, r => r.RecipientIdentityId);
+         ```
+       - Project read models purely synchronously in memory from the batched maps.
+  3. **Add Dedicated Unit Tests:**
+     - Create `Percolator.Infrastructure.Tests/Persistence/Repositories/SqlFileTransferQueryServiceTests.cs` testing `GetAllTransfersAsync`, `GetTransferByIdAsync`, and `GetManifestFilesAsync` against in-memory SQLite, asserting single-query execution and accurate projection.
+- **Acceptance Criteria:**
+  - `FileTransferQueryService` is deleted.
+  - `SqlFileTransferQueryService` executes zero unbatched queries in loops.
+  - Dedicated unit tests verify CQRS read projection integrity.
+
+#### Ticket `FT-009` — Reactive Transport Signals, Synthetic ID Elimination & Desktop Discovery DI
+- **Layer / Scope:** `Percolator.Apps.FileTransfer`, `Percolator.Infrastructure`, `Percolator.Desktop`
+- **Dependencies:** `FT-008`
+- **Architectural Rationale:**
+  - `ITransferPeerConnection` exposes a raw C# `event Action<IceSignalOutboundEvent>? SignalProduced;` delegate, leading to unanchored subscriptions and fire-and-forget `_ = Task.Run(...)` tasks in `TransferSessionRuntime`.
+  - `FileTransferActionHandler.CancelTransferAsync()` synthesizes a fake `ChannelId.FromGuid(sessionId.Value)` when `transportContext` is null.
+  - `DesktopNetworkEndpointDiscoveryPort` directly instantiates `new NetworkInterfaceEndpointDiscoveryPort(...)` rather than using dependency injection.
+- **Implementation Details:**
+  1. **Reactive Transport Signals Port:**
+     - In `Percolator.Apps.FileTransfer/Ports/ITransferPeerTransport.cs`:
+       - Replace `event Action<IceSignalOutboundEvent>? SignalProduced;` on `ITransferPeerConnection` with:
+         ```csharp
+         Observable<IceSignalOutboundEvent> Signals { get; }
+         ```
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/WebRtc/WebRtcPeerConnectionAdapter.cs` and test doubles:
+       - Implement `Signals` using `Subject<IceSignalOutboundEvent> _signals = new();`.
+     - In `Percolator.Apps.FileTransfer/Features/Runtime/TransferSessionRuntime.cs`:
+       - In `WireIceCandidateForwarder`:
+         ```csharp
+         connection.Signals
+             .Where(evt => evt.Kind == IceSignalKind.IceCandidate)
+             .Subscribe(async evt =>
+             {
+                 try
+                 {
+                     var payload = new FileTransferIceSignalPayload(
+                         evt.SessionId,
+                         evt.Kind,
+                         evt.SdpOrCandidate,
+                         evt.CandidateMid,
+                         evt.LocalDtlsFingerprint);
+                     await sendSignalAsync(payload, handle.SessionCts.Token).ConfigureAwait(false);
+                 }
+                 catch (OperationCanceledException) { }
+                 catch (Exception ex)
+                 {
+                     _logger.LogWarning(ex, "Failed to send ICE candidate for session {SessionId}", evt.SessionId);
+                 }
+             })
+             .AddTo(handle.SessionDisposables);
+         ```
+  2. **Eliminate Synthetic `ChannelId` Fallback:**
+     - In `Percolator.Apps.FileTransfer/Features/TransferNegotiation/FileTransferActionHandler.cs` line 627:
+       - Remove `ChannelId channelId = transportContext?.ChannelId ?? ChannelId.FromGuid(sessionId.Value);`.
+       - If `transportContext == null` or `!transportContext.ChannelId.IsValid`: do not dispatch a network cancel payload; simply terminate local runtime and session state. If `transportContext != null && transportContext.ChannelId.IsValid`: dispatch `FileTransferCancelPayload` on `transportContext.ChannelId`.
+  3. **Desktop Discovery Port DI Cleanliness:**
+     - In `Percolator.Infrastructure/Plugins/FileTransfer/NetworkInterfaceEndpointDiscoveryPort.cs`:
+       - Extract factory delegate `Func<int?, bool, INetworkEndpointDiscoveryPort>` or interface in Stage-1/Stage-2 DI.
+     - In `Percolator.Desktop/Common/Services/DesktopNetworkEndpointDiscoveryPort.cs`:
+       - Inject the factory / provider and invoke it cleanly instead of directly `new`ing concrete infrastructure classes.
+- **Acceptance Criteria:**
+  - Zero raw C# event delegates on transport ports; all subscriptions anchored to `handle.SessionDisposables`.
+  - Zero synthetic `ChannelId.FromGuid(...)` fabrications.
+  - `DesktopNetworkEndpointDiscoveryPort` resolves discovery implementation via DI.
+  - All test suites (Desktop, Simulator, Apps, Infrastructure, Integration) pass 100%.
