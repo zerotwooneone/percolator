@@ -403,7 +403,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ITransferPeerTransport, TransferPeerTransport>();
         services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
         services.AddSingleton<IDistributedTrackerPort, GrpcSwarmTrackerClient>();
-        services.AddScoped<ITransferSessionRepository, SqliteTransferSessionRepository>();
+        services.AddSingleton<ITransferSessionRepository, SqliteTransferSessionRepository>();
         services.AddSingleton<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
         services.AddScoped<IFileTransferQueryService, SqlFileTransferQueryService>();
         services.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();

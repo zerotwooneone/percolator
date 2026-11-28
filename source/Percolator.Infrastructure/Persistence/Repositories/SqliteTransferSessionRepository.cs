@@ -1,3 +1,5 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Infrastructure/spec/repository.spec.md before modifying this file.
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -19,11 +21,11 @@ using Percolator.Infrastructure.Persistence.Entities;
 
 public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbContextFactory;
 
-    public SqliteTransferSessionRepository(PercolatorDbContext dbContext)
+    public SqliteTransferSessionRepository(IDbContextFactory<PercolatorDbContext> dbContextFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
     }
 
     public async ValueTask SaveSessionAsync(TransferSession session, CancellationToken ct = default)
@@ -32,9 +34,10 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
 
         Guid transferGuid = session.Id.Value;
 
-        await using var tx = await _dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        TransferSessionEntity? existing = await _dbContext.TransferSessions
+        TransferSessionEntity? existing = await db.TransferSessions
             .FirstOrDefaultAsync(s => s.TransferId == transferGuid, ct)
             .ConfigureAwait(false);
 
@@ -44,7 +47,7 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             {
                 TransferId = transferGuid
             };
-            _dbContext.TransferSessions.Add(existing);
+            db.TransferSessions.Add(existing);
         }
 
         existing.Role = (int)session.Role;
@@ -68,21 +71,21 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         existing.CreatedAtUtc = session.CreatedAtUtc;
         existing.CompletedAtUtc = session.CompletedAtUtc;
 
-        // Topology & recipients
-        List<byte[]> recipientByteArrays = [];
+        // Topology & recipients deduplicated via domain PublicIdentityId
+        HashSet<PublicIdentityId> uniqueRecipients = [];
         switch (session.Topology)
         {
             case TransferTopology.OneToOne oto:
                 existing.TopologyType = 1;
                 existing.InitiatorId = oto.InitiatorId.ToByteArray();
-                recipientByteArrays.Add(oto.RecipientId.ToByteArray());
+                uniqueRecipients.Add(oto.RecipientId);
                 break;
             case TransferTopology.MultiPeer mp:
                 existing.TopologyType = 2;
                 existing.InitiatorId = mp.InitiatorId.ToByteArray();
                 foreach (PublicIdentityId recipient in mp.Recipients)
                 {
-                    recipientByteArrays.Add(recipient.ToByteArray());
+                    uniqueRecipients.Add(recipient);
                 }
                 break;
             case TransferTopology.IncomingStaged incoming:
@@ -91,28 +94,23 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
                 break;
         }
 
-        var existingRecipients = await _dbContext.TransferSessionRecipients
+        var existingRecipients = await db.TransferSessionRecipients
             .Where(r => r.TransferId == transferGuid)
             .ToListAsync(ct)
             .ConfigureAwait(false);
-        _dbContext.TransferSessionRecipients.RemoveRange(existingRecipients);
+        db.TransferSessionRecipients.RemoveRange(existingRecipients);
 
-        var seenRecipients = new HashSet<string>();
-        foreach (byte[] rBytes in recipientByteArrays)
+        foreach (PublicIdentityId recipient in uniqueRecipients)
         {
-            string hex = Convert.ToHexString(rBytes);
-            if (seenRecipients.Add(hex))
+            db.TransferSessionRecipients.Add(new TransferSessionRecipientEntity
             {
-                _dbContext.TransferSessionRecipients.Add(new TransferSessionRecipientEntity
-                {
-                    TransferId = transferGuid,
-                    RecipientIdentityId = rBytes
-                });
-            }
+                TransferId = transferGuid,
+                RecipientIdentityId = recipient.ToByteArray()
+            });
         }
 
         // Save bitfield
-        TransferBitfieldEntity? bitfieldEntity = await _dbContext.TransferBitfields
+        TransferBitfieldEntity? bitfieldEntity = await db.TransferBitfields
             .FirstOrDefaultAsync(b => b.TransferId == transferGuid, ct)
             .ConfigureAwait(false);
 
@@ -122,21 +120,21 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             {
                 TransferId = transferGuid
             };
-            _dbContext.TransferBitfields.Add(bitfieldEntity);
+            db.TransferBitfields.Add(bitfieldEntity);
         }
 
         bitfieldEntity.BitfieldBytes = session.LocalBitfield.ToByteArray();
         bitfieldEntity.VerifiedPieces = session.LocalBitfield.PopCount;
         bitfieldEntity.TotalPieces = session.Manifest.TotalChunks.Count;
 
-        await _dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        DbConnection dbConn = _dbContext.Database.GetDbConnection();
+        DbConnection dbConn = db.Database.GetDbConnection();
         DbTransaction dbTx = tx.GetDbTransaction();
         string transferGuidString = transferGuid.ToString().ToUpperInvariant();
 
         // High-file-count bulk persistence for ft_manifest_files (insert-once when !hasFiles)
-        bool hasFiles = await _dbContext.ManifestFiles
+        bool hasFiles = await db.ManifestFiles
             .AnyAsync(f => f.TransferId == transferGuid, ct)
             .ConfigureAwait(false);
 
@@ -146,7 +144,7 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             cmd.Transaction = dbTx;
             cmd.CommandText = """
                 INSERT INTO ft_manifest_files (transfer_id, file_index, relative_path, file_size_bytes, start_offset, last_modified_unix_seconds)
-                VALUES (@tid, @idx, @path, @size, @offset, @mtime)
+                VALUES (@tid, @idx, @path, @size, @offset, @mtime);
                 """;
 
             DbParameter pTid = cmd.CreateParameter();
@@ -227,7 +225,9 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
     {
         Guid transferGuid = sessionId.Value;
 
-        TransferSessionEntity? entity = await _dbContext.TransferSessions
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        TransferSessionEntity? entity = await db.TransferSessions
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.TransferId == transferGuid, ct)
             .ConfigureAwait(false);
@@ -237,19 +237,19 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
             return null;
         }
 
-        List<ManifestFileEntity> fileEntities = await _dbContext.ManifestFiles
+        List<ManifestFileEntity> fileEntities = await db.ManifestFiles
             .AsNoTracking()
             .Where(f => f.TransferId == transferGuid)
             .OrderBy(f => f.FileIndex)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        TransferBitfieldEntity? bitfieldEntity = await _dbContext.TransferBitfields
+        TransferBitfieldEntity? bitfieldEntity = await db.TransferBitfields
             .AsNoTracking()
             .FirstOrDefaultAsync(b => b.TransferId == transferGuid, ct)
             .ConfigureAwait(false);
 
-        List<TransferSessionRecipientEntity> recipientEntities = await _dbContext.TransferSessionRecipients
+        List<TransferSessionRecipientEntity> recipientEntities = await db.TransferSessionRecipients
             .AsNoTracking()
             .Where(r => r.TransferId == transferGuid)
             .ToListAsync(ct)
@@ -258,7 +258,7 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
         List<TransferSessionSelectedFileEntity>? selectedFileEntities = null;
         if (!entity.AllFilesSelected)
         {
-            selectedFileEntities = await _dbContext.TransferSessionSelectedFiles
+            selectedFileEntities = await db.TransferSessionSelectedFiles
                 .AsNoTracking()
                 .Where(s => s.TransferId == transferGuid)
                 .ToListAsync(ct)
@@ -270,7 +270,9 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
 
     public async ValueTask<IReadOnlyList<TransferSession>> GetActiveSessionsAsync(CancellationToken ct = default)
     {
-        List<TransferSessionEntity> entities = await _dbContext.TransferSessions
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        List<TransferSessionEntity> entities = await db.TransferSessions
             .AsNoTracking()
             .Where(s => s.State == (int)TransferSessionState.InFlight
                      || s.State == (int)TransferSessionState.Seeding
@@ -288,20 +290,20 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
 
         List<Guid> transferGuids = entities.Select(e => e.TransferId).ToList();
 
-        List<ManifestFileEntity> allFiles = await _dbContext.ManifestFiles
+        List<ManifestFileEntity> allFiles = await db.ManifestFiles
             .AsNoTracking()
             .Where(f => transferGuids.Contains(f.TransferId))
             .OrderBy(f => f.FileIndex)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        List<TransferBitfieldEntity> allBitfields = await _dbContext.TransferBitfields
+        List<TransferBitfieldEntity> allBitfields = await db.TransferBitfields
             .AsNoTracking()
             .Where(b => transferGuids.Contains(b.TransferId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        List<TransferSessionRecipientEntity> allRecipients = await _dbContext.TransferSessionRecipients
+        List<TransferSessionRecipientEntity> allRecipients = await db.TransferSessionRecipients
             .AsNoTracking()
             .Where(r => transferGuids.Contains(r.TransferId))
             .ToListAsync(ct)
@@ -309,7 +311,7 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
 
         List<Guid> partialSelectionGuids = entities.Where(e => !e.AllFilesSelected).Select(e => e.TransferId).ToList();
         List<TransferSessionSelectedFileEntity> allSelectedFiles = partialSelectionGuids.Count > 0
-            ? await _dbContext.TransferSessionSelectedFiles
+            ? await db.TransferSessionSelectedFiles
                 .AsNoTracking()
                 .Where(s => partialSelectionGuids.Contains(s.TransferId))
                 .ToListAsync(ct)
@@ -342,17 +344,14 @@ public sealed class SqliteTransferSessionRepository : ITransferSessionRepository
 
     public async ValueTask<IReadOnlyList<TransferSessionId>> GetExpiredPendingOfferIdsAsync(DateTimeOffset createdBeforeUtc, CancellationToken ct = default)
     {
-        var pendingSessions = await _dbContext.TransferSessions
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        return await db.TransferSessions
             .AsNoTracking()
-            .Where(s => s.State == (int)TransferSessionState.PendingConsent)
-            .Select(s => new { s.TransferId, s.CreatedAtUtc })
+            .Where(s => s.State == (int)TransferSessionState.PendingConsent && s.CreatedAtUtc < createdBeforeUtc)
+            .Select(s => TransferSessionId.FromGuid(s.TransferId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
-
-        return pendingSessions
-            .Where(s => s.CreatedAtUtc < createdBeforeUtc)
-            .Select(s => TransferSessionId.FromGuid(s.TransferId))
-            .ToList();
     }
 
     private static TransferSession ReconstituteSession(

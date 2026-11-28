@@ -16,6 +16,7 @@ using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities;
+using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Repositories;
 using Percolator.Infrastructure.Plugins.FileTransfer;
 using Percolator.Infrastructure.Tests.Persistence.TestSupport;
@@ -32,7 +33,7 @@ public sealed class SqliteTransferSessionRepositoryTests
     public void SetUp()
     {
         _db = new SqliteTestDb();
-        _sessionRepo = new SqliteTransferSessionRepository(_db.DbContext);
+        _sessionRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
         _transportStore = new SqliteTransferSessionTransportStore(_db.ContextFactory);
         _policyRepo = new SqliteFilterPolicyRepository(_db.ContextFactory);
     }
@@ -108,9 +109,8 @@ public sealed class SqliteTransferSessionRepositoryTests
         await _transportStore.SaveTransportContextAsync(context);
         await _sessionRepo.SaveSessionAsync(session);
 
-        // Read back from a fresh context
-        using var readDb = _db.CreateNewContext();
-        var readRepo = new SqliteTransferSessionRepository(readDb);
+        // Read back from a fresh context via factory
+        var readRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
         var readTransportStore = new SqliteTransferSessionTransportStore(_db.ContextFactory);
 
         TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
@@ -121,7 +121,7 @@ public sealed class SqliteTransferSessionRepositoryTests
         loaded.Role.Should().Be(TransferRole.Sender);
         loaded.State.Should().Be(TransferSessionState.Offered);
         loaded.Manifest.RootName.Value.Should().Be("ArchiveBundle");
-        loaded.Manifest.TotalSize.Bytes.Should().Be(98304);
+        loaded.Manifest.TotalSize.Bytes.Should().Be(manifest.TotalSize.Bytes);
         loaded.Manifest.Files.Should().HaveCount(2);
         loaded.Manifest.Files[0].RelativePath.Value.Should().Be("docs/readme.txt");
         loaded.Manifest.Files[1].RelativePath.Value.Should().Be("images/logo.png");
@@ -198,6 +198,14 @@ public sealed class SqliteTransferSessionRepositoryTests
     }
 
     [Test]
+    public async Task DeleteTransportContextAsync_WhenNonExistent_IsIdempotentAndDoesNotThrow()
+    {
+        var nonExistentId = TransferSessionId.New();
+        var act = async () => await _transportStore.DeleteTransportContextAsync(nonExistentId);
+        await act.Should().NotThrowAsync();
+    }
+
+    [Test]
     public async Task SaveSessionAsync_FullSelection_StoresZeroRowsInSelectedFilesTable()
     {
         var sessionId = TransferSessionId.New();
@@ -229,7 +237,7 @@ public sealed class SqliteTransferSessionRepositoryTests
         int selectedFilesCount = await readDb.TransferSessionSelectedFiles.CountAsync(s => s.TransferId == sessionId.Value);
         selectedFilesCount.Should().Be(0);
 
-        var readRepo = new SqliteTransferSessionRepository(readDb);
+        var readRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
         TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
         loaded.Should().NotBeNull();
         loaded!.SelectedFiles.Should().NotBeNull();
@@ -239,11 +247,41 @@ public sealed class SqliteTransferSessionRepositoryTests
     }
 
     [Test]
+    public async Task SaveSessionAsync_EmptyOrNoSelection_StoresZeroRowsInSelectedFilesTable()
+    {
+        var sessionId = TransferSessionId.New();
+        var initiatorId = PublicIdentityId.New();
+
+        var leaf = MerkleTreeBuilder.HashLeaf(new byte[65536]);
+        var merkleTree = MerkleTreeIndex.Create(MerkleRoot.FromSpan(leaf.Span), [leaf]);
+        var manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("EmptySelectionBundle"),
+            ChunkSizeBytes.FromBytes(65536),
+            merkleTree,
+            [
+                new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("file1.txt"), FileSizeBytes.FromBytes(32768), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))
+            ]);
+
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        var session = TransferSession.CreateIncomingStaged(sessionId, initiatorId, manifest, SeedRatio.Zero, clock);
+
+        await _sessionRepo.SaveSessionAsync(session);
+
+        using var readDb = _db.CreateNewContext();
+        var entity = await readDb.TransferSessions.FirstOrDefaultAsync(s => s.TransferId == sessionId.Value);
+        entity.Should().NotBeNull();
+        entity!.AllFilesSelected.Should().BeFalse();
+
+        int selectedFilesCount = await readDb.TransferSessionSelectedFiles.CountAsync(s => s.TransferId == sessionId.Value);
+        selectedFilesCount.Should().Be(0);
+    }
+
+    [Test]
     public async Task SaveSessionAsync_PartialSelection_StoresOnlySelectedFileRows()
     {
         var sessionId = TransferSessionId.New();
         var initiatorId = PublicIdentityId.New();
-        var recipientId = PublicIdentityId.New();
 
         var leaf = MerkleTreeBuilder.HashLeaf(new byte[65536]);
         var merkleTree = MerkleTreeIndex.Create(MerkleRoot.FromSpan(leaf.Span), [leaf]);
@@ -275,7 +313,7 @@ public sealed class SqliteTransferSessionRepositoryTests
         selectedRows.Should().HaveCount(1);
         selectedRows[0].FileIndex.Should().Be(1);
 
-        var readRepo = new SqliteTransferSessionRepository(readDb);
+        var readRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
         TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
         loaded.Should().NotBeNull();
         loaded!.SelectedFiles.Should().NotBeNull();
@@ -329,7 +367,7 @@ public sealed class SqliteTransferSessionRepositoryTests
         int savedFileCount = await readDb.ManifestFiles.CountAsync(f => f.TransferId == sessionId.Value);
         savedFileCount.Should().Be(fileCount);
 
-        var readRepo = new SqliteTransferSessionRepository(readDb);
+        var readRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
         TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
         loaded.Should().NotBeNull();
         loaded!.Manifest.Files.Should().HaveCount(fileCount);
@@ -338,7 +376,58 @@ public sealed class SqliteTransferSessionRepositoryTests
     }
 
     [Test]
-    public async Task GetExpiredPendingOfferIdsAsync_FiltersByStateAndThreshold()
+    public async Task BulkManifestPersistence_With1000Files_IsIdempotentOnSubsequentSaves()
+    {
+        var sessionId = TransferSessionId.New();
+        var initiatorId = PublicIdentityId.New();
+        var recipientId = PublicIdentityId.New();
+
+        int fileCount = 1000;
+        List<FileEntry> files = new(fileCount);
+        long currentOffset = 0;
+        for (int i = 0; i < fileCount; i++)
+        {
+            long size = 1024;
+            files.Add(new FileEntry(
+                FileIndex.FromInt(i),
+                SanitizedRelativePath.Parse($"dist/file_{i}.dat"),
+                FileSizeBytes.FromBytes(size),
+                BundleByteOffset.FromOffset(currentOffset),
+                FileLastModifiedUtc.FromUnixSeconds(1700000000 + i)));
+            currentOffset += size;
+        }
+
+        int chunkCount = (int)Math.Max(1, (currentOffset + 65535) / 65536);
+        List<ChunkHash> leaves = new(chunkCount);
+        for (int i = 0; i < chunkCount; i++)
+        {
+            leaves.Add(MerkleTreeBuilder.HashLeaf(new byte[65536]));
+        }
+        var merkleTree = MerkleTreeIndex.Create(MerkleRoot.FromSpan(leaves[0].Span), leaves);
+        var manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("IdempotentBundle"),
+            ChunkSizeBytes.FromBytes(65536),
+            merkleTree,
+            files);
+
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        var session = TransferSession.CreateOutgoing1to1(sessionId, initiatorId, recipientId, manifest, SeedRatio.Zero, clock);
+
+        // First save
+        await _sessionRepo.SaveSessionAsync(session);
+
+        // Second save (simulating state transition / update)
+        var act = async () => await _sessionRepo.SaveSessionAsync(session);
+        await act.Should().NotThrowAsync();
+
+        using var readDb = _db.CreateNewContext();
+        int savedFileCount = await readDb.ManifestFiles.CountAsync(f => f.TransferId == sessionId.Value);
+        savedFileCount.Should().Be(fileCount, "Second save must not duplicate manifest files");
+    }
+
+    [Test]
+    public async Task GetExpiredPendingOfferIdsAsync_FiltersByStateAndThresholdNativelyInSql()
     {
         var clock = new TestClock(DateTimeOffset.UtcNow);
 
@@ -420,7 +509,7 @@ public sealed class SqliteTransferSessionRepositoryTests
     }
 
     [Test]
-    public async Task RoundTrip_GroupTransfer_PreservesUnlimitedSeedRatioAndSenderCertSha256()
+    public async Task RoundTrip_MultiPeerTopology_PreservesRecipientsAndUnlimitedSeedRatio()
     {
         var sessionId = TransferSessionId.New();
         var initiatorId = PublicIdentityId.New();
@@ -446,7 +535,25 @@ public sealed class SqliteTransferSessionRepositoryTests
             SeedRatio.Unlimited,
             clock);
 
+        await _sessionRepo.SaveSessionAsync(session);
+
+        var readRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
+        TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
+
+        loaded.Should().NotBeNull();
+        loaded!.TargetSeedRatio.IsUnlimited.Should().BeTrue();
+        loaded.Topology.Should().BeOfType<TransferTopology.MultiPeer>();
+        loaded.Topology.ContainsParticipant(member1).Should().BeTrue();
+        loaded.Topology.ContainsParticipant(member2).Should().BeTrue();
+    }
+
+    [Test]
+    public async Task TransportStore_GroupTransfer_PreservesSenderCertSha256()
+    {
+        var sessionId = TransferSessionId.New();
+        var initiatorId = PublicIdentityId.New();
         var senderCertFp = CertSha256Fingerprint.FromBytes(RandomNumberGenerator.GetBytes(32));
+
         var context = new TransferSessionTransportContext(
             sessionId,
             ChannelId.New(),
@@ -461,24 +568,99 @@ public sealed class SqliteTransferSessionRepositoryTests
             SenderCertSha256: senderCertFp);
 
         await _transportStore.SaveTransportContextAsync(context);
-        await _sessionRepo.SaveSessionAsync(session);
 
-        using var readDb = _db.CreateNewContext();
-        var readRepo = new SqliteTransferSessionRepository(readDb);
         var readTransportStore = new SqliteTransferSessionTransportStore(_db.ContextFactory);
-
-        TransferSession? loaded = await readRepo.GetSessionByIdAsync(sessionId);
         TransferSessionTransportContext? loadedCtx = await readTransportStore.GetTransportContextAsync(sessionId);
-
-        loaded.Should().NotBeNull();
-        loaded!.TargetSeedRatio.IsUnlimited.Should().BeTrue();
-        loaded.Topology.Should().BeOfType<TransferTopology.MultiPeer>();
-        loaded.Topology.ContainsParticipant(member1).Should().BeTrue();
-        loaded.Topology.ContainsParticipant(member2).Should().BeTrue();
 
         loadedCtx.Should().NotBeNull();
         loadedCtx!.IsGroupTransfer.Should().BeTrue();
         loadedCtx.SenderCertSha256.Should().Be(senderCertFp);
+    }
+
+    [Test]
+    public async Task ConcurrentWrites_UnderWalMode_DoNotThrowSqliteBusy()
+    {
+        var tempDbPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"perc_wal_ft_{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source={tempDbPath};Pooling=false;";
+        var factory = new FileBasedDbContextFactory(connectionString);
+
+        await using (var initContext = factory.CreateDbContext())
+        {
+            await initContext.Database.EnsureCreatedAsync();
+            await initContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+        }
+
+        try
+        {
+            var sessionRepo = new SqliteTransferSessionRepository(factory);
+            var transportStore = new SqliteTransferSessionTransportStore(factory);
+
+            // Concurrently persist 10 sessions and transport contexts across tasks with distinct connections
+            List<Task> writeTasks = new(10);
+            for (int i = 0; i < 10; i++)
+            {
+                int index = i;
+                writeTasks.Add(Task.Run(async () =>
+                {
+                    var sId = TransferSessionId.New();
+                    var initId = PublicIdentityId.New();
+                    var recipId = PublicIdentityId.New();
+
+                    var leaf = MerkleTreeBuilder.HashLeaf(new byte[65536]);
+                    var tree = MerkleTreeIndex.Create(MerkleRoot.FromSpan(leaf.Span), [leaf]);
+                    var manifest = TransferManifest.Create(
+                        sId,
+                        RootBundleName.Parse($"ConcurrentBundle_{index}"),
+                        ChunkSizeBytes.FromBytes(65536),
+                        tree,
+                        [new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse($"f_{index}.bin"), FileSizeBytes.FromBytes(100), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))]);
+
+                    var session = TransferSession.CreateOutgoing1to1(sId, initId, recipId, manifest, SeedRatio.Zero, new TestClock(DateTimeOffset.UtcNow));
+                    var transportCtx = new TransferSessionTransportContext(
+                        sId,
+                        ChannelId.New(),
+                        initId,
+                        SwarmRendezvousId.Generate(),
+                        EphemeralSwarmPeerId.Generate(),
+                        StreamAuthToken.Generate(),
+                        DirectWanPolicy.DisabledByDefault,
+                        null,
+                        []);
+
+                    await sessionRepo.SaveSessionAsync(session);
+                    await transportStore.SaveTransportContextAsync(transportCtx);
+                }));
+            }
+
+            var act = async () => await Task.WhenAll(writeTasks);
+            await act.Should().NotThrowAsync("Concurrent writes under WAL mode with busy_timeout = 5000 must succeed");
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (System.IO.File.Exists(tempDbPath))
+            {
+                System.IO.File.Delete(tempDbPath);
+            }
+        }
+    }
+
+    private sealed class FileBasedDbContextFactory : IDbContextFactory<PercolatorDbContext>
+    {
+        private readonly string _connectionString;
+
+        public FileBasedDbContextFactory(string connectionString) => _connectionString = connectionString;
+
+        public PercolatorDbContext CreateDbContext()
+        {
+            var options = new DbContextOptionsBuilder<PercolatorDbContext>()
+                .UseSqlite(_connectionString)
+                .Options;
+            return new PercolatorDbContext(options);
+        }
+
+        public Task<PercolatorDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateDbContext());
     }
 
     private sealed class TestClock : IDateTimeProvider

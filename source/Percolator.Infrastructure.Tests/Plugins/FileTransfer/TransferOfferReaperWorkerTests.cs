@@ -24,7 +24,7 @@ public sealed class TransferOfferReaperWorkerTests
     public void SetUp()
     {
         _db = new SqliteTestDb();
-        _sessionRepo = new SqliteTransferSessionRepository(_db.DbContext);
+        _sessionRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
     }
 
     [TearDown]
@@ -79,8 +79,7 @@ public sealed class TransferOfferReaperWorkerTests
         reaped.Should().Be(1);
 
         // Verify session state updated in database
-        using var readDb = _db.CreateNewContext();
-        var readRepo = new SqliteTransferSessionRepository(readDb);
+        var readRepo = new SqliteTransferSessionRepository(_db.ContextFactory);
 
         var loaded = await readRepo.GetSessionByIdAsync(sessionId);
         loaded.Should().NotBeNull();
