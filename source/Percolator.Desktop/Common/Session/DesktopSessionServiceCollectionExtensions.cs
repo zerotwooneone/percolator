@@ -54,7 +54,7 @@ internal static class DesktopSessionServiceCollectionExtensions
         // are instantiated on-demand inside scoped dialog lifetimes via IWindowManager (ActivatorUtilities + IDialogContext).
         services.AddSingleton<IQrCodeGenerator, QrCodeGenerator>();
         services.AddSingleton<ICurrentPersonaService, CurrentPersonaService>();
-        services.AddSingleton<Percolator.PluginSdk.INetworkEndpointDiscoveryPort, DesktopNetworkEndpointDiscoveryPort>();
+        services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, DesktopNetworkEndpointDiscoveryPort>();
 
         // Navigation and Left Rail state services (DESK-05)
         services.AddSingleton<IShellNavigationStateService, ShellNavigationStateService>();
@@ -98,7 +98,19 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<TransferSessionRuntimeOptions>(_ => new TransferSessionRuntimeOptions());
         services.AddSingleton<IBackgroundPayloadDispatcher, Percolator.Apps.FileTransfer.Features.Runtime.ScopedBackgroundPayloadDispatcher>();
         services.AddSingleton<ITransferSessionRuntime, Percolator.Apps.FileTransfer.Features.Runtime.TransferSessionRuntime>();
+        services.AddSingleton<FileTransferIngressFilter>(sp =>
+        {
+            var repo = sp.GetRequiredService<IFileTransferFilterPolicyRepository>();
+            return new FileTransferIngressFilter(repo) { IsEnabled = true };
+        });
+        services.AddSingleton<IAppIngressFilter>(sp => sp.GetRequiredService<FileTransferIngressFilter>());
         services.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
+        services.AddScoped<IFileTransferActionHandler, Percolator.Apps.FileTransfer.Features.TransferNegotiation.FileTransferActionHandler>();
+        services.AddScoped<Percolator.Apps.FileTransfer.Features.MultiStreamEngine.TransferSessionCoordinator>();
+        services.AddScoped<Percolator.Apps.FileTransfer.Features.Storage.DiskChunkAssembler>();
+        services.AddScoped<Percolator.Apps.FileTransfer.Features.MultiStreamEngine.ChunkPipelineScheduler>();
+        services.AddScoped<Percolator.Apps.FileTransfer.Features.SwarmCoordination.SwarmCoordinator>();
+        services.AddScoped<Percolator.Apps.FileTransfer.Features.SwarmCoordination.EndgameCoordinator>();
 
         // Session-bound window manager: window scopes come off the SESSION root — no
         // provider parameter on Show/ShowDialogAsync and zero call-site changes (the
@@ -106,15 +118,16 @@ internal static class DesktopSessionServiceCollectionExtensions
         services.AddSingleton<IWindowManager>(sp =>
             new WindowManager(sp, sp.GetRequiredService<ILogger<WindowManager>>()));
 
-        // Stage-1 live-instance imports — the only Stage-1 deps any session-bound VM
-        // ctor-injects. ILogger<> resolves free via Host.CreateDefaultBuilder;
+        // Stage-1 live-instance imports — the Stage-1 deps session-bound VMs
+        // ctor-inject. ILogger<> resolves free via Host.CreateDefaultBuilder;
         // ICryptoEngine/IDateTimeProvider come from the session's own core-slice
-        // registrations; IDialogService/ILauncherService need no import (their only
-        // consumers are Stage-1 VMs).
+        // registrations.
         services.AddSingleton(_ => stage1.GetRequiredService<IWindowHandoffCoordinator>());
         services.AddSingleton(_ => stage1.GetRequiredService<IIdenticonGenerator>());
         services.AddSingleton(_ => stage1.GetRequiredService<Percolator.Application.Ports.IPortReservationService>());
         services.AddSingleton(_ => stage1.GetRequiredService<IClipboardService>());
+        services.AddSingleton(_ => stage1.GetRequiredService<IDialogService>());
+        services.AddSingleton(_ => stage1.GetRequiredService<IFilePickerService>());
         services.AddSingleton(_ => stage1.GetRequiredService<TimeProvider>());
 
         return services;

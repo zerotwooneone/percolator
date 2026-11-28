@@ -357,7 +357,6 @@ public sealed class DirectoryServiceTests
             t => t.StartAsync(
                 It.IsAny<System.Net.IPAddress>(),
                 It.IsAny<PortNumber>(),
-                It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }

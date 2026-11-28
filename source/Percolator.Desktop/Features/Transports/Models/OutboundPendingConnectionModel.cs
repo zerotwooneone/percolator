@@ -7,11 +7,12 @@ using Percolator.Domain.Identities;
 namespace Percolator.Desktop.Features.Transports.Models;
 
 /// <summary>
-/// Model representing a staged outbound connection to an offline direct peer.
+/// Model representing a staged outbound connection to an offline peer.
 /// Tracks peer metadata, invitation tokens, and the initial attempt timestamp for background retries.
 /// </summary>
 public sealed record OutboundPendingConnectionModel(
     PublicIdentityId PeerId,
     string DisplayName,
     PeerInvitationPayload Invitation,
-    DateTimeOffset InitiatedAtUtc);
+    DateTimeOffset InitiatedAtUtc,
+    PublicIdentityId OwnerId = default);

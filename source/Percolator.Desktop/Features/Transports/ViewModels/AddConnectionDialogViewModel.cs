@@ -157,6 +157,12 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
             return;
         }
 
+        if (_activePersonaId == null || !_activePersonaId.Value.IsValid)
+        {
+            ErrorMessage = "No active persona selected.";
+            return;
+        }
+
         var payload = decodeResult.Value!;
         IsProbing = true;
         ProbeStatusText = "Probing network route...";
@@ -164,6 +170,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
         try
         {
             var workflowResult = await _outboundWorkflow.ConnectAsync(
+                _activePersonaId.Value,
                 payload,
                 TimeSpan.FromSeconds(3)).ConfigureAwait(true);
 
@@ -173,8 +180,7 @@ public sealed partial class AddConnectionDialogViewModel : ViewModelBase
                 return;
             }
 
-            var peerDisplayName = payload.EndpointHosts.FirstOrDefault(h => !string.IsNullOrWhiteSpace(h))
-                ?? $"Peer {payload.IdentityId.Value:N}"[..12];
+            var peerDisplayName = $"Peer {payload.IdentityId.Value:N}"[..12];
 
             OutboundConnectionStatus dialogStatus;
             if (workflowResult.Value!.Status == AppOutboundStatus.Connected)

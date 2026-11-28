@@ -4,6 +4,7 @@ namespace Percolator.Desktop.Features.Chats.ViewModels;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,8 +12,14 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using ObservableCollections;
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Apps.Chat.Features.Reactions;
+using Percolator.Apps.FileTransfer.Domain.Common;
+using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
+using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Ports;
 using Percolator.Desktop.Common.Services;
 using Percolator.Desktop.Features.Chats.Models;
 using Percolator.Desktop.Features.Chats.Services;
@@ -38,11 +45,19 @@ public sealed partial class ChatViewModel : ViewModelBase
     private readonly ICurrentPersonaService _currentPersonaService;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ChatViewModel> _logger;
+    private readonly IFileTransferActionHandler? _fileTransferActionHandler;
+    private readonly IFileTransferQueryService? _fileTransferQueryService;
+    private readonly IDialogService? _dialogService;
+    private readonly IFilePickerService? _filePickerService;
+    private readonly IPeerIntroductionConsentRepository? _peerIntroductionConsentRepository;
 
     private readonly ObservableList<ChatMessageViewModel> _messagesList = new();
     private readonly Dictionary<PayloadId, ChatMessageModel> _modelsById = new();
     private readonly ChatReloadCoordinator _reloadCoordinator;
     private readonly object _lock = new();
+
+    private readonly ObservableList<FileTransferItemViewModel> _transfersList = new();
+    private readonly object _transfersLock = new();
 
     public ChannelId ChannelId => _channelId;
 
@@ -75,7 +90,33 @@ public sealed partial class ChatViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isLoading;
 
+    [ObservableProperty]
+    private bool _hasActiveTransfers;
+
+    [ObservableProperty]
+    private bool _is1To1Conversation;
+
+    [ObservableProperty]
+    private bool _isIntroduceFlyoutOpen;
+
+    [ObservableProperty]
+    private ConversationSummaryModel? _selectedCandidateForIntro;
+
+    [ObservableProperty]
+    private string _introNoteText = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasPendingIntroduction;
+
+    [ObservableProperty]
+    private string _pendingIntroductionText = string.Empty;
+
+    [ObservableProperty]
+    private string? _pendingIntroductionRequestId;
+
     public INotifyCollectionChangedSynchronizedViewList<ChatMessageViewModel> Messages { get; }
+    public INotifyCollectionChangedSynchronizedViewList<FileTransferItemViewModel> Transfers { get; }
+    public ObservableList<ConversationSummaryModel> AvailableCandidatesForIntro { get; } = new();
 
     public ObservableList<string> ComposerAttachments { get; } = new();
 
@@ -91,7 +132,12 @@ public sealed partial class ChatViewModel : ViewModelBase
         ICurrentPersonaService currentPersonaService,
         TimeProvider timeProvider,
         ILogger<ChatViewModel> logger,
-        ILogger<ChatReloadCoordinator> reloadCoordinatorLogger)
+        ILogger<ChatReloadCoordinator> reloadCoordinatorLogger,
+        IFileTransferActionHandler? fileTransferActionHandler = null,
+        IFileTransferQueryService? fileTransferQueryService = null,
+        IDialogService? dialogService = null,
+        IFilePickerService? filePickerService = null,
+        IPeerIntroductionConsentRepository? peerIntroductionConsentRepository = null)
     {
         _channelId = channelId;
         _chatService = chatService ?? throw new ArgumentNullException(nameof(chatService));
@@ -103,11 +149,23 @@ public sealed partial class ChatViewModel : ViewModelBase
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(reloadCoordinatorLogger);
 
+        _fileTransferActionHandler = fileTransferActionHandler;
+        _fileTransferQueryService = fileTransferQueryService;
+        _dialogService = dialogService;
+        _filePickerService = filePickerService;
+        _peerIntroductionConsentRepository = peerIntroductionConsentRepository;
+
         var view = _messagesList.CreateView(x => x);
         Messages = SynchronizationContext.Current != null
             ? view.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current)
             : view.ToNotifyCollectionChanged();
         Messages.AddTo(ref Bag);
+
+        var transfersView = _transfersList.CreateView(x => x);
+        Transfers = SynchronizationContext.Current != null
+            ? transfersView.ToNotifyCollectionChanged(SynchronizationContextCollectionEventDispatcher.Current)
+            : transfersView.ToNotifyCollectionChanged();
+        Transfers.AddTo(ref Bag);
 
         _reloadCoordinator = new ChatReloadCoordinator(_channelId, _queryService, _timeProvider, reloadCoordinatorLogger);
         _reloadCoordinator.AddTo(ref Bag);
@@ -128,17 +186,36 @@ public sealed partial class ChatViewModel : ViewModelBase
             .Subscribe(_ => UpdateConversationMetadata())
             .AddTo(ref Bag);
 
+        // Vault lock / persona switch listener: teardown active transfers
+        _currentPersonaService.CurrentPersonaChanged
+            .ObserveOnCurrentSynchronizationContext()
+            .Subscribe(p =>
+            {
+                if (p == null || !p.IdentityId.IsValid)
+                {
+                    TeardownTransfersOnLock();
+                }
+            })
+            .AddTo(ref Bag);
+
         UpdateConversationMetadata();
         RestoreVolatileDraft();
 
-        // Expiring message countdown timer: ticks every 1 second
+        // Expiring message countdown timer & transfer polling: ticks every 1 second
         Observable.Interval(TimeSpan.FromSeconds(1), _timeProvider)
             .ObserveOnCurrentSynchronizationContext()
-            .Subscribe(_ => TickExpirations())
+            .Subscribe(_ => OnPeriodicTimerTick())
             .AddTo(ref Bag);
 
-        // Initial message load
+        // Initial message and transfer load
         _ = LoadInitialMessagesAsync();
+        _ = RefreshTransfersAndPendingIntroductionsAsync();
+    }
+
+    private void OnPeriodicTimerTick()
+    {
+        TickExpirations();
+        _ = RefreshTransfersAndPendingIntroductionsAsync();
     }
 
     private async Task LoadInitialMessagesAsync()
@@ -245,6 +322,23 @@ public sealed partial class ChatViewModel : ViewModelBase
             ConversationTitle = match.DisplayName;
             RouteType = match.RouteType;
             IsPendingOutbound = match.IsPendingOutbound;
+            Is1To1Conversation = match.RouteType != ConversationRouteType.Relayed || match.RelayId == null;
+        }
+
+        // Update available candidate contacts for introduction
+        AvailableCandidatesForIntro.Clear();
+        foreach (var conv in _conversationStateService.Conversations)
+        {
+            if (conv.ConversationId != _channelId &&
+                conv.PeerOrGroupId.IsValid &&
+                (match == null || conv.PeerOrGroupId != match.PeerOrGroupId))
+            {
+                AvailableCandidatesForIntro.Add(conv);
+            }
+        }
+        if (SelectedCandidateForIntro == null && AvailableCandidatesForIntro.Count > 0)
+        {
+            SelectedCandidateForIntro = AvailableCandidatesForIntro[0];
         }
     }
 
@@ -326,9 +420,7 @@ public sealed partial class ChatViewModel : ViewModelBase
         var conversation = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
         PublicIdentityId? recipientId = conversation?.PeerOrGroupId;
 
-        var route = conversation != null && conversation.RouteType == ConversationRouteType.Relayed
-            ? DeliveryRoute.RelayedOneToOne
-            : DeliveryRoute.DirectP2P;
+        var route = DeliveryRoute.RelayedOneToOne;
 
         var command = new SendMessageCommand(
             ChannelId: _channelId,
@@ -372,9 +464,7 @@ public sealed partial class ChatViewModel : ViewModelBase
         if (currentPersona == null || !currentPersona.IdentityId.IsValid) return;
 
         var conversation = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
-        var route = conversation != null && conversation.RouteType == ConversationRouteType.Relayed
-            ? DeliveryRoute.RelayedOneToOne
-            : DeliveryRoute.DirectP2P;
+        var route = DeliveryRoute.RelayedOneToOne;
 
         var command = new AddReactionCommand(
             TargetPayloadId: msgVm.Id,
@@ -395,9 +485,7 @@ public sealed partial class ChatViewModel : ViewModelBase
         if (currentPersona == null || !currentPersona.IdentityId.IsValid) return;
 
         var conversation = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
-        var route = conversation != null && conversation.RouteType == ConversationRouteType.Relayed
-            ? DeliveryRoute.RelayedOneToOne
-            : DeliveryRoute.DirectP2P;
+        var route = DeliveryRoute.RelayedOneToOne;
 
         var command = new DeleteMessageCommand(
             TargetPayloadId: msgVm.Id,
@@ -410,7 +498,6 @@ public sealed partial class ChatViewModel : ViewModelBase
         await _chatService.DeleteMessageAsync(command).ConfigureAwait(true);
         _reloadCoordinator.TriggerReload();
     }
-
 
     [RelayCommand]
     private void CycleDisappearingTimer()
@@ -447,9 +534,342 @@ public sealed partial class ChatViewModel : ViewModelBase
         }
     }
 
+    #region File Transfer Operations
+
+    [RelayCommand]
+    public async Task SendFileAsync()
+    {
+        var currentPersona = _currentPersonaService.CurrentPersona;
+        if (currentPersona == null || !currentPersona.IdentityId.IsValid)
+        {
+            _logger.LogWarning("Cannot initiate file transfer: no active persona.");
+            return;
+        }
+
+        if (_dialogService == null || _filePickerService == null || _fileTransferActionHandler == null)
+        {
+            _logger.LogWarning("Cannot initiate file transfer: required services are unavailable.");
+            return;
+        }
+
+        var match = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
+        var contactName = match?.DisplayName ?? "Peer";
+
+        // Unavoidable IP-disclosure notice
+        var disclosureResult = await _dialogService.ShowAsync(new DialogRequest(
+            Title: "Direct P2P File Transfer IP Disclosure",
+            Message: $"Direct P2P file transfer connects directly to {contactName} (and group swarm peers) without relaying through the Exchange. This reveals your IP address to participating peers.",
+            PrimaryButtonText: "I Understand & Connect Directly",
+            CloseButtonText: "Cancel")).ConfigureAwait(true);
+
+        if (disclosureResult != DialogResult.Primary)
+        {
+            _logger.LogInformation("File transfer cancelled by user at IP disclosure notice.");
+            return;
+        }
+
+        var selectedFiles = await _filePickerService.PickFilesAsync("Select file(s) to transfer", allowMultiple: true).ConfigureAwait(true);
+        if (selectedFiles == null || selectedFiles.Count == 0) return;
+
+        var firstFile = selectedFiles[0];
+        var directory = Path.GetDirectoryName(firstFile);
+        if (string.IsNullOrEmpty(directory)) return;
+
+        var rootPath = RootDirectoryPath.Parse(directory);
+        var relativePaths = selectedFiles
+            .Select(f => SanitizedRelativePath.Parse(Path.GetRelativePath(directory, f)))
+            .ToList();
+
+        var recipients = match != null && match.PeerOrGroupId.IsValid
+            ? new[] { match.PeerOrGroupId }
+            : Array.Empty<PublicIdentityId>();
+
+        var bundleName = RootBundleName.Parse(Path.GetFileName(firstFile));
+
+        var result = await _fileTransferActionHandler.InitiateTransferAsync(
+            channelId: _channelId,
+            localInitiator: currentPersona.IdentityId,
+            recipients: recipients,
+            sourceRoot: rootPath,
+            filePaths: relativePaths,
+            wanPolicy: DirectWanPolicy.ExplicitlyAllowed,
+            customBundleName: bundleName).ConfigureAwait(true);
+
+        if (result.IsSuccess)
+        {
+            await RefreshTransfersAsync().ConfigureAwait(true);
+        }
+        else
+        {
+            _logger.LogWarning("Failed to initiate transfer: {Error}", result.Error.Description);
+        }
+    }
+
+    public async Task AcceptTransferAsync(TransferSessionId sessionId)
+    {
+        if (_dialogService == null || _filePickerService == null || _fileTransferActionHandler == null)
+        {
+            _logger.LogWarning("Cannot accept transfer: required services are unavailable.");
+            return;
+        }
+
+        var match = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
+        var contactName = match?.DisplayName ?? "Peer";
+
+        // Unavoidable IP-disclosure notice
+        var disclosureResult = await _dialogService.ShowAsync(new DialogRequest(
+            Title: "Direct P2P File Transfer IP Disclosure",
+            Message: $"Direct P2P file transfer connects directly to {contactName} (and group swarm peers) without relaying through the Exchange. This reveals your IP address to participating peers.",
+            PrimaryButtonText: "I Understand & Connect Directly",
+            CloseButtonText: "Cancel")).ConfigureAwait(true);
+
+        if (disclosureResult != DialogResult.Primary)
+        {
+            _logger.LogInformation("Transfer acceptance cancelled at IP disclosure notice.");
+            return;
+        }
+
+        var destinationFolder = await _filePickerService.PickFolderAsync("Select Destination Folder").ConfigureAwait(true);
+        if (string.IsNullOrEmpty(destinationFolder)) return;
+
+        var result = await _fileTransferActionHandler.AcceptTransferAsync(
+            sessionId,
+            RootDirectoryPath.Parse(destinationFolder)).ConfigureAwait(true);
+
+        if (result.IsSuccess)
+        {
+            await RefreshTransfersAsync().ConfigureAwait(true);
+        }
+        else
+        {
+            _logger.LogWarning("Failed to accept transfer: {Error}", result.Error.Description);
+        }
+    }
+
+    public async Task PauseTransferAsync(TransferSessionId sessionId)
+    {
+        if (_fileTransferActionHandler == null) return;
+        await _fileTransferActionHandler.PauseTransferAsync(sessionId).ConfigureAwait(true);
+        await RefreshTransfersAsync().ConfigureAwait(true);
+    }
+
+    public async Task ResumeTransferAsync(TransferSessionId sessionId)
+    {
+        if (_fileTransferActionHandler == null) return;
+        await _fileTransferActionHandler.ResumeTransferAsync(sessionId).ConfigureAwait(true);
+        await RefreshTransfersAsync().ConfigureAwait(true);
+    }
+
+    public async Task StopSeedingAsync(TransferSessionId sessionId)
+    {
+        if (_fileTransferActionHandler == null) return;
+        await _fileTransferActionHandler.StopSeedingAsync(sessionId).ConfigureAwait(true);
+        await RefreshTransfersAsync().ConfigureAwait(true);
+    }
+
+    public async Task CancelTransferAsync(TransferSessionId sessionId)
+    {
+        if (_fileTransferActionHandler == null) return;
+        await _fileTransferActionHandler.CancelTransferAsync(sessionId, TransferTerminationReason.SenderCancelled).ConfigureAwait(true);
+        await RefreshTransfersAsync().ConfigureAwait(true);
+    }
+
+    public async Task RefreshTransfersAndPendingIntroductionsAsync()
+    {
+        await RefreshTransfersAsync().ConfigureAwait(true);
+        await RefreshPendingIntroductionsAsync().ConfigureAwait(true);
+    }
+
+    public async Task RefreshTransfersAsync()
+    {
+        if (_fileTransferQueryService == null) return;
+
+        try
+        {
+            var match = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
+            var recipientId = match?.PeerOrGroupId;
+
+            var all = await _fileTransferQueryService.GetAllTransfersAsync().ConfigureAwait(true);
+            var relevant = all.Where(t =>
+                (t.ChannelId.HasValue && t.ChannelId.Value == _channelId) ||
+                (!t.ChannelId.HasValue && recipientId.HasValue && recipientId.Value.IsValid && t.InitiatorId == recipientId.Value)).ToList();
+
+            lock (_transfersLock)
+            {
+                var existingById = _transfersList.ToDictionary(t => t.SessionId);
+                var activeIds = new HashSet<TransferSessionId>();
+
+                foreach (var model in relevant)
+                {
+                    activeIds.Add(model.SessionId);
+                    if (existingById.TryGetValue(model.SessionId, out var existingItem))
+                    {
+                        existingItem.UpdateState(
+                            model.DownloadedBytes.Bytes,
+                            model.TotalBytes.Bytes,
+                            model.Status,
+                            model.DownloadSpeed.BytesPerSecond,
+                            model.ConnectedPeers.Count,
+                            model.ConnectedStreams.Count);
+                    }
+                    else
+                    {
+                        var newItem = new FileTransferItemViewModel(
+                            model.SessionId,
+                            model.RootName.Value,
+                            model.TotalBytes.Bytes,
+                            model.DownloadedBytes.Bytes,
+                            model.Status,
+                            model.DownloadSpeed.BytesPerSecond,
+                            model.ConnectedPeers.Count,
+                            model.ConnectedStreams.Count,
+                            onAccept: AcceptTransferAsync,
+                            onCancel: CancelTransferAsync,
+                            onPause: PauseTransferAsync,
+                            onResume: ResumeTransferAsync,
+                            onStopSeeding: StopSeedingAsync);
+
+                        _transfersList.Add(newItem);
+                    }
+                }
+
+                for (int i = _transfersList.Count - 1; i >= 0; i--)
+                {
+                    if (!activeIds.Contains(_transfersList[i].SessionId))
+                    {
+                        _transfersList[i].Dispose();
+                        _transfersList.RemoveAt(i);
+                    }
+                }
+
+                HasActiveTransfers = _transfersList.Count > 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error refreshing file transfers for channel {ChannelId}", _channelId);
+        }
+    }
+
+    private void TeardownTransfersOnLock()
+    {
+        if (_fileTransferActionHandler == null) return;
+
+        lock (_transfersLock)
+        {
+            foreach (var transfer in _transfersList)
+            {
+                if (transfer.IsInFlight || transfer.IsSeeding)
+                {
+                    _ = _fileTransferActionHandler.CancelTransferAsync(transfer.SessionId, TransferTerminationReason.SenderCancelled);
+                }
+            }
+        }
+    }
+
+    #endregion
+
+    #region Introduction Operations
+
+    [RelayCommand]
+    public async Task RequestIntroductionConsentAsync()
+    {
+        var currentPersona = _currentPersonaService.CurrentPersona;
+        if (currentPersona == null || !currentPersona.IdentityId.IsValid || SelectedCandidateForIntro == null) return;
+
+        var cmd = new RequestIntroductionConsentCommand(
+            ChannelId: _channelId,
+            RequesterId: currentPersona.IdentityId,
+            CandidatePeerId: SelectedCandidateForIntro.PeerOrGroupId,
+            CandidateDisplayName: SelectedCandidateForIntro.DisplayName,
+            ForwardChannelId: SelectedCandidateForIntro.ConversationId,
+            Note: string.IsNullOrWhiteSpace(IntroNoteText) ? null : IntroNoteText.Trim());
+
+        var result = await _chatService.RequestIntroductionConsentAsync(cmd).ConfigureAwait(true);
+        if (result.IsSuccess)
+        {
+            IntroNoteText = string.Empty;
+            IsIntroduceFlyoutOpen = false;
+        }
+        else
+        {
+            _logger.LogWarning("Failed to request introduction consent: {Error}", result.Error.Description);
+        }
+    }
+
+    [RelayCommand]
+    public async Task AllowPendingIntroductionAsync()
+    {
+        if (string.IsNullOrEmpty(PendingIntroductionRequestId)) return;
+
+        var cmd = new RespondToIntroductionConsentCommand(PendingIntroductionRequestId, Allowed: true);
+        var result = await _chatService.RespondToIntroductionConsentAsync(cmd).ConfigureAwait(true);
+        if (result.IsSuccess)
+        {
+            HasPendingIntroduction = false;
+            PendingIntroductionRequestId = null;
+            PendingIntroductionText = string.Empty;
+        }
+    }
+
+    [RelayCommand]
+    public async Task DeclinePendingIntroductionAsync()
+    {
+        if (string.IsNullOrEmpty(PendingIntroductionRequestId)) return;
+
+        var cmd = new RespondToIntroductionConsentCommand(PendingIntroductionRequestId, Allowed: false, DeclineReason: "Declined by user.");
+        var result = await _chatService.RespondToIntroductionConsentAsync(cmd).ConfigureAwait(true);
+        if (result.IsSuccess)
+        {
+            HasPendingIntroduction = false;
+            PendingIntroductionRequestId = null;
+            PendingIntroductionText = string.Empty;
+        }
+    }
+
+    public async Task RefreshPendingIntroductionsAsync()
+    {
+        if (_peerIntroductionConsentRepository == null) return;
+        var currentPersona = _currentPersonaService.CurrentPersona;
+        if (currentPersona == null || !currentPersona.IdentityId.IsValid) return;
+
+        try
+        {
+            var match = _conversationStateService.Conversations.FirstOrDefault(c => c.ConversationId == _channelId);
+            var recipientId = match?.PeerOrGroupId;
+
+            var pending = await _peerIntroductionConsentRepository.GetPendingInboundRequestsAsync(currentPersona.IdentityId).ConfigureAwait(true);
+            var matching = pending.FirstOrDefault(p =>
+                p.ChannelId == _channelId ||
+                (recipientId.HasValue && recipientId.Value.IsValid && p.RemotePeerId == recipientId.Value));
+
+            if (matching != null)
+            {
+                HasPendingIntroduction = true;
+                PendingIntroductionRequestId = matching.RequestId;
+                var noteSuffix = string.IsNullOrWhiteSpace(matching.Note) ? "" : $" Note: \"{matching.Note}\"";
+                PendingIntroductionText = $"🤝 {ConversationTitle} wants to introduce {matching.CandidateDisplayName} to you.{noteSuffix}";
+            }
+            else
+            {
+                HasPendingIntroduction = false;
+                PendingIntroductionRequestId = null;
+                PendingIntroductionText = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error refreshing pending introductions for channel {ChannelId}", _channelId);
+        }
+    }
+
+    #endregion
+
     protected override void DisposeCore()
     {
         SaveVolatileDraft();
+        TeardownTransfersOnLock();
+
         lock (_lock)
         {
             foreach (var vm in _messagesList)
@@ -460,7 +880,15 @@ public sealed partial class ChatViewModel : ViewModelBase
             _modelsById.Clear();
         }
 
+        lock (_transfersLock)
+        {
+            foreach (var t in _transfersList)
+            {
+                t.Dispose();
+            }
+            _transfersList.Clear();
+        }
+
         base.DisposeCore();
     }
 }
-

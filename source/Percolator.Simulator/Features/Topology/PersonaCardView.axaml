@@ -141,11 +141,44 @@
                         </Flyout>
                     </DropDownButton.Flyout>
                 </DropDownButton>
+
+                <!-- 4. Introduce Contact Flyout -->
+                <DropDownButton Content="🤝 Introduce ▼">
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Spacing="8" MinWidth="300" Margin="4">
+                                <TextBlock Text="Introduce Contact" FontWeight="Bold" FontSize="12" />
+                                <TextBlock Text="Select a contact to introduce to current peer:" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ComboBox ItemsSource="{Binding AvailableCandidatesForIntro}"
+                                          SelectedItem="{Binding SelectedCandidateForIntro}"
+                                          HorizontalAlignment="Stretch" />
+                                <TextBox Text="{Binding IntroNoteText}" Watermark="Optional note..." />
+                                <Button Content="🤝 Send Introduction"
+                                        Command="{Binding RequestIntroductionCommand}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Classes="accent" />
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
             </StackPanel>
 
 
             <!-- Pending Banners CTL-PER-14, 15, 16 -->
             <StackPanel Grid.Row="2" Spacing="4" Margin="0,0,0,8">
+                <!-- Pending Introduction Banner -->
+                <Border Background="#4A2545" CornerRadius="6" Padding="8,6"
+                        IsVisible="{Binding HasPendingIntroduction}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding PendingIntroText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button Content="✓ Allow" Command="{Binding AcceptPendingIntroductionCommand}" Classes="accent" Padding="6,2" />
+                            <Button Content="✕ Decline" Command="{Binding DeclinePendingIntroductionCommand}" Padding="6,2" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
                 <!-- Pending Handshake Banner CTL-PER-14 -->
                 <Border Background="#263859" CornerRadius="6" Padding="8,6"
                         IsVisible="{Binding HasPendingHandshake}">

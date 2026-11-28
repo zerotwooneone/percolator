@@ -11,6 +11,8 @@ namespace Percolator.Desktop.Features.Transports.Models;
 public sealed record ShareInvitationDialogParams(
     PublicIdentityId IdentityId,
     BlindedRoutingToken RoutingToken,
-    DeliveryToken DeliveryToken,
-    IReadOnlyList<string> EndpointHosts,
-    int BoundPort);
+    DeliveryToken? DeliveryToken = null,
+    IReadOnlyList<string>? EndpointHosts = null,
+    int BoundPort = 0,
+    IdentityKey? IdentityKey = null,
+    RelayEndpoint? RelayEndpoint = null);

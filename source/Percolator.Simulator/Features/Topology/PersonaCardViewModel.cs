@@ -14,6 +14,7 @@ using Percolator.Application.Channels.Events;
 using Percolator.Application.Ports;
 using Percolator.Application.Profiles.Events;
 using Percolator.Apps.Chat.Features.GroupInvitations;
+using Percolator.Apps.Chat.Features.Introductions;
 using Percolator.Apps.Chat.Features.Messaging;
 using Percolator.Domain.Channels.Ports;
 using Percolator.PluginSdk.Events;
@@ -42,6 +43,13 @@ internal sealed record ConversationItemViewModel(
     SimulatedNodeId? PeerNodeId,
     ChannelId? GroupChannelId,
     PublicIdentityId? PeerIdentityId = null)
+{
+    public override string ToString() => DisplayTitle;
+}
+
+internal sealed record IntroduceCandidateItemViewModel(
+    string DisplayTitle,
+    PublicIdentityId IdentityId)
 {
     public override string ToString() => DisplayTitle;
 }
@@ -135,6 +143,24 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
     private string _pendingFileOfferText = string.Empty;
 
     private Guid? _pendingFileTransferId;
+
+    // Pending Peer Introduction Banner State
+    [ObservableProperty]
+    private bool _hasPendingIntroduction;
+
+    [ObservableProperty]
+    private string _pendingIntroText = string.Empty;
+
+    private string? _pendingIntroRequestId;
+
+    // Contact Introduction Flyout State
+    public ObservableCollection<IntroduceCandidateItemViewModel> AvailableCandidatesForIntro { get; } = new();
+
+    [ObservableProperty]
+    private IntroduceCandidateItemViewModel? _selectedCandidateForIntro;
+
+    [ObservableProperty]
+    private string _introNoteText = string.Empty;
 
     // Conversation Selector (CTL-PER-17)
     public ObservableCollection<ConversationItemViewModel> AvailableConversations { get; } = new();
@@ -461,6 +487,21 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                 var pendingInvites = await groupInviteQuery.GetPendingInvitationsAsync();
                 var pendingInvite = pendingInvites.FirstOrDefault(i => i.Status == GroupInvitationStatus.Pending);
 
+                // 3. Peer introductions (Consent requests)
+                var introConsentRepo = scope.ServiceProvider.GetRequiredService<IPeerIntroductionConsentRepository>();
+                var pendingIntros = await introConsentRepo.GetPendingInboundRequestsAsync(_host.PublicIdentityId);
+                var pendingIntro = pendingIntros.FirstOrDefault();
+
+                var candidateItems = contacts
+                    .Where(c => c.State == ContactState.Active && c.IdentityId != _host.PublicIdentityId)
+                    .Select(c =>
+                    {
+                        var host = _worldState.FindPersonaHostByIdentity(c.IdentityId);
+                        var name = host?.DisplayName ?? c.IdentityId.ToString()[..8];
+                        return new IntroduceCandidateItemViewModel(name, c.IdentityId);
+                    })
+                    .ToList();
+
                 UiTaskRunner.PostToUi(() =>
                 {
                     if (pending != null)
@@ -501,6 +542,33 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
                         _pendingInvitationId = null;
                         HasPendingGroupInvite = false;
                         PendingGroupInviteText = string.Empty;
+                    }
+
+                    if (pendingIntro != null)
+                    {
+                        _pendingIntroRequestId = pendingIntro.RequestId;
+                        var reqHost = _worldState.FindPersonaHostByIdentity(pendingIntro.RemotePeerId);
+                        var reqName = reqHost?.DisplayName ?? pendingIntro.RemotePeerId.ToString()[..8];
+                        var candHost = _worldState.FindPersonaHostByIdentity(pendingIntro.CandidatePeerId);
+                        var candName = candHost?.DisplayName ?? pendingIntro.CandidatePeerId.ToString()[..8];
+                        PendingIntroText = $"Introduction request from {reqName}: introduce to {candName}?";
+                        HasPendingIntroduction = true;
+                    }
+                    else
+                    {
+                        _pendingIntroRequestId = null;
+                        HasPendingIntroduction = false;
+                        PendingIntroText = string.Empty;
+                    }
+
+                    AvailableCandidatesForIntro.Clear();
+                    foreach (var c in candidateItems)
+                    {
+                        AvailableCandidatesForIntro.Add(c);
+                    }
+                    if (SelectedCandidateForIntro == null && AvailableCandidatesForIntro.Count > 0)
+                    {
+                        SelectedCandidateForIntro = AvailableCandidatesForIntro[0];
                     }
                 });
             },
@@ -1048,6 +1116,125 @@ internal sealed partial class PersonaCardViewModel : ViewModelBase
         {
             HasPendingFileOffer = false;
             PendingFileOfferText = string.Empty;
+        }
+    }
+
+    [RelayCommand]
+    public async Task AcceptPendingIntroductionAsync()
+    {
+        if (_host == null || string.IsNullOrEmpty(_pendingIntroRequestId)) return;
+        var reqId = _pendingIntroRequestId;
+        _pendingIntroRequestId = null;
+        HasPendingIntroduction = false;
+        PendingIntroText = string.Empty;
+
+        var success = await UiTaskRunner.RunAsync(
+            async () =>
+            {
+                using var scope = _host.Services.CreateScope();
+                var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+                var result = await chatService.RespondToIntroductionConsentAsync(
+                    new RespondToIntroductionConsentCommand(reqId, Allowed: true));
+                return result.IsSuccess;
+            },
+            category: "PeerIntroduction",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+
+        if (success)
+        {
+            _toastService?.ShowToast("Introduction Allowed", "Allowed introduction consent. Contact card forwarded.", ToastSeverity.Success);
+        }
+        RefreshPendingHandshakes();
+    }
+
+    [RelayCommand]
+    public async Task DeclinePendingIntroductionAsync()
+    {
+        if (_host == null || string.IsNullOrEmpty(_pendingIntroRequestId)) return;
+        var reqId = _pendingIntroRequestId;
+        _pendingIntroRequestId = null;
+        HasPendingIntroduction = false;
+        PendingIntroText = string.Empty;
+
+        await UiTaskRunner.RunAsync(
+            async () =>
+            {
+                using var scope = _host.Services.CreateScope();
+                var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+                await chatService.RespondToIntroductionConsentAsync(
+                    new RespondToIntroductionConsentCommand(reqId, Allowed: false, DeclineReason: "Declined by user."));
+                return true;
+            },
+            category: "PeerIntroduction",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+
+        _toastService?.ShowToast("Introduction Declined", "Declined introduction consent.", ToastSeverity.Informational);
+        RefreshPendingHandshakes();
+    }
+
+    [RelayCommand]
+    public async Task RequestIntroductionAsync()
+    {
+        if (_host == null || SelectedConversation == null || SelectedConversation.IsGroup || !SelectedConversation.PeerIdentityId.HasValue || SelectedCandidateForIntro == null)
+        {
+            _toastService?.ShowToast("Introduction", "Select a direct conversation and a candidate contact to introduce.", ToastSeverity.Warning);
+            return;
+        }
+
+        var candidate = SelectedCandidateForIntro;
+        var targetPeerId = SelectedConversation.PeerIdentityId.Value;
+        if (candidate.IdentityId == targetPeerId)
+        {
+            _toastService?.ShowToast("Introduction", "Cannot introduce a contact to themselves.", ToastSeverity.Warning);
+            return;
+        }
+
+        var relay = _host.GetPrimaryLinkedRelay();
+        if (relay == null)
+        {
+            _toastService?.ShowToast("Introduction", "Active persona has no linked relay.", ToastSeverity.Error);
+            return;
+        }
+
+        var directChannelId = ChannelId.DeterministicForDirect(_host.PublicIdentityId, targetPeerId, relay.Endpoint);
+        var forwardChannelId = ChannelId.DeterministicForDirect(_host.PublicIdentityId, candidate.IdentityId, relay.Endpoint);
+        var note = string.IsNullOrWhiteSpace(IntroNoteText) ? null : IntroNoteText.Trim();
+
+        var success = await UiTaskRunner.RunAsync(
+            async () =>
+            {
+                using var scope = _host.Services.CreateScope();
+                var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+                var cmd = new RequestIntroductionConsentCommand(
+                    ChannelId: directChannelId,
+                    RequesterId: _host.PublicIdentityId,
+                    CandidatePeerId: candidate.IdentityId,
+                    CandidateDisplayName: candidate.DisplayTitle,
+                    ForwardChannelId: forwardChannelId,
+                    Note: note);
+                var result = await chatService.RequestIntroductionConsentAsync(cmd);
+                return result.IsSuccess;
+            },
+            category: "PeerIntroduction",
+            logSink: _logSink,
+            toastService: _toastService,
+            nodeName: DisplayName,
+            nodeId: NodeId);
+
+        if (success)
+        {
+            _toastService?.ShowToast("Introduction Sent", $"Requested consent from {SelectedConversation.DisplayTitle} to introduce {candidate.DisplayTitle}.", ToastSeverity.Success);
+            IntroNoteText = string.Empty;
+        }
+        else
+        {
+            _toastService?.ShowToast("Introduction Failed", "Failed to send introduction consent request.", ToastSeverity.Error);
         }
     }
 

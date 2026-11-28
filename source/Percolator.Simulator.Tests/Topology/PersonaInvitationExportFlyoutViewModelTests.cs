@@ -11,6 +11,7 @@ using Percolator.Domain.Delivery.Model;
 using Percolator.Domain.Delivery.ValueObjects;
 using Percolator.Domain.Identities;
 using Percolator.Domain.Identities.ValueObjects;
+using Percolator.PluginSdk;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;

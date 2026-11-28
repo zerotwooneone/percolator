@@ -45,6 +45,8 @@ public sealed class DesktopStage2SessionFactoryTests
         stage1Services.AddSingleton(Mock.Of<IIdenticonGenerator>());
         stage1Services.AddSingleton(Mock.Of<Percolator.Application.Ports.IPortReservationService>());
         stage1Services.AddSingleton(Mock.Of<IClipboardService>());
+        stage1Services.AddSingleton(Mock.Of<IDialogService>());
+        stage1Services.AddSingleton(Mock.Of<IFilePickerService>());
         stage1Services.AddSingleton(TimeProvider.System);
 
         _stage1Provider = stage1Services.BuildServiceProvider();

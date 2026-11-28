@@ -1,7 +1,13 @@
 namespace Percolator.Desktop.Common.Services;
 
 using System;
-using Percolator.PluginSdk;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Infrastructure.Plugins.FileTransfer;
 
 public sealed class DesktopNetworkEndpointDiscoveryPort : INetworkEndpointDiscoveryPort
 {
@@ -12,14 +18,19 @@ public sealed class DesktopNetworkEndpointDiscoveryPort : INetworkEndpointDiscov
         _currentPersonaService = currentPersonaService ?? throw new ArgumentNullException(nameof(currentPersonaService));
     }
 
-    public Uri? GetLocalDirectEndpoint()
+    public ValueTask<IReadOnlyList<DirectEndpointCandidate>> DiscoverLocalCandidatesAsync(
+        DirectWanPolicy wanPolicy,
+        CancellationToken ct = default)
     {
         var boundPort = _currentPersonaService.CurrentPersona?.BoundPort;
-        if (boundPort is > 0)
-        {
-            return new Uri($"https://127.0.0.1:{boundPort}");
-        }
+        var inner = new NetworkInterfaceEndpointDiscoveryPort(boundPort, allowLoopback: true);
+        return inner.DiscoverLocalCandidatesAsync(wanPolicy, ct);
+    }
 
-        return null;
+    public ValueTask<RelayRendezvousDescriptor?> AllocateRelayRendezvousAsync(
+        TransferSessionId sessionId,
+        CancellationToken ct = default)
+    {
+        return ValueTask.FromResult<RelayRendezvousDescriptor?>(null);
     }
 }

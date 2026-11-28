@@ -278,6 +278,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IRoutingCoordinator, RoutingCoordinator>();
         services.AddScoped<IPayloadSender, OutboundEgressPipeline>();
         services.AddScoped<IGroupKeyDistributionService, GroupKeyDistributionService>();
+        services.AddScoped<IPeerInvitationService, PeerInvitationService>();
         services.AddScoped<AppRouter>();
         services.AddScoped<IAppRouter>(sp =>
         {

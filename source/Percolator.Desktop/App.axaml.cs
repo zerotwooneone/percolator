@@ -77,6 +77,7 @@ public partial class App : Avalonia.Application
                 services.AddSingleton<IPortReservationService, PortReservationService>();
                 services.AddSingleton<IIdenticonGenerator, IdenticonGenerator>();
                 services.AddSingleton<IClipboardService, AvaloniaClipboardService>();
+                services.AddSingleton<IFilePickerService, AvaloniaFilePickerService>();
 
                 // CTX-02: Stage-2 session composition is executable-owned. The coordinator
                 // resolves this factory and gets the session back — no Infra-side host factory.

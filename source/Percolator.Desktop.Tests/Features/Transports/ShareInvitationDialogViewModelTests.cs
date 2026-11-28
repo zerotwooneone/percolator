@@ -101,7 +101,7 @@ public sealed class ShareInvitationDialogViewModelTests
 
             _fakeCodec.LastEncodedPayload.Should().NotBeNull();
             _fakeCodec.LastEncodedPayload!.IdentityId.Should().Be(_testIdentityId);
-            _fakeCodec.LastEncodedPayload.PortRange.Should().BeNull("default range preset must omit port from invitation");
+            _fakeCodec.LastEncodedPayload.RoutingToken.Should().Be(_testRoutingToken);
 
             vm.InvitationUrl.Should().Be("percolator://invite?test=1");
             vm.QrCodePngBytes.Should().NotBeNull();
@@ -123,9 +123,7 @@ public sealed class ShareInvitationDialogViewModelTests
             vm.IsCustomRangePreset.Should().BeTrue();
 
             _fakeCodec.LastEncodedPayload.Should().NotBeNull();
-            _fakeCodec.LastEncodedPayload!.PortRange.Should().NotBeNull();
-            _fakeCodec.LastEncodedPayload.PortRange!.MinPort.Should().Be(5150);
-            _fakeCodec.LastEncodedPayload.PortRange!.MaxPort.Should().Be(5200);
+            _fakeCodec.LastEncodedPayload!.IdentityId.Should().Be(_testIdentityId);
         }
     }
 
@@ -141,9 +139,7 @@ public sealed class ShareInvitationDialogViewModelTests
             vm.IsCustomRangeVisible.Should().BeFalse();
 
             _fakeCodec.LastEncodedPayload.Should().NotBeNull();
-            _fakeCodec.LastEncodedPayload!.PortRange.Should().NotBeNull();
-            _fakeCodec.LastEncodedPayload.PortRange!.MinPort.Should().Be(TestBoundPort);
-            _fakeCodec.LastEncodedPayload.PortRange!.MaxPort.Should().Be(TestBoundPort);
+            _fakeCodec.LastEncodedPayload!.IdentityId.Should().Be(_testIdentityId);
         }
     }
 
@@ -189,9 +185,7 @@ public sealed class ShareInvitationDialogViewModelTests
             vm.CustomRangeMax = 5100;
 
             _fakeCodec.LastEncodedPayload.Should().NotBeNull();
-            _fakeCodec.LastEncodedPayload!.PortRange.Should().NotBeNull();
-            _fakeCodec.LastEncodedPayload.PortRange!.MinPort.Should().Be(5100);
-            _fakeCodec.LastEncodedPayload.PortRange!.MaxPort.Should().Be(5400);
+            _fakeCodec.LastEncodedPayload!.IdentityId.Should().Be(_testIdentityId);
         }
     }
 

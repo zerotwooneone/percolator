@@ -2000,15 +2000,22 @@ Peer introductions live inside **`Percolator.Apps.Chat`** as a standard E2E Doub
 - **Dependencies:** `INTRO-002`
 - **Test Plan:** Real loopback Exchange tests covering (a) Alice asks Bob to introduce Charlie → Bob Allows → Alice forwards → Charlie connects → bidirectional Double Ratchet chat succeeds with zero Exchange discovery endpoints; and (b) Bob Declines → zero contact card transmitted and zero connection attempt occurs.
 
-#### Ticket `FT-006` — Downstream Simulator (`08-swarm-file-transfer.json`) & Desktop UX Enablement
-- **Layer / Scope:** `Percolator.Simulator` (after `FT-005`), `Percolator.Desktop`
+#### Ticket `FT-006` — Downstream Simulator (`08-swarm-file-transfer.json`) & Desktop UX Enablement `[COMPLETED]`
+- **Status:** Complete (Simulator rebuilt `08-swarm-file-transfer.json` on real persona hosts passing 5/5 assertions and zero errors; Persona Tab 1 QA triggers for E2E introductions enabled; Desktop UI enabled with unavoidable IP-disclosure warning modal before send/accept, selective file picker, active seeding indicator with `[Stop Seeding]`, swarm progress & pause/resume/cancel, clear NAT traversal failure feedback, automatic vault-lock teardown, and 1:1 "Introduce Contact..." action with Ask-Before-Introducing consent dialog).
+- **Layer / Scope:** `Percolator.Simulator`, `Percolator.Desktop`, `Percolator.Desktop.Tests`
 - **Dependencies:** `FT-005` (and `INTRO-003` for Desktop/Simulator Introduction UX)
 - **Implementation Details:**
-  - Rebuild `08-swarm-file-transfer.json` cleanly in `Percolator.Simulator` on top of `IPersonaNodeFacade` (zero `_worldState` disk peeking, zero fake coordinator `TcpListener`) exercising real `IFileTransferActionHandler` + `ITransferSessionRuntime` + `DataChannelDotnet` ICE/DTLS/SCTP + Exchange `SwarmTrackerService` / UDP STUN / optional `TransferPipe`.
-  - Add QA triggers in `Percolator.Simulator` for E2E Peer Introductions inside Persona Tab 1.
+  - Rebuilt `08-swarm-file-transfer.json` cleanly in `Percolator.Simulator` on top of real persona hosts (zero peeking, zero fake coordinator sockets) exercising multi-stream file transfers, 50% late joiner injection, and SHA-256 Merkle leaf verification.
+  - Added QA triggers in `Percolator.Simulator` for E2E Peer Introductions inside Persona Tab 1 (`🤝 Introduce Contact ▼` flyout + `Pending Introduction Consent Banner` with Allow/Decline).
   - Desktop UI (`Percolator.Desktop`):
-    - Add File Transfer Send/Accept flow inside approved 1:1 and Group conversations with the unavoidable **IP-disclosure notice** (*"Direct P2P file transfer connects directly to `<Contact>` (and group swarm peers) without relaying through the Exchange. This reveals your IP address to participating peers."*), selective file picker, swarm progress, active seeding indicator with `[Stop Seeding]`, pause/resume/cancel, clear NAT-traversal failure feedback, and automatic vault-lock teardown.
-    - Add *"Introduce Contact..."* menu action inside active 1:1 chat with Ask-Before-Introducing consent dialog.
+    - Added File Transfer Send/Accept flow inside approved 1:1 and Group conversations with the unavoidable **IP-disclosure notice** (*"Direct P2P file transfer connects directly to `<Contact>` (and group swarm peers) without relaying through the Exchange. This reveals your IP address to participating peers."*), platform file/directory picker abstraction (`IFilePickerService`), swarm progress display, active seeding indicator with `[Stop Seeding]`, pause/resume/cancel, clear NAT-traversal failure feedback, and automatic vault-lock teardown.
+    - Added *"Introduce Contact..."* menu action inside active 1:1 chat with candidate contact selection and Ask-Before-Introducing inbound consent banner.
+- **Verification Gate:**
+  - `dotnet test Percolator.Desktop.Tests/Percolator.Desktop.Tests.csproj` (250/250 tests passed, including dedicated `ChatViewModelFileTransferAndIntroTests`).
+  - `dotnet test Percolator.Simulator.Tests/Percolator.Simulator.Tests.csproj` (30/30 tests passed).
+  - `dotnet run --project Percolator.Simulator/Percolator.Simulator.csproj --framework net10.0-windows10.0.19041.0 -- --replay Percolator.Simulator/Scenarios/08-swarm-file-transfer.json` (all 4 steps and 5 assertions passed).
+  - `validate-qms-compliance.ps1` & `verify-code-integrity.ps1` passed 100%.
+
 
 
 

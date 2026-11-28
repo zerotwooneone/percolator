@@ -27,7 +27,6 @@ public sealed class DesktopPeerConnectionServiceTests
     private ServiceProvider _serviceProvider = null!;
     private Mock<ICurrentPersonaService> _currentPersonaMock = null!;
     private FakeDesktopPersonaDirectory _fakeDirectory = null!;
-    private IStreamRegistryManagement _fakeStreamRegistry = null!;
     private FakeDateTimeProvider _fakeTimeProvider = null!;
 
     [SetUp]
@@ -36,7 +35,6 @@ public sealed class DesktopPeerConnectionServiceTests
         _currentPersonaMock = new Mock<ICurrentPersonaService>();
         _currentPersonaMock.Setup(a => a.CurrentPersona).Returns((ActivePersonaModel?)null);
         _fakeDirectory = new FakeDesktopPersonaDirectory();
-        _fakeStreamRegistry = Mock.Of<IStreamRegistryManagement>();
         _fakeTimeProvider = new FakeDateTimeProvider();
 
         _services = new ServiceCollection();
@@ -56,22 +54,20 @@ public sealed class DesktopPeerConnectionServiceTests
     {
         var scopeFactory = _serviceProvider.GetRequiredService<IServiceScopeFactory>();
 
-        Action act1 = () => new DesktopPeerConnectionService(null!, _currentPersonaMock.Object, _fakeStreamRegistry, _fakeTimeProvider);
-        Action act2 = () => new DesktopPeerConnectionService(scopeFactory, null!, _fakeStreamRegistry, _fakeTimeProvider);
-        Action act3 = () => new DesktopPeerConnectionService(scopeFactory, _currentPersonaMock.Object, null!, _fakeTimeProvider);
-        Action act4 = () => new DesktopPeerConnectionService(scopeFactory, _currentPersonaMock.Object, _fakeStreamRegistry, null!);
+        Action act1 = () => new DesktopPeerConnectionService(null!, _currentPersonaMock.Object, _fakeTimeProvider);
+        Action act2 = () => new DesktopPeerConnectionService(scopeFactory, null!, _fakeTimeProvider);
+        Action act3 = () => new DesktopPeerConnectionService(scopeFactory, _currentPersonaMock.Object, null!);
 
         act1.Should().Throw<ArgumentNullException>();
         act2.Should().Throw<ArgumentNullException>();
         act3.Should().Throw<ArgumentNullException>();
-        act4.Should().Throw<ArgumentNullException>();
     }
 
     [Test]
     public async Task ConnectToPeerAsync_WhenNoActivePersonaExists_ReturnsFailure()
     {
         var scopeFactory = _serviceProvider.GetRequiredService<IServiceScopeFactory>();
-        var sut = new DesktopPeerConnectionService(scopeFactory, _currentPersonaMock.Object, _fakeStreamRegistry, _fakeTimeProvider);
+        var sut = new DesktopPeerConnectionService(scopeFactory, _currentPersonaMock.Object, _fakeTimeProvider);
 
         var result = await sut.ConnectToPeerAsync(PublicIdentityId.New());
 
@@ -80,19 +76,20 @@ public sealed class DesktopPeerConnectionServiceTests
     }
 
     [Test]
-    public async Task ConnectToDirectPeerAsync_WhenNoActivePersonaExists_ReturnsFailure()
+    public async Task ConnectWithInvitationAsync_WhenNoActivePersonaExists_ReturnsFailure()
     {
         var scopeFactory = _serviceProvider.GetRequiredService<IServiceScopeFactory>();
-        var sut = new DesktopPeerConnectionService(scopeFactory, _currentPersonaMock.Object, _fakeStreamRegistry, _fakeTimeProvider);
+        var sut = new DesktopPeerConnectionService(scopeFactory, _currentPersonaMock.Object, _fakeTimeProvider);
 
-        var routingToken = BlindedRoutingToken.New();
-        using var deliveryToken = DeliveryToken.GenerateRandom();
-
-        var result = await sut.ConnectToDirectPeerAsync(
+        var invitationResult = PeerInvitation.Create(
             PublicIdentityId.New(),
-            routingToken,
-            deliveryToken,
-            new Uri("https://127.0.0.1:5100"));
+            IdentityKey.FromBytes(new byte[32]),
+            RelayEndpoint.Parse("127.0.0.1:5100"),
+            BlindedRoutingToken.New());
+
+        var result = await sut.ConnectWithInvitationAsync(
+            default,
+            invitationResult.Value);
 
         result.IsFailure.Should().BeTrue();
         result.Error.Code.Should().Be("NO_ACTIVE_PERSONA");

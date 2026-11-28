@@ -33,9 +33,11 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
 
     private readonly PublicIdentityId _identityId;
     private readonly BlindedRoutingToken _routingToken;
-    private readonly DeliveryToken _deliveryToken;
+    private readonly DeliveryToken? _deliveryToken;
     private readonly IReadOnlyList<string> _endpointHosts;
     private readonly int _boundPort;
+    private readonly IdentityKey _identityKey;
+    private readonly RelayEndpoint _relayEndpoint;
 
     public ShareInvitationDialogViewModel(
         IDialogContext<ShareInvitationDialogParams> dialogContext,
@@ -56,6 +58,8 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
         _deliveryToken = p.DeliveryToken;
         _endpointHosts = p.EndpointHosts ?? Array.Empty<string>();
         _boundPort = p.BoundPort;
+        _identityKey = p.IdentityKey ?? IdentityKey.FromBytes(new byte[32]);
+        _relayEndpoint = p.RelayEndpoint ?? RelayEndpoint.Parse("127.0.0.1:5100");
 
         UpdateInvitationPayload();
     }
@@ -140,10 +144,9 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
 
             var payload = new PeerInvitationPayload(
                 _identityId,
-                _routingToken,
-                _deliveryToken,
-                _endpointHosts,
-                portRange);
+                _identityKey,
+                _relayEndpoint,
+                _routingToken);
 
             InvitationUrl = _invitationCodec.Encode(payload);
             QrCodePngBytes = _qrCodeGenerator.GeneratePngBytes(InvitationUrl);
@@ -187,7 +190,7 @@ public sealed partial class ShareInvitationDialogViewModel : ViewModelBase
 
     protected override void DisposeCore()
     {
-        _deliveryToken.Dispose();
+        _deliveryToken?.Dispose();
         base.DisposeCore();
     }
 }

@@ -12,6 +12,7 @@ using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Ports;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using Percolator.Infrastructure.Persistence;
 using Percolator.Infrastructure.Persistence.Entities;
@@ -169,6 +170,7 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             (TransferSessionState)entity.State,
             (TransferRole)entity.Role,
             entity.CreatedAtUtc,
-            entity.CompletedAtUtc);
+            entity.CompletedAtUtc,
+            entity.ChannelId != Guid.Empty ? ChannelId.FromGuid(entity.ChannelId) : null);
     }
 }

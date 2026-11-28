@@ -61,10 +61,9 @@ public sealed class AddConnectionDialogViewModelTests
         _testPersonaId = PublicIdentityId.New();
         _testInvitationPayload = new PeerInvitationPayload(
             PublicIdentityId.New(),
-            BlindedRoutingToken.New(),
-            DeliveryToken.GenerateRandom(),
-            new[] { "127.0.0.1" },
-            PortRange.Single(5100));
+            IdentityKey.FromBytes(new byte[32]),
+            RelayEndpoint.Parse("127.0.0.1:5100"),
+            BlindedRoutingToken.New());
 
         _dialogResult = null;
         _contextMock = new Mock<IDialogContext<PublicIdentityId, AddConnectionDialogResult>>();
@@ -255,6 +254,7 @@ public sealed class AddConnectionDialogViewModelTests
 
         _mockOutboundWorkflow
             .Setup(p => p.ConnectAsync(
+                _testPersonaId,
                 _testInvitationPayload,
                 TimeSpan.FromSeconds(3),
                 It.IsAny<CancellationToken>()))
@@ -287,6 +287,7 @@ public sealed class AddConnectionDialogViewModelTests
 
         _mockOutboundWorkflow
             .Setup(p => p.ConnectAsync(
+                _testPersonaId,
                 _testInvitationPayload,
                 TimeSpan.FromSeconds(3),
                 It.IsAny<CancellationToken>()))
@@ -314,6 +315,7 @@ public sealed class AddConnectionDialogViewModelTests
 
         _mockOutboundWorkflow
             .Setup(p => p.ConnectAsync(
+                _testPersonaId,
                 _testInvitationPayload,
                 TimeSpan.FromSeconds(3),
                 It.IsAny<CancellationToken>()))

@@ -2,6 +2,7 @@ using Percolator.Apps.FileTransfer.Domain.Common;
 using Percolator.Apps.FileTransfer.Domain.ManifestManagement;
 using Percolator.Apps.FileTransfer.Domain.TransferNegotiation;
 using Percolator.Apps.FileTransfer.Features.TransferNegotiation;
+using Percolator.Domain.Channels.ValueObjects;
 using Percolator.Domain.Identities.ValueObjects;
 using PublicIdentityId = Percolator.Domain.Identities.PublicIdentityId;
 
@@ -27,4 +28,5 @@ public sealed record TransferSessionReadModel(
     TransferSessionState Status,
     TransferRole Role,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? CompletedAtUtc);
+    DateTimeOffset? CompletedAtUtc,
+    ChannelId? ChannelId = null);

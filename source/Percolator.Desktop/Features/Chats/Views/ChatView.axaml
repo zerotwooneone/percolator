@@ -7,7 +7,7 @@
              x:Class="Percolator.Desktop.Features.Chats.Views.ChatView"
              x:DataType="vm:ChatViewModel">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
         <!-- 1. Conversation Header -->
         <Border Grid.Row="0"
                 Background="{DynamicResource SurfaceSubtleBrush}"
@@ -35,23 +35,90 @@
                     </Border>
                 </StackPanel>
 
-                <!-- Disappearing message indicator in header -->
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal"
-                            Spacing="4"
-                            VerticalAlignment="Center"
-                            IsVisible="{Binding IsExpiringMessagesEnabled}">
-                    <TextBlock Text="⏱" FontSize="12" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding ExpiringTimerLabel}"
-                               FontSize="12"
-                               Foreground="{DynamicResource TextMutedBrush}"
-                               VerticalAlignment="Center" />
+                <!-- Header Actions -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <!-- Disappearing message indicator in header -->
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="4"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding IsExpiringMessagesEnabled}">
+                        <TextBlock Text="⏱" FontSize="12" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding ExpiringTimerLabel}"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Introduce Contact Action (1:1 conversations only) -->
+                    <Button Content="🤝 Introduce Contact..."
+                            Classes="subtle"
+                            FontSize="12"
+                            Padding="8,4"
+                            IsVisible="{Binding Is1To1Conversation}"
+                            ToolTip.Tip="Introduce a contact to this peer">
+                        <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight" IsOpen="{Binding IsIntroduceFlyoutOpen, Mode=TwoWay}">
+                                <Border Width="300" Padding="12" Background="{DynamicResource SurfaceBrush}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="Introduce Contact" FontWeight="SemiBold" FontSize="13" />
+                                        <TextBlock Text="Select a contact to introduce to this peer:" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+                                        <ComboBox ItemsSource="{Binding AvailableCandidatesForIntro}"
+                                                  SelectedItem="{Binding SelectedCandidateForIntro, Mode=TwoWay}"
+                                                  HorizontalAlignment="Stretch">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="models:ConversationSummaryModel">
+                                                    <TextBlock Text="{Binding DisplayName}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <TextBox Text="{Binding IntroNoteText, Mode=TwoWay}"
+                                                 Watermark="Optional note..."
+                                                 AcceptsReturn="True"
+                                                 MaxHeight="60" />
+                                        <Button Content="Send Introduction Request"
+                                                Classes="accent"
+                                                HorizontalAlignment="Right"
+                                                Command="{Binding RequestIntroductionConsentCommand}" />
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- 2. Pending Connection Banner -->
+        <!-- 2. Pending Introduction Consent Banner -->
         <Border Grid.Row="1"
+                Background="#334CAF50"
+                BorderBrush="#FF4CAF50"
+                BorderThickness="0,0,0,1"
+                Padding="12,8"
+                IsVisible="{Binding HasPendingIntroduction}">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock Text="🤝" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding PendingIntroductionText}"
+                               Foreground="#FF81C784"
+                               FontWeight="Medium"
+                               TextWrapping="Wrap"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Content="Allow"
+                            Classes="accent"
+                            Padding="12,4"
+                            Command="{Binding AllowPendingIntroductionCommand}" />
+                    <Button Content="Decline"
+                            Classes="subtle"
+                            Padding="12,4"
+                            Command="{Binding DeclinePendingIntroductionCommand}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 3. Pending Connection Banner -->
+        <Border Grid.Row="2"
                 Background="#33FFC107"
                 BorderBrush="#FFFFC107"
                 BorderThickness="0,0,0,1"
@@ -66,8 +133,134 @@
             </StackPanel>
         </Border>
 
-        <!-- 3. Message List Transcript -->
-        <ListBox Grid.Row="2"
+        <!-- 4. Active Swarm File Transfers Strip -->
+        <Border Grid.Row="3"
+                Background="{DynamicResource SurfaceSubtleBrush}"
+                BorderBrush="{DynamicResource ControlBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="12,8"
+                IsVisible="{Binding HasActiveTransfers}">
+            <ItemsControl ItemsSource="{Binding Transfers}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FileTransferItemViewModel">
+                        <Border Background="{DynamicResource SurfaceBrush}"
+                                BorderBrush="{DynamicResource ControlBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="10,8"
+                                Margin="0,0,0,6">
+                            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                                <!-- Top row: Name, Badge, Peer/Stream info -->
+                                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <TextBlock Text="📦" FontSize="14" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding RootBundleName}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="250" />
+                                    <Border Background="{DynamicResource SurfaceSubtleBrush}"
+                                            BorderBrush="{DynamicResource ControlBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="4,1"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding StatusBadgeText}" FontSize="10" Foreground="{DynamicResource TextMutedBrush}" />
+                                    </Border>
+                                    <!-- Active Seeding Badge -->
+                                    <Border Background="#334CAF50"
+                                            BorderBrush="#FF4CAF50"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="4,1"
+                                            VerticalAlignment="Center"
+                                            IsVisible="{Binding IsSeeding}">
+                                        <TextBlock Text="🌱 Seeding" FontSize="10" Foreground="#FF81C784" FontWeight="SemiBold" />
+                                    </Border>
+                                    <TextBlock Text="{Binding PeersText}" FontSize="10" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+
+                                <!-- Action buttons -->
+                                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <!-- Inbound accept/decline -->
+                                    <Button Content="Accept"
+                                            Classes="accent"
+                                            Padding="8,2"
+                                            FontSize="11"
+                                            IsVisible="{Binding IsPendingConsent}"
+                                            Command="{Binding AcceptCommand}" />
+                                    <Button Content="Decline"
+                                            Classes="subtle"
+                                            Padding="8,2"
+                                            FontSize="11"
+                                            IsVisible="{Binding IsPendingConsent}"
+                                            Command="{Binding CancelCommand}" />
+
+                                    <!-- Seeding stop -->
+                                    <Button Content="Stop Seeding"
+                                            Classes="subtle"
+                                            Padding="8,2"
+                                            FontSize="11"
+                                            IsVisible="{Binding IsSeeding}"
+                                            Command="{Binding StopSeedingCommand}" />
+
+                                    <!-- InFlight Pause/Cancel -->
+                                    <Button Content="Pause"
+                                            Classes="subtle"
+                                            Padding="8,2"
+                                            FontSize="11"
+                                            IsVisible="{Binding IsInFlight}"
+                                            Command="{Binding PauseCommand}" />
+                                    <Button Content="Cancel"
+                                            Classes="subtle"
+                                            Padding="8,2"
+                                            FontSize="11"
+                                            IsVisible="{Binding IsInFlight}"
+                                            Command="{Binding CancelCommand}" />
+
+                                    <!-- Paused Resume/Cancel -->
+                                    <Button Content="Resume"
+                                            Classes="accent"
+                                            Padding="8,2"
+                                            FontSize="11"
+                                            IsVisible="{Binding IsPaused}"
+                                            Command="{Binding ResumeCommand}" />
+                                    <Button Content="Cancel"
+                                            Classes="subtle"
+                                            Padding="8,2"
+                                            FontSize="11"
+                                            IsVisible="{Binding IsPaused}"
+                                            Command="{Binding CancelCommand}" />
+                                </StackPanel>
+
+                                <!-- Middle row: Progress bar -->
+                                <ProgressBar Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                             Value="{Binding ProgressPercentage}"
+                                             Minimum="0" Maximum="100"
+                                             Height="4"
+                                             CornerRadius="2"
+                                             Margin="0,6,0,4"
+                                             IsVisible="{Binding !IsPendingConsent}" />
+
+                                <!-- Bottom row: Progress text, speed, failure feedback -->
+                                <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto" Margin="0,2,0,0">
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding ProgressText}" FontSize="10" Foreground="{DynamicResource TextMutedBrush}" />
+                                        <TextBlock Text="{Binding SpeedText}" FontSize="10" Foreground="{DynamicResource TextMutedBrush}" IsVisible="{Binding SpeedText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                    </StackPanel>
+
+                                    <!-- NAT-traversal failure feedback text -->
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding FailureFeedback}"
+                                               FontSize="10"
+                                               Foreground="#FFFF6B6B"
+                                               TextWrapping="Wrap"
+                                               IsVisible="{Binding FailureFeedback, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+
+        <!-- 5. Message List Transcript -->
+        <ListBox Grid.Row="4"
                  ItemsSource="{Binding Messages}"
                  Background="Transparent"
                  BorderThickness="0"
@@ -277,7 +470,7 @@
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <!-- 4. Chat Composer -->
-        <controls:ChatComposer Grid.Row="3" />
+        <!-- 6. Chat Composer -->
+        <controls:ChatComposer Grid.Row="5" />
     </Grid>
 </UserControl>

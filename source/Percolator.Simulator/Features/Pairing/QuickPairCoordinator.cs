@@ -10,6 +10,7 @@ using Percolator.Application.Invitations;
 using Percolator.Domain.Common;
 using Percolator.Domain.Identities.Ports;
 using Percolator.Domain.Security.Ports;
+using Percolator.PluginSdk;
 using Percolator.Simulator.Features.Logging;
 using Percolator.Simulator.Features.Shell;
 using Percolator.Simulator.Features.Topology;

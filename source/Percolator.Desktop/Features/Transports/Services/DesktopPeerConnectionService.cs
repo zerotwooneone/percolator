@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
+using Percolator.Application.Connections;
 using Percolator.Application.Delivery.Ports;
 using Percolator.Application.Ports;
 using Percolator.Application.Services;
@@ -32,18 +33,15 @@ public sealed class DesktopPeerConnectionService : IPeerConnectionService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ICurrentPersonaService _currentPersonaService;
-    private readonly IStreamRegistryManagement _streamRegistry;
     private readonly IDateTimeProvider _timeProvider;
 
     public DesktopPeerConnectionService(
         IServiceScopeFactory scopeFactory,
         ICurrentPersonaService currentPersonaService,
-        IStreamRegistryManagement streamRegistry,
         IDateTimeProvider timeProvider)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _currentPersonaService = currentPersonaService ?? throw new ArgumentNullException(nameof(currentPersonaService));
-        _streamRegistry = streamRegistry ?? throw new ArgumentNullException(nameof(streamRegistry));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
 
@@ -65,16 +63,14 @@ public sealed class DesktopPeerConnectionService : IPeerConnectionService
         return await service.ConnectToPeerAsync(targetPeerId, targetDeviceId, relayEndpoint, ct).ConfigureAwait(false);
     }
 
-    public async Task<DomainResult<PeerConnectionResult>> ConnectToDirectPeerAsync(
-        PublicIdentityId targetPeerId,
-        BlindedRoutingToken routingToken,
-        DeliveryToken deliveryToken,
-        Uri directEndpoint,
-        DeviceId? targetDeviceId = null,
+
+    public async Task<DomainResult<PeerConnectionResult>> ConnectWithInvitationAsync(
+        PublicIdentityId ownerId,
+        PeerInvitation invitation,
         CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var localIdentity = await ResolveActiveIdentityAsync(scope, ct).ConfigureAwait(false);
+        var localIdentity = ownerId.IsValid ? ownerId : await ResolveActiveIdentityAsync(scope, ct).ConfigureAwait(false);
         if (localIdentity == null || !localIdentity.Value.IsValid)
         {
             return DomainResult<PeerConnectionResult>.Failure(new DomainError(
@@ -82,13 +78,7 @@ public sealed class DesktopPeerConnectionService : IPeerConnectionService
         }
 
         var service = CreateInnerService(scope, localIdentity.Value);
-        return await service.ConnectToDirectPeerAsync(
-            targetPeerId,
-            routingToken,
-            deliveryToken,
-            directEndpoint,
-            targetDeviceId,
-            ct).ConfigureAwait(false);
+        return await service.ConnectWithInvitationAsync(localIdentity.Value, invitation, ct).ConfigureAwait(false);
     }
 
     private async Task<PublicIdentityId?> ResolveActiveIdentityAsync(IServiceScope scope, CancellationToken ct)
@@ -113,10 +103,10 @@ public sealed class DesktopPeerConnectionService : IPeerConnectionService
             sp.GetRequiredService<IHandshakeService>(),
             sp.GetRequiredService<IChannelRepository>(),
             _timeProvider,
-            _streamRegistry,
             sp.GetRequiredService<IPeerMailboxRoutingRepository>(),
             sp.GetRequiredService<IPeerContactRepository>(),
             sp.GetRequiredService<IEventPublisher>(),
-            sp.GetRequiredService<IInitialHandshakePayloadProvider>());
+            sp.GetRequiredService<IInitialHandshakePayloadProvider>(),
+            sp.GetRequiredService<IOutboundConnectionWorkflow>());
     }
 }

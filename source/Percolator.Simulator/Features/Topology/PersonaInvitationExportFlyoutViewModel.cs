@@ -11,6 +11,7 @@ using Percolator.Application.Invitations;
 using Percolator.Domain.Common;
 using Percolator.Domain.Delivery.Hosting;
 using Percolator.Domain.Identities;
+using Percolator.PluginSdk;
 using Percolator.Simulator.Features.RelayedChat;
 using Percolator.Simulator.Features.Shell;
 

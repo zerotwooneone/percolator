@@ -159,28 +159,11 @@ public sealed class OutboundPendingRetryWorker : IOutboundPendingRetryWorker
 
                 if (ct.IsCancellationRequested) break;
 
-                Uri directUri;
-                try
+                var invitationDomain = model.Invitation.ToDomain();
+                if (invitationDomain.IsFailure)
                 {
-                    var rawHost = model.Invitation.EndpointHosts.FirstOrDefault(h => !string.IsNullOrWhiteSpace(h)) ?? "127.0.0.1";
-                    var port = model.Invitation.PortRange?.MinPort ?? 5100;
-
-                    if (rawHost.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-                        rawHost.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var parsed = new Uri(rawHost);
-                        directUri = new UriBuilder(parsed) { Scheme = "https", Port = port }.Uri;
-                    }
-                    else
-                    {
-                        directUri = new UriBuilder("https", rawHost, port).Uri;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to resolve direct endpoint URI for pending peer {PeerId}", model.PeerId);
-                    attempt++;
-                    continue;
+                    _logger.LogWarning("Invalid pending invitation for peer {PeerId}", model.PeerId);
+                    break;
                 }
 
                 // 3-second fast probe timeout per retry attempt
@@ -189,11 +172,10 @@ public sealed class OutboundPendingRetryWorker : IOutboundPendingRetryWorker
 
                 try
                 {
-                    var result = await _peerConnectionService.ConnectToDirectPeerAsync(
-                        model.Invitation.IdentityId,
-                        model.Invitation.RoutingToken,
-                        model.Invitation.DeliveryToken,
-                        directUri,
+                    var ownerId = model.OwnerId.IsValid ? model.OwnerId : model.PeerId;
+                    var result = await _peerConnectionService.ConnectWithInvitationAsync(
+                        ownerId,
+                        invitationDomain.Value,
                         ct: attemptCts.Token).ConfigureAwait(false);
 
                     if (result.IsSuccess)
