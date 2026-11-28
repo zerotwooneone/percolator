@@ -490,6 +490,17 @@ public sealed class TransferNegotiationTests
         }
 
         reportedProgress.Should().NotBeEmpty();
+        int previousScanned = 0;
+        int previousHashed = 0;
+        foreach (var p in reportedProgress)
+        {
+            p.FilesScanned.Should().BeGreaterThanOrEqualTo(previousScanned);
+            p.TotalFiles.Should().Be(relativePaths.Count);
+            p.ChunksHashed.Should().BeGreaterThanOrEqualTo(previousHashed);
+            previousScanned = p.FilesScanned;
+            previousHashed = p.ChunksHashed;
+        }
+
         var lastProgress = reportedProgress[^1];
         lastProgress.FilesScanned.Should().Be(relativePaths.Count);
         lastProgress.TotalFiles.Should().Be(relativePaths.Count);

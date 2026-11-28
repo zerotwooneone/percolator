@@ -328,6 +328,11 @@ public sealed class PortableDesktopFileStoreTests
             await File.WriteAllTextAsync(Path.Combine(emptyDir, "somefile.txt"), "hello");
             bool hasEntriesAfter = await _fileStore.HasAnyExistingTransferFilesAsync(root, manifest, SelectedFileIndices.All(FileCount.FromInt(1)));
             hasEntriesAfter.Should().BeTrue();
+
+            File.Delete(Path.Combine(emptyDir, "somefile.txt"));
+            await File.WriteAllTextAsync(Path.Combine(emptyDir, "test.bin.percolator-part"), "part");
+            bool hasPartEntries = await _fileStore.HasAnyExistingTransferFilesAsync(root, manifest, SelectedFileIndices.All(FileCount.FromInt(1)));
+            hasPartEntries.Should().BeTrue();
         }
         finally
         {

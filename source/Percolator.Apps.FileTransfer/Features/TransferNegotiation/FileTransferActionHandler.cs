@@ -247,6 +247,14 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             catch (Exception ex)
             {
                 hashChannel.Writer.TryComplete(ex);
+                try
+                {
+                    await Task.WhenAll(workers).ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+
                 if (currentChunkBuf != null)
                 {
                     ArrayPool<byte>.Shared.Return(currentChunkBuf, clearArray: true);

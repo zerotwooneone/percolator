@@ -494,17 +494,26 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage, IDisposable
 
         lock (_handleCacheLock)
         {
-            if (_handleCache.TryGetValue(key, out HandleEntry? existing) &&
-                !existing.Handle.IsClosed &&
-                !existing.Handle.IsInvalid)
+            if (_handleCache.TryGetValue(key, out HandleEntry? existing))
             {
-                existing.RefCount++;
+                if (!existing.Handle.IsClosed &&
+                    !existing.Handle.IsInvalid &&
+                    !existing.MarkedForEviction)
+                {
+                    existing.RefCount++;
+                    if (existing.LruNode != null)
+                    {
+                        _lruList.Remove(existing.LruNode);
+                        _lruList.AddLast(existing.LruNode);
+                    }
+                    return existing;
+                }
+
+                _handleCache.Remove(key);
                 if (existing.LruNode != null)
                 {
                     _lruList.Remove(existing.LruNode);
-                    _lruList.AddLast(existing.LruNode);
                 }
-                return existing;
             }
 
             EvictLruHandlesUnderLock();
@@ -568,33 +577,16 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage, IDisposable
         string normTarget = Path.GetFullPath(path);
         string normPart = Path.GetFullPath(GetPartFilePath(path));
 
-        List<HandleEntry> pendingDisposals = [];
         lock (_handleCacheLock)
         {
-            EvictKeyUnderLock(new HandleKey(normTarget, FileAccess.Read), pendingDisposals);
-            EvictKeyUnderLock(new HandleKey(normTarget, FileAccess.Write), pendingDisposals);
-            EvictKeyUnderLock(new HandleKey(normPart, FileAccess.Read), pendingDisposals);
-            EvictKeyUnderLock(new HandleKey(normPart, FileAccess.Write), pendingDisposals);
-        }
-
-        foreach (HandleEntry entry in pendingDisposals)
-        {
-            int attempts = 0;
-            while (Volatile.Read(ref entry.RefCount) > 0 && attempts++ < 50)
-            {
-                Thread.Sleep(5);
-            }
-            try
-            {
-                entry.Handle.Dispose();
-            }
-            catch
-            {
-            }
+            EvictKeyUnderLock(new HandleKey(normTarget, FileAccess.Read));
+            EvictKeyUnderLock(new HandleKey(normTarget, FileAccess.Write));
+            EvictKeyUnderLock(new HandleKey(normPart, FileAccess.Read));
+            EvictKeyUnderLock(new HandleKey(normPart, FileAccess.Write));
         }
     }
 
-    private void EvictKeyUnderLock(HandleKey key, List<HandleEntry> pendingDisposals)
+    private void EvictKeyUnderLock(HandleKey key)
     {
         if (_handleCache.Remove(key, out HandleEntry? entry))
         {
@@ -612,10 +604,6 @@ public sealed class PortableDesktopFileStore : IDesktopFileStorage, IDisposable
                 catch
                 {
                 }
-            }
-            else
-            {
-                pendingDisposals.Add(entry);
             }
         }
     }

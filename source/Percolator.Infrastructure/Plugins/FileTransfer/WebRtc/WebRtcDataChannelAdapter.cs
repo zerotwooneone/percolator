@@ -377,10 +377,17 @@ internal sealed class WebRtcDataChannelAdapter : ITransferDataChannel
                     }
                 }
 
+                if (offset != (uint)reassembly.ReceivedBytes)
+                {
+                    FailChannelOffThread(new InvalidDataException(
+                        $"WebRTC fragment offset mismatch for msgId {msgId}: expected sequential offset {reassembly.ReceivedBytes}, got {offset}."));
+                    return;
+                }
+
                 data.Slice(FragmentHeaderBytes, payloadLen).CopyTo(reassembly.Buffer.AsSpan((int)offset, payloadLen));
                 reassembly.ReceivedBytes += payloadLen;
 
-                if (reassembly.ReceivedBytes >= reassembly.TotalLength)
+                if (reassembly.ReceivedBytes == reassembly.TotalLength)
                 {
                     _reassemblies.Remove(msgId);
                     completedFrame = new PooledWireFrame(this, reassembly.Buffer, reassembly.TotalLength);
