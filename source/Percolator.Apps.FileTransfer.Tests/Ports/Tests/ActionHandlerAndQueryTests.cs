@@ -31,7 +31,6 @@ public sealed class ActionHandlerAndQueryTests
     private TransferSessionRuntime _runtime = null!;
     private TestPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
-    private FileTransferQueryService _queryService = null!;
     private TransferOfferReaperService _reaperService = null!;
 
     [SetUp]
@@ -72,7 +71,6 @@ public sealed class ActionHandlerAndQueryTests
             _certStore,
             _transportStore);
 
-        _queryService = new FileTransferQueryService(_sessionRepo);
         _reaperService = new TransferOfferReaperService(_sessionRepo, _clock);
     }
 
@@ -416,39 +414,5 @@ public sealed class ActionHandlerAndQueryTests
         expired.Should().Be(1);
         staleSession.State.Should().Be(TransferSessionState.Cancelled);
         recentSession.State.Should().Be(TransferSessionState.PendingConsent);
-    }
-
-    [Test]
-    public async Task UT_QRY_01_TransferSessionQueryProjectionAccuracy()
-    {
-        TransferSessionId sessionId = TransferSessionId.New();
-        PublicIdentityId initiator = PublicIdentityId.New();
-        PublicIdentityId recipient = PublicIdentityId.New();
-
-        TransferManifest manifest = TransferManifest.Create(
-            sessionId,
-            RootBundleName.Parse("ProjectionTest"),
-            ChunkSizeBytes.FromBytes(65536),
-            MerkleTreeBuilder.BuildFromLeaves([ChunkHash.FromBytes(new byte[32]), ChunkHash.FromBytes(new byte[32])]),
-            [
-                new FileEntry(FileIndex.FromInt(0), SanitizedRelativePath.Parse("f0.bin"), FileSizeBytes.FromBytes(65536), BundleByteOffset.Zero, FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow)),
-                new FileEntry(FileIndex.FromInt(1), SanitizedRelativePath.Parse("f1.bin"), FileSizeBytes.FromBytes(65536), BundleByteOffset.FromOffset(65536), FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow))
-            ]);
-
-        TransferSession session = TransferSession.CreateOutgoing1to1(sessionId, initiator, recipient, manifest, SeedRatio.FromMultiplier(2.0), _clock);
-        session.RecordUploadedBytes(TransferByteLength.FromBytes(65536), _clock);
-        await _sessionRepo.SaveSessionAsync(session);
-
-        TransferSessionReadModel? readModel = await _queryService.GetTransferByIdAsync(sessionId);
-
-        readModel.Should().NotBeNull();
-        readModel!.SessionId.Should().Be(sessionId);
-        readModel.RootName.Value.Should().Be("ProjectionTest");
-        readModel.TotalBytes.Bytes.Should().Be(131072);
-        readModel.UploadedBytes.Bytes.Should().Be(65536);
-        readModel.CurrentSeedRatio.Multiplier.Should().Be(0.5);
-        readModel.TargetSeedRatio.Multiplier.Should().Be(2.0);
-        readModel.TotalChunks.Count.Should().Be(2);
-        readModel.Status.Should().Be(TransferSessionState.Offered);
     }
 }

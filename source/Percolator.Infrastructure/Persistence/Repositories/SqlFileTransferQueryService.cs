@@ -1,3 +1,5 @@
+// SPECIFICATION GOVERNANCE: Read Percolator.Infrastructure/spec/repository.spec.md before modifying this file.
+
 namespace Percolator.Infrastructure.Persistence.Repositories;
 
 using System;
@@ -18,24 +20,57 @@ using Percolator.Infrastructure.Persistence.Entities;
 
 public sealed class SqlFileTransferQueryService : IFileTransferQueryService
 {
-    private readonly PercolatorDbContext _dbContext;
+    private readonly IDbContextFactory<PercolatorDbContext> _dbContextFactory;
 
-    public SqlFileTransferQueryService(PercolatorDbContext dbContext)
+    public SqlFileTransferQueryService(IDbContextFactory<PercolatorDbContext> dbContextFactory)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
     }
 
     public async ValueTask<IReadOnlyList<TransferSessionReadModel>> GetAllTransfersAsync(CancellationToken ct = default)
     {
-        List<TransferSessionEntity> entities = await _dbContext.TransferSessions
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        List<TransferSessionEntity> entities = await db.TransferSessions
             .AsNoTracking()
             .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (entities.Count == 0)
+        {
+            return Array.Empty<TransferSessionReadModel>();
+        }
+
+        List<Guid> transferIds = entities.Select(e => e.TransferId).ToList();
+
+        Dictionary<Guid, TransferBitfieldEntity> bitfieldMap = await db.TransferBitfields
+            .AsNoTracking()
+            .Where(b => transferIds.Contains(b.TransferId))
+            .ToDictionaryAsync(b => b.TransferId, ct)
+            .ConfigureAwait(false);
+
+        List<TransferSessionRecipientEntity> recipientEntities = await db.TransferSessionRecipients
+            .AsNoTracking()
+            .Where(r => transferIds.Contains(r.TransferId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        ILookup<Guid, byte[]> recipientsLookup = recipientEntities.ToLookup(r => r.TransferId, r => r.RecipientIdentityId);
+
+        Dictionary<Guid, TransferSessionTransportContextEntity> transportMap = await db.TransferSessionTransportContexts
+            .AsNoTracking()
+            .Where(t => transferIds.Contains(t.TransferId))
+            .ToDictionaryAsync(t => t.TransferId, ct)
             .ConfigureAwait(false);
 
         List<TransferSessionReadModel> models = new(entities.Count);
         foreach (TransferSessionEntity entity in entities)
         {
-            models.Add(await ProjectReadModelAsync(entity, ct).ConfigureAwait(false));
+            bitfieldMap.TryGetValue(entity.TransferId, out var bitfield);
+            transportMap.TryGetValue(entity.TransferId, out var transportCtx);
+            var recipients = recipientsLookup[entity.TransferId];
+
+            models.Add(ProjectReadModel(entity, bitfield, recipients, transportCtx));
         }
 
         return models;
@@ -43,9 +78,13 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
 
     public async ValueTask<TransferSessionReadModel?> GetTransferByIdAsync(TransferSessionId sessionId, CancellationToken ct = default)
     {
-        TransferSessionEntity? entity = await _dbContext.TransferSessions
+        Guid transferGuid = sessionId.Value;
+
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        TransferSessionEntity? entity = await db.TransferSessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.TransferId == sessionId.Value, ct)
+            .FirstOrDefaultAsync(s => s.TransferId == transferGuid, ct)
             .ConfigureAwait(false);
 
         if (entity == null)
@@ -53,12 +92,34 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             return null;
         }
 
-        return await ProjectReadModelAsync(entity, ct).ConfigureAwait(false);
+        TransferBitfieldEntity? bitfield = await db.TransferBitfields
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.TransferId == transferGuid, ct)
+            .ConfigureAwait(false);
+
+        List<TransferSessionRecipientEntity> recipientEntities = await db.TransferSessionRecipients
+            .AsNoTracking()
+            .Where(r => r.TransferId == transferGuid)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        TransferSessionTransportContextEntity? transportContext = await db.TransferSessionTransportContexts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.TransferId == transferGuid, ct)
+            .ConfigureAwait(false);
+
+        return ProjectReadModel(entity, bitfield, recipientEntities.Select(r => r.RecipientIdentityId), transportContext);
     }
 
-    public async ValueTask<IReadOnlyList<ManifestFileReadModel>> GetManifestFilesAsync(TransferSessionId sessionId, CancellationToken ct = default)
+    public async ValueTask<IReadOnlyList<ManifestFileReadModel>> GetManifestFilesAsync(
+        TransferSessionId sessionId,
+        int skip = 0,
+        int? take = null,
+        CancellationToken ct = default)
     {
-        TransferSessionEntity? sessionEntity = await _dbContext.TransferSessions
+        await using PercolatorDbContext db = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        TransferSessionEntity? sessionEntity = await db.TransferSessions
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.TransferId == sessionId.Value, ct)
             .ConfigureAwait(false);
@@ -68,36 +129,76 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             return Array.Empty<ManifestFileReadModel>();
         }
 
-        List<ManifestFileEntity> fileEntities = await _dbContext.ManifestFiles
+        IQueryable<ManifestFileEntity> query = db.ManifestFiles
             .AsNoTracking()
             .Where(f => f.TransferId == sessionId.Value)
-            .OrderBy(f => f.FileIndex)
-            .ToListAsync(ct)
+            .OrderBy(f => f.FileIndex);
+
+        if (skip > 0)
+        {
+            query = query.Skip(skip);
+        }
+
+        if (take.HasValue && take.Value > 0)
+        {
+            query = query.Take(take.Value);
+        }
+
+        List<ManifestFileEntity> fileEntities = await query.ToListAsync(ct).ConfigureAwait(false);
+
+        TransferBitfieldEntity? bitfieldEntity = await db.TransferBitfields
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.TransferId == sessionId.Value, ct)
             .ConfigureAwait(false);
 
         HashSet<int>? selectedIndices = null;
         if (!sessionEntity.AllFilesSelected)
         {
-            List<TransferSessionSelectedFileEntity> selectedEntities = await _dbContext.TransferSessionSelectedFiles
+            List<TransferSessionSelectedFileEntity> selectedEntities = await db.TransferSessionSelectedFiles
                 .AsNoTracking()
                 .Where(s => s.TransferId == sessionId.Value)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
-            if (selectedEntities.Count > 0)
-            {
-                selectedIndices = new HashSet<int>(selectedEntities.Select(s => s.FileIndex));
-            }
+            selectedIndices = new HashSet<int>(selectedEntities.Select(s => s.FileIndex));
         }
 
-        bool isSessionComplete = sessionEntity.State == (int)TransferSessionState.Completed
-                              || sessionEntity.State == (int)TransferSessionState.Seeding;
+        Bitfield? localBitfield = null;
+        if (bitfieldEntity is { BitfieldBytes.Length: > 0 } && bitfieldEntity.TotalPieces > 0)
+        {
+            localBitfield = Bitfield.FromBytes(bitfieldEntity.BitfieldBytes, ChunkCount.FromInt(bitfieldEntity.TotalPieces));
+        }
 
         List<ManifestFileReadModel> results = new(fileEntities.Count);
         foreach (ManifestFileEntity file in fileEntities)
         {
-            bool isSelected = selectedIndices == null || selectedIndices.Contains(file.FileIndex);
-            bool isCompleted = file.FileSizeBytes == 0 || (isSelected && isSessionComplete);
+            bool isSelected = sessionEntity.AllFilesSelected || (selectedIndices != null && selectedIndices.Contains(file.FileIndex));
+
+            bool isCompleted;
+            if (file.FileSizeBytes == 0)
+            {
+                isCompleted = true;
+            }
+            else if (!isSelected || localBitfield == null)
+            {
+                isCompleted = false;
+            }
+            else
+            {
+                int firstChunk = (int)(file.StartOffset / sessionEntity.ChunkSizeBytes);
+                int lastChunk = (int)((file.StartOffset + file.FileSizeBytes - 1) / sessionEntity.ChunkSizeBytes);
+                bool allChunksVerified = true;
+                for (int c = firstChunk; c <= lastChunk; c++)
+                {
+                    if (!localBitfield.HasChunk(ChunkIndex.FromInt(c)))
+                    {
+                        allChunksVerified = false;
+                        break;
+                    }
+                }
+
+                isCompleted = allChunksVerified;
+            }
 
             results.Add(new ManifestFileReadModel(
                 FileIndex.FromInt(file.FileIndex),
@@ -113,46 +214,55 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
         return results;
     }
 
-    private async Task<TransferSessionReadModel> ProjectReadModelAsync(TransferSessionEntity entity, CancellationToken ct)
+    private static TransferSessionReadModel ProjectReadModel(
+        TransferSessionEntity entity,
+        TransferBitfieldEntity? bitfield,
+        IEnumerable<byte[]> recipients,
+        TransferSessionTransportContextEntity? transportContext)
     {
-        TransferBitfieldEntity? bitfield = await _dbContext.TransferBitfields
-            .AsNoTracking()
-            .FirstOrDefaultAsync(b => b.TransferId == entity.TransferId, ct)
-            .ConfigureAwait(false);
+        int totalPieces = bitfield?.TotalPieces ?? (entity.TotalSizeBytes == 0 ? 1 : (int)((entity.TotalSizeBytes + entity.ChunkSizeBytes - 1) / entity.ChunkSizeBytes));
+        long downloadedBytes = 0;
+        int verifiedPieces = 0;
 
-        int verifiedPieces = bitfield?.VerifiedPieces ?? 0;
-        int totalPieces = bitfield?.TotalPieces ?? (int)Math.Max(1, (entity.TotalSizeBytes + entity.ChunkSizeBytes - 1) / entity.ChunkSizeBytes);
-
-        long downloadedBytes = (long)verifiedPieces * entity.ChunkSizeBytes;
-        if (downloadedBytes > entity.TotalSizeBytes)
+        if (bitfield is { BitfieldBytes.Length: > 0 })
         {
-            downloadedBytes = entity.TotalSizeBytes;
+            Bitfield parsed = Bitfield.FromBytes(bitfield.BitfieldBytes, ChunkCount.FromInt(totalPieces));
+            verifiedPieces = parsed.PopCount;
+
+            if (parsed.IsComplete)
+            {
+                downloadedBytes = entity.TotalSizeBytes;
+            }
+            else
+            {
+                // O(1) downloadedBytes calculation:
+                // All regular chunks (indices 0 to totalPieces - 2) have size ChunkSizeBytes.
+                // The last chunk (index totalPieces - 1) has size = TotalSizeBytes - (totalPieces - 1) * ChunkSizeBytes.
+                int lastChunkIndex = totalPieces - 1;
+                bool hasLastChunk = parsed.HasChunk(ChunkIndex.FromInt(lastChunkIndex));
+                long lastChunkBytes = entity.TotalSizeBytes - ((long)lastChunkIndex * entity.ChunkSizeBytes);
+                if (lastChunkBytes <= 0 || lastChunkBytes > entity.ChunkSizeBytes)
+                {
+                    lastChunkBytes = entity.ChunkSizeBytes;
+                }
+
+                int regularVerifiedChunks = verifiedPieces - (hasLastChunk ? 1 : 0);
+                downloadedBytes = ((long)regularVerifiedChunks * entity.ChunkSizeBytes) + (hasLastChunk ? lastChunkBytes : 0);
+                if (downloadedBytes > entity.TotalSizeBytes)
+                {
+                    downloadedBytes = entity.TotalSizeBytes;
+                }
+            }
         }
 
-        TransferSessionTransportContextEntity? transportContext = await _dbContext.TransferSessionTransportContexts
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.TransferId == entity.TransferId, ct)
-            .ConfigureAwait(false);
-
-        List<TransferSessionRecipientEntity> recipientEntities = await _dbContext.TransferSessionRecipients
-            .AsNoTracking()
-            .Where(r => r.TransferId == entity.TransferId)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
         PublicIdentityId initiatorId = PublicIdentityId.FromBytes(entity.InitiatorId);
+        List<PublicIdentityId> recipientIds = recipients.Select(r => PublicIdentityId.FromBytes(r)).ToList();
         TransferTopology topology = entity.TopologyType switch
         {
-            1 => new TransferTopology.OneToOne(
-                initiatorId,
-                recipientEntities.Count > 0
-                    ? PublicIdentityId.FromBytes(recipientEntities[0].RecipientIdentityId)
-                    : initiatorId),
-            2 => new TransferTopology.MultiPeer(
-                initiatorId,
-                recipientEntities
-                    .Select(r => PublicIdentityId.FromBytes(r.RecipientIdentityId))
-                    .ToList()),
+            1 => recipientIds.Count > 0
+                ? new TransferTopology.OneToOne(initiatorId, recipientIds[0])
+                : new TransferTopology.IncomingStaged(initiatorId),
+            2 => new TransferTopology.MultiPeer(initiatorId, recipientIds),
             _ => new TransferTopology.IncomingStaged(initiatorId)
         };
 
@@ -161,6 +271,10 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             : null;
 
         Guid channelGuid = transportContext?.ChannelId ?? Guid.Empty;
+
+        SeedRatio targetSeedRatio = entity.TargetSeedRatio < 0
+            ? SeedRatio.Unlimited
+            : SeedRatio.FromMultiplier(entity.TargetSeedRatio);
 
         double currentRatio = downloadedBytes > 0 ? (double)entity.UploadedSizeBytes / downloadedBytes : 0.0;
 
@@ -174,7 +288,7 @@ public sealed class SqlFileTransferQueryService : IFileTransferQueryService
             TotalBundleBytes.FromBytes(downloadedBytes),
             TotalBundleBytes.FromBytes(entity.UploadedSizeBytes),
             SeedRatio.FromMultiplier(currentRatio),
-            SeedRatio.FromMultiplier(entity.TargetSeedRatio),
+            targetSeedRatio,
             CompletedChunkCount.FromInt(verifiedPieces),
             ChunkCount.FromInt(totalPieces),
             TransferBandwidth.FromBytesPerSecond(0),

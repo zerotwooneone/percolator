@@ -22,7 +22,6 @@ public static class ServiceCollectionExtensions
         collection.AddSingleton<ITransferSessionRuntime, TransferSessionRuntime>();
         collection.AddScoped<IAppPayloadHandler, FileTransferPayloadHandler>();
         collection.AddScoped<IFileTransferActionHandler, FileTransferActionHandler>();
-        collection.AddScoped<IFileTransferQueryService, FileTransferQueryService>();
         collection.AddScoped<TransferSessionCoordinator>();
         collection.AddScoped<DiskChunkAssembler>();
         collection.AddScoped<ChunkPipelineScheduler>();

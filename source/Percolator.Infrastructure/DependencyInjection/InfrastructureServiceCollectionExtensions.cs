@@ -405,7 +405,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IDistributedTrackerPort, GrpcSwarmTrackerClient>();
         services.AddSingleton<ITransferSessionRepository, SqliteTransferSessionRepository>();
         services.AddSingleton<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
-        services.AddScoped<IFileTransferQueryService, SqlFileTransferQueryService>();
+        services.AddSingleton<IFileTransferQueryService, SqlFileTransferQueryService>();
         services.AddScoped<ITransferOfferReaperService, TransferOfferReaperService>();
 
         services.AddHostedService<TransferOfferReaperWorker>();
