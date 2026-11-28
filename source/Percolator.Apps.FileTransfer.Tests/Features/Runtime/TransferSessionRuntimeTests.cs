@@ -429,6 +429,71 @@ public sealed class TransferSessionRuntimeTests
     }
 
     [Test]
+    public async Task Checkpointing_PersistsOnBatchBoundaryAndForcesOnSeedingTransition()
+    {
+        ChannelId channelId = ChannelId.New();
+        PublicIdentityId aliceId = PublicIdentityId.New();
+        PublicIdentityId bobId = PublicIdentityId.New();
+
+        FakeDateTimeProvider clock = new();
+        TestPayloadSerializer serializer = new();
+        InMemoryBlobStorageService blobStorage = new();
+        FakeNetworkEndpointDiscoveryPort endpointDiscovery = new();
+
+        await using var alice = CreateNode(aliceId, clock, serializer, blobStorage, endpointDiscovery);
+        // Configure Bob with batch size of 2 chunks so chunks 0 & 1 trigger a batch checkpoint, and chunk 2 triggers transition to seeding
+        await using var bob = CreateNode(bobId, clock, serializer, blobStorage, endpointDiscovery, checkpointBatchSize: 2);
+
+        RootDirectoryPath aliceRoot = RootDirectoryPath.Parse(@"C:\AliceCkpt");
+        RootDirectoryPath bobRoot = RootDirectoryPath.Parse(@"C:\BobCkpt");
+        SanitizedRelativePath fileRel = SanitizedRelativePath.Parse("checkpoint_test.dat");
+
+        byte[] originalBytes = RandomNumberGenerator.GetBytes(600_000); // 3 chunks at 256 KB
+        alice.FileStorage.FilesOnDisk[ResolvedFilePath.Resolve(aliceRoot, fileRel).AbsolutePath] = originalBytes;
+
+        TransferSessionId sessionId = (await alice.ActionHandler.InitiateTransferAsync(
+            channelId, aliceId, [bobId], aliceRoot, [fileRel], DirectWanPolicy.DisabledByDefault)).Value;
+
+        var offerBytes = alice.PayloadSender.SentPayloads[0].Payload;
+        await bob.PayloadHandler.HandleInboundAsync(new InboundPayloadContext(
+            channelId, bobId, aliceId, DeviceId.Primary, AppId.FileTransferControl, offerBytes, clock.UtcNow));
+
+        await bob.ActionHandler.AcceptTransferAsync(sessionId, bobRoot);
+
+        using var aliceCert = await alice.CertStore.GetAsync(sessionId);
+        using var bobCert = await bob.CertStore.GetAsync(sessionId);
+        await alice.Runtime.RegisterPinnedPeerCertificateAsync(sessionId, bobId, bobCert!.Fingerprint);
+
+        var (aliceToBob, bobToAlice) = InMemoryPairedTransferDataChannel.CreatePair(aliceCert!.Fingerprint, bobCert.Fingerprint);
+        (await alice.Runtime.AttachAuthenticatedChannelAsync(sessionId, bobId, aliceToBob)).IsSuccess.Should().BeTrue();
+        (await bob.Runtime.AttachAuthenticatedChannelAsync(sessionId, aliceId, bobToAlice)).IsSuccess.Should().BeTrue();
+
+        await WaitUntilAsync(() => bob.Runtime.GetActiveSession(sessionId)?.State == TransferSessionState.Seeding, TimeSpan.FromSeconds(5));
+
+        // Checkpoints on Bob must include:
+        // 1. Batched checkpoint after receiving 2 chunks (InFlight, PopCount == 2)
+        // 2. Forced immediate checkpoint on InFlight -> Seeding transition (Seeding, PopCount == 3, CompletedAtUtc is null while actively seeding)
+        bob.CheckpointStore.Checkpoints.Should().NotBeEmpty();
+
+        var seedingCheckpoint = bob.CheckpointStore.Checkpoints.Last();
+        seedingCheckpoint.SessionId.Should().Be(sessionId);
+        seedingCheckpoint.State.Should().Be(TransferSessionState.Seeding);
+        seedingCheckpoint.LocalBitfield.PopCount.Should().Be(3);
+        seedingCheckpoint.CompletedAtUtc.Should().BeNull();
+
+        // 3. When Alice (sender) stops seeding/session, unpersisted changes (UploadedBytes) are forced to checkpoint
+        (await alice.ActionHandler.StopSeedingAsync(sessionId)).IsSuccess.Should().BeTrue();
+        alice.CheckpointStore.Checkpoints.Should().NotBeEmpty();
+        alice.CheckpointStore.Checkpoints.Last().UploadedBytes.Bytes.Should().BeGreaterThan(0);
+
+        // 4. When Bob stops seeding, transition to Completed and verify final checkpoint has CompletedAtUtc
+        (await bob.ActionHandler.StopSeedingAsync(sessionId)).IsSuccess.Should().BeTrue();
+        var completedCheckpoint = bob.CheckpointStore.Checkpoints.Last();
+        completedCheckpoint.State.Should().Be(TransferSessionState.Completed);
+        completedCheckpoint.CompletedAtUtc.Should().NotBeNull();
+    }
+
+    [Test]
     public async Task AddFileTransferApp_RemovesNullTransferStreamPool_AndPassesValidateScopes()
     {
         ServiceCollection services = new();
@@ -452,6 +517,7 @@ public sealed class TransferSessionRuntimeTests
         services.AddScoped<IPayloadSender, RecordingPayloadSender>();
         services.AddScoped<ITransferSessionRepository, InMemoryTransferSessionRepository>();
         services.AddSingleton<ITransferSessionTransportStore, InMemoryTransferSessionTransportStore>();
+        services.AddSingleton<ITransferSessionCheckpointStore, InMemoryTransferSessionCheckpointStore>();
 
         await using ServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
@@ -624,15 +690,18 @@ public sealed class TransferSessionRuntimeTests
         IPayloadSerializer serializer,
         IBlobStorageService blobStorage,
         INetworkEndpointDiscoveryPort endpointDiscovery,
-        TimeSpan? seedingTtl = null)
+        TimeSpan? seedingTtl = null,
+        int checkpointBatchSize = 16,
+        TimeSpan? checkpointInterval = null)
     {
         InMemoryTransferSessionRepository sessionRepo = new();
         InMemoryTransferSessionTransportStore transportStore = new();
         InMemoryDesktopFileStorage fileStorage = new();
         RecordingPayloadSender payloadSender = new();
         RecordingTrackerPort trackerPort = new();
-        InMemoryFilterPolicyRepository policyRepo = new() { Policy = FileTransferFilterPolicy.DefaultPermissive(localId) };
+        InMemoryFilterPolicyRepository policyRepo = new();
         InMemoryTransferSessionCertificateStore certStore = new();
+        InMemoryTransferSessionCheckpointStore checkpointStore = new();
         FakeTransferPeerTransport peerTransport = new();
         InMemoryEventBusForTests eventBus = new();
         FileTransferIngressFilter filter = new(policyRepo) { IsEnabled = true };
@@ -647,7 +716,11 @@ public sealed class TransferSessionRuntimeTests
             eventBus,
             serializer,
             new DirectBackgroundPayloadDispatcher(payloadSender),
-            new TransferSessionRuntimeOptions(SeedingTtl: seedingTtl));
+            checkpointStore,
+            new TransferSessionRuntimeOptions(
+                SeedingTtl: seedingTtl,
+                CheckpointInterval: checkpointInterval,
+                CheckpointChunkBatchSize: checkpointBatchSize));
 
         FileTransferActionHandler actionHandler = new(
             sessionRepo,
@@ -680,6 +753,7 @@ public sealed class TransferSessionRuntimeTests
             payloadSender,
             trackerPort,
             certStore,
+            checkpointStore,
             peerTransport,
             eventBus,
             runtime,
@@ -707,6 +781,7 @@ public sealed class TransferSessionRuntimeTests
         RecordingPayloadSender payloadSender,
         RecordingTrackerPort trackerPort,
         InMemoryTransferSessionCertificateStore certStore,
+        InMemoryTransferSessionCheckpointStore checkpointStore,
         FakeTransferPeerTransport peerTransport,
         InMemoryEventBusForTests eventBus,
         TransferSessionRuntime runtime,
@@ -718,6 +793,7 @@ public sealed class TransferSessionRuntimeTests
         public RecordingPayloadSender PayloadSender { get; } = payloadSender;
         public RecordingTrackerPort TrackerPort { get; } = trackerPort;
         public InMemoryTransferSessionCertificateStore CertStore { get; } = certStore;
+        public InMemoryTransferSessionCheckpointStore CheckpointStore { get; } = checkpointStore;
         public FakeTransferPeerTransport PeerTransport { get; } = peerTransport;
         public InMemoryEventBusForTests EventBus { get; } = eventBus;
         public TransferSessionRuntime Runtime { get; } = runtime;

@@ -578,6 +578,76 @@ public sealed class SqliteTransferSessionRepositoryTests
     }
 
     [Test]
+    public async Task CheckpointStore_SaveCheckpointAsync_PersistsBitfieldAndSessionStateRoundTrip()
+    {
+        var sessionId = TransferSessionId.New();
+        var initiatorId = PublicIdentityId.New();
+        var recipientId = PublicIdentityId.New();
+
+        byte[] chunk0 = new byte[65536];
+        byte[] chunk1 = new byte[32768];
+        RandomNumberGenerator.Fill(chunk0);
+        RandomNumberGenerator.Fill(chunk1);
+
+        var leaf0 = MerkleTreeBuilder.HashLeaf(chunk0);
+        var leaf1 = MerkleTreeBuilder.HashLeaf(chunk1);
+        var merkleTree = MerkleTreeIndex.Create(MerkleRoot.FromSpan(leaf0.Span), [leaf0, leaf1]);
+
+        var file1 = new FileEntry(
+            FileIndex.FromInt(0),
+            SanitizedRelativePath.Parse("file1.dat"),
+            FileSizeBytes.FromBytes(65536),
+            BundleByteOffset.Zero,
+            FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow));
+
+        var file2 = new FileEntry(
+            FileIndex.FromInt(1),
+            SanitizedRelativePath.Parse("file2.dat"),
+            FileSizeBytes.FromBytes(32768),
+            BundleByteOffset.FromOffset(65536),
+            FileLastModifiedUtc.FromDateTimeOffset(DateTimeOffset.UtcNow));
+
+        var manifest = TransferManifest.Create(
+            sessionId,
+            RootBundleName.Parse("bundle"),
+            ChunkSizeBytes.FromBytes(65536),
+            merkleTree,
+            [file1, file2]);
+
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        var session = TransferSession.CreateOutgoing1to1(
+            sessionId,
+            initiatorId,
+            recipientId,
+            manifest,
+            SeedRatio.Unlimited,
+            clock);
+
+        await _sessionRepo.SaveSessionAsync(session);
+
+        var checkpointStore = new SqliteTransferSessionCheckpointStore(_db.ContextFactory);
+        var updatedBitfield = Bitfield.Empty(manifest.TotalChunks).WithChunk(ChunkIndex.FromInt(0));
+        var completedAt = DateTimeOffset.UtcNow;
+        var uploadedBytes = TotalBundleBytes.FromBytes(65536);
+
+        await checkpointStore.SaveCheckpointAsync(
+            sessionId,
+            updatedBitfield,
+            TransferSessionState.Seeding,
+            uploadedBytes,
+            completedAt);
+
+        TransferSession? loaded = await _sessionRepo.GetSessionByIdAsync(sessionId);
+        loaded.Should().NotBeNull();
+        loaded!.State.Should().Be(TransferSessionState.Seeding);
+        loaded.UploadedBytes.Bytes.Should().Be(65536);
+        loaded.CompletedAtUtc.Should().BeCloseTo(completedAt, TimeSpan.FromMilliseconds(50));
+        loaded.LocalBitfield.HasChunk(ChunkIndex.FromInt(0)).Should().BeTrue();
+        loaded.LocalBitfield.HasChunk(ChunkIndex.FromInt(1)).Should().BeFalse();
+        loaded.LocalBitfield.PopCount.Should().Be(1);
+    }
+
+    [Test]
     public async Task ConcurrentWrites_UnderWalMode_DoNotThrowSqliteBusy()
     {
         var tempDbPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"perc_wal_ft_{Guid.NewGuid():N}.db");

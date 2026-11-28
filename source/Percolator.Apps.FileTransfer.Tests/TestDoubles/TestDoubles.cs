@@ -84,6 +84,34 @@ public sealed class InMemoryTransferSessionTransportStore : ITransferSessionTran
     }
 }
 
+public sealed record CheckpointRecord(
+    TransferSessionId SessionId,
+    Bitfield LocalBitfield,
+    TransferSessionState State,
+    TotalBundleBytes UploadedBytes,
+    DateTimeOffset? CompletedAtUtc);
+
+public sealed class InMemoryTransferSessionCheckpointStore : ITransferSessionCheckpointStore
+{
+    private readonly object _sync = new();
+    public List<CheckpointRecord> Checkpoints { get; } = [];
+
+    public ValueTask SaveCheckpointAsync(
+        TransferSessionId sessionId,
+        Bitfield localBitfield,
+        TransferSessionState state,
+        TotalBundleBytes uploadedBytes,
+        DateTimeOffset? completedAtUtc,
+        CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            Checkpoints.Add(new CheckpointRecord(sessionId, localBitfield, state, uploadedBytes, completedAtUtc));
+        }
+        return ValueTask.CompletedTask;
+    }
+}
+
 public sealed class InMemoryDesktopFileStorage : IDesktopFileStorage
 {
     private readonly object _sync = new();
@@ -225,11 +253,12 @@ public sealed class InMemoryDesktopFileStorage : IDesktopFileStorage
 public sealed class RecordingPayloadSender : IPayloadSender
 {
     public List<OutboundPayloadContext> SentPayloads { get; } = [];
+    public DomainResult ResultToReturn { get; set; } = DomainResult.Success();
 
     public ValueTask<DomainResult> SendPayloadAsync(OutboundPayloadContext context, CancellationToken ct = default)
     {
         SentPayloads.Add(context);
-        return ValueTask.FromResult(DomainResult.Success());
+        return ValueTask.FromResult(ResultToReturn);
     }
 }
 
@@ -374,17 +403,20 @@ public sealed class FakeTransferStreamPool : ITransferStreamPool
 
 public sealed class InMemoryFilterPolicyRepository : IFileTransferFilterPolicyRepository
 {
-    public FileTransferFilterPolicy Policy { get; set; } = FileTransferFilterPolicy.CreateDefault();
+    private readonly ConcurrentDictionary<PublicIdentityId, FileTransferFilterPolicy> _policies = new();
 
     public ValueTask SavePolicyAsync(FileTransferFilterPolicy policy, CancellationToken ct = default)
     {
-        Policy = policy;
+        ArgumentNullException.ThrowIfNull(policy);
+        _policies[policy.OwnerId] = policy;
         return ValueTask.CompletedTask;
     }
 
     public ValueTask<FileTransferFilterPolicy> GetPolicyAsync(PublicIdentityId ownerId, CancellationToken ct = default)
     {
-        return ValueTask.FromResult(Policy);
+        return ValueTask.FromResult(_policies.TryGetValue(ownerId, out FileTransferFilterPolicy? p)
+            ? p
+            : FileTransferFilterPolicy.DefaultPermissive(ownerId));
     }
 }
 

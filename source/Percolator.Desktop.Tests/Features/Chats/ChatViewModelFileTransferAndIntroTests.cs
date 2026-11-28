@@ -160,6 +160,7 @@ public sealed class ChatViewModelFileTransferAndIntroTests
             It.IsAny<DirectWanPolicy>(),
             It.IsAny<RootBundleName>(),
             It.IsAny<SeedRatio>(),
+            It.IsAny<bool>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -188,6 +189,7 @@ public sealed class ChatViewModelFileTransferAndIntroTests
                 DirectWanPolicy.ExplicitlyAllowed,
                 It.IsAny<RootBundleName>(),
                 null,
+                false,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DomainResult<TransferSessionId>.Success(expectedSessionId));
 
@@ -209,6 +211,7 @@ public sealed class ChatViewModelFileTransferAndIntroTests
             DirectWanPolicy.ExplicitlyAllowed,
             It.IsAny<RootBundleName>(),
             null,
+            false,
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

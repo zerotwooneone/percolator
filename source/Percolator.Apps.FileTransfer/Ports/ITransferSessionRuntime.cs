@@ -10,10 +10,13 @@ namespace Percolator.Apps.FileTransfer.Ports;
 public sealed record TransferSessionRuntimeOptions(
     TimeSpan? SeedingTtl = null,
     TimeSpan? TeardownTimeout = null,
-    int MaxPeersPerSession = 16)
+    int MaxPeersPerSession = 16,
+    TimeSpan? CheckpointInterval = null,
+    int CheckpointChunkBatchSize = 16)
 {
     public TimeSpan EffectiveSeedingTtl => SeedingTtl ?? TimeSpan.FromHours(24);
     public TimeSpan EffectiveTeardownTimeout => TeardownTimeout ?? TimeSpan.FromMilliseconds(750);
+    public TimeSpan EffectiveCheckpointInterval => CheckpointInterval ?? TimeSpan.FromMilliseconds(500);
 }
 
 /// <summary>

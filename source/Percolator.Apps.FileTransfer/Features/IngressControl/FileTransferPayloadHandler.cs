@@ -56,7 +56,7 @@ public sealed class FileTransferPayloadHandler : IAppPayloadHandler
         byte opcodeByte = context.Payload.Span[0];
         ReadOnlyMemory<byte> body = context.Payload.Slice(1);
 
-        FileTransferFilterPolicy policy = await _policyRepository.GetPolicyAsync(context.SenderIdentityId, ct);
+        FileTransferFilterPolicy policy = await _policyRepository.GetPolicyAsync(context.RecipientIdentityId, ct);
         if (policy.EvaluatePeer(context.SenderIdentityId) == PeerFilterDecision.Blocked)
             return DomainResult.Success(); // Silent drop
 

@@ -53,6 +53,7 @@ public sealed class TransferNegotiationTests
             new InMemoryEventBusForTests(),
             _serializer,
             new DirectBackgroundPayloadDispatcher(_payloadSender),
+            new InMemoryTransferSessionCheckpointStore(),
             new TransferSessionRuntimeOptions());
         var defaultFilter = new FileTransferIngressFilter(_policyRepository) { IsEnabled = true };
 

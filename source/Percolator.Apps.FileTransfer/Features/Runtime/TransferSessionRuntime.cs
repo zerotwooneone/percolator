@@ -27,6 +27,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
     private readonly IDateTimeProvider _clock;
     private readonly IPayloadSerializer _serializer;
     private readonly IBackgroundPayloadDispatcher _payloadDispatcher;
+    private readonly ITransferSessionCheckpointStore _checkpointStore;
     private readonly TransferSessionRuntimeOptions _options;
     private readonly IDisposable _memberRemovedSubscription;
     private readonly IDisposable _iceCandidateSubscription;
@@ -46,6 +47,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         IEventSubscriber eventSubscriber,
         IPayloadSerializer serializer,
         IBackgroundPayloadDispatcher payloadDispatcher,
+        ITransferSessionCheckpointStore checkpointStore,
         TransferSessionRuntimeOptions options)
     {
         _peerTransport = peerTransport ?? throw new ArgumentNullException(nameof(peerTransport));
@@ -57,6 +59,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         ArgumentNullException.ThrowIfNull(eventSubscriber);
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         _payloadDispatcher = payloadDispatcher ?? throw new ArgumentNullException(nameof(payloadDispatcher));
+        _checkpointStore = checkpointStore ?? throw new ArgumentNullException(nameof(checkpointStore));
         _options = options ?? throw new ArgumentNullException(nameof(options));
 
         _memberRemovedSubscription = eventSubscriber.Subscribe<GroupMemberRemovedApplicationEvent>(OnGroupMemberRemovedAsync);
@@ -667,6 +670,11 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
             if (stopped)
             {
+                lock (handle.SyncRoot)
+                {
+                    handle.HasUnpersistedChanges = true;
+                }
+                await PersistCheckpointIfNeededAsync(handle, force: true, ct).ConfigureAwait(false);
                 expiredSessions.Add(sessionId);
             }
         }
@@ -737,7 +745,6 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
 
             handle.PeerChannels.Clear();
             handle.PeerConnections.Clear();
-            handle.SessionCts.Dispose();
         }
 
         try
@@ -756,6 +763,23 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         if (pumpTasks.Count > 0)
         {
             await WaitBoundedAsync(Task.WhenAll(pumpTasks), boundedCt).ConfigureAwait(false);
+        }
+
+        foreach ((TransferSessionId _, ActiveTransferHandle handle) in snapshot)
+        {
+            try
+            {
+                await PersistCheckpointIfNeededAsync(handle, force: true, boundedCt).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception)
+            {
+            }
+
+            handle.CheckpointLock.Dispose();
+            handle.SessionCts.Dispose();
         }
     }
 
@@ -803,7 +827,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             exchangeStunEndpoint,
             exchangeSupportsTransferPipe,
             exchangeEndpoint,
-            session.State == TransferSessionState.Seeding ? _clock.UtcNow : null);
+            session.State == TransferSessionState.Seeding ? _clock.UtcNow : null,
+            _clock.UtcNow);
 
         if (transportContext.SenderCertSha256 != null &&
             session.InitiatorId != transportContext.LocalIdentityId)
@@ -1083,6 +1108,13 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                                 _fileStorage,
                                 handle.LocalRootPath,
                                 ct).ConfigureAwait(false);
+
+                            lock (handle.SyncRoot)
+                            {
+                                handle.HasUnpersistedChanges = true;
+                            }
+
+                            await PersistCheckpointIfNeededAsync(handle, force: false, ct).ConfigureAwait(false);
                         }
                         break;
                     }
@@ -1116,6 +1148,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                         await BroadcastHaveAsync(handle, chunkData.ChunkIndex, ct).ConfigureAwait(false);
 
                         bool transitionedToSeeding = false;
+                        isTerminal = false;
                         lock (handle.SyncRoot)
                         {
                             if (!wasSeedingBefore && handle.Session.State == TransferSessionState.Seeding)
@@ -1123,6 +1156,12 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                                 handle.SeedingStartedAtUtc ??= _clock.UtcNow;
                                 transitionedToSeeding = true;
                             }
+
+                            isTerminal = handle.Session.State == TransferSessionState.Completed ||
+                                         handle.Session.State == TransferSessionState.Cancelled ||
+                                         handle.Session.State == TransferSessionState.Failed;
+                            handle.ChunksSinceCheckpoint++;
+                            handle.HasUnpersistedChanges = true;
                         }
 
                         if (transitionedToSeeding)
@@ -1133,6 +1172,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                                 handle.ExchangeEndpoint,
                                 ct).ConfigureAwait(false);
                         }
+
+                        await PersistCheckpointIfNeededAsync(handle, force: transitionedToSeeding || isTerminal, ct).ConfigureAwait(false);
                         break;
                     }
 
@@ -1283,6 +1324,18 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
                 await WaitBoundedAsync(Task.WhenAll(handle.PeerPumpTasks.Values), boundedCt).ConfigureAwait(false);
             }
 
+            try
+            {
+                await PersistCheckpointIfNeededAsync(handle, force: true, boundedCt).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception)
+            {
+            }
+
+            handle.CheckpointLock.Dispose();
             handle.SessionCts.Dispose();
         }
 
@@ -1376,9 +1429,87 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
         }
     }
 
+    private async ValueTask PersistCheckpointIfNeededAsync(ActiveTransferHandle handle, bool force, CancellationToken ct)
+    {
+        bool isDue;
+        lock (handle.SyncRoot)
+        {
+            isDue = force
+                || handle.ChunksSinceCheckpoint >= _options.CheckpointChunkBatchSize
+                || (handle.HasUnpersistedChanges && (_clock.UtcNow - handle.LastCheckpointUtc) >= _options.EffectiveCheckpointInterval);
+        }
+
+        if (!isDue)
+        {
+            return;
+        }
+
+        await handle.CheckpointLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            TransferSessionId sessionId;
+            Bitfield localBitfield;
+            TransferSessionState state;
+            TotalBundleBytes uploadedBytes;
+            DateTimeOffset? completedAtUtc;
+
+            lock (handle.SyncRoot)
+            {
+                bool stillDue = force
+                    || handle.ChunksSinceCheckpoint >= _options.CheckpointChunkBatchSize
+                    || (handle.HasUnpersistedChanges && (_clock.UtcNow - handle.LastCheckpointUtc) >= _options.EffectiveCheckpointInterval);
+
+                if (!stillDue)
+                {
+                    return;
+                }
+
+                sessionId = handle.Session.Id;
+                localBitfield = handle.Session.LocalBitfield;
+                state = handle.Session.State;
+                uploadedBytes = handle.Session.UploadedBytes;
+                completedAtUtc = handle.Session.CompletedAtUtc;
+
+                handle.HasUnpersistedChanges = false;
+                handle.ChunksSinceCheckpoint = 0;
+                handle.LastCheckpointUtc = _clock.UtcNow;
+            }
+
+            try
+            {
+                await _checkpointStore.SaveCheckpointAsync(
+                    sessionId,
+                    localBitfield,
+                    state,
+                    uploadedBytes,
+                    completedAtUtc,
+                    ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                lock (handle.SyncRoot)
+                {
+                    handle.HasUnpersistedChanges = true;
+                }
+            }
+        }
+        finally
+        {
+            handle.CheckpointLock.Release();
+        }
+    }
+
     private sealed class ActiveTransferHandle
     {
         public object SyncRoot { get; } = new();
+        public SemaphoreSlim CheckpointLock { get; } = new(1, 1);
+        public bool HasUnpersistedChanges { get; set; }
+        public int ChunksSinceCheckpoint { get; set; }
+        public DateTimeOffset LastCheckpointUtc { get; set; }
         public TransferSession Session { get; set; }
         public TransferSessionTransportContext TransportContext { get; set; }
         public RootDirectoryPath LocalRootPath { get; set; }
@@ -1408,7 +1539,8 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             StunEndpointDescriptor? exchangeStunEndpoint,
             bool exchangeSupportsTransferPipe,
             RelayEndpoint? exchangeEndpoint,
-            DateTimeOffset? seedingStartedAtUtc)
+            DateTimeOffset? seedingStartedAtUtc,
+            DateTimeOffset lastCheckpointUtc)
         {
             Session = session;
             TransportContext = transportContext;
@@ -1419,6 +1551,7 @@ public sealed class TransferSessionRuntime : ITransferSessionRuntime
             ExchangeSupportsTransferPipe = exchangeSupportsTransferPipe;
             ExchangeEndpoint = exchangeEndpoint;
             SeedingStartedAtUtc = seedingStartedAtUtc;
+            LastCheckpointUtc = lastCheckpointUtc;
         }
     }
 }

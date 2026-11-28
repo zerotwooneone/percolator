@@ -68,6 +68,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         DirectWanPolicy wanPolicy,
         RootBundleName? customBundleName = null,
         SeedRatio? targetSeedRatio = null,
+        bool isGroupTransfer = false,
         CancellationToken ct = default)
     {
         if (!_ingressFilter.IsEnabled)
@@ -152,11 +153,11 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
         EphemeralSwarmPeerId ephemeralPeerId = EphemeralSwarmPeerId.Generate();
         StreamAuthToken streamAuthToken = StreamAuthToken.Generate();
         SeedRatio enforcedSeedRatio = targetSeedRatio ?? SeedRatio.Unlimited;
-        bool isGroupTransfer = recipients.Count > 1;
+        bool effectiveIsGroup = isGroupTransfer || recipients.Count > 1;
 
         using TransferSessionCertificateMaterial certMaterial = await _certificateStore.GetOrCreateAsync(sessionId, ct);
 
-        TransferSession session = isGroupTransfer
+        TransferSession session = effectiveIsGroup
             ? TransferSession.CreateOutgoingMultiPeer(sessionId, localInitiator, recipients, manifest, enforcedSeedRatio, _clock)
             : TransferSession.CreateOutgoing1to1(sessionId, localInitiator, recipients[0], manifest, enforcedSeedRatio, _clock);
 
@@ -179,7 +180,7 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             relayRendezvous,
             candidates,
             sourceRoot,
-            IsGroupTransfer: isGroupTransfer,
+            IsGroupTransfer: effectiveIsGroup,
             SenderCertSha256: certMaterial.Fingerprint);
 
         await _sessionRepository.SaveSessionAsync(session, ct);
@@ -234,17 +235,22 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
             relayRendezvous,
             candidates,
             certMaterial.Fingerprint,
-            isGroupTransfer);
+            effectiveIsGroup);
 
         byte[] inBandBytes = FileTransferControlFraming.FramePayload(_serializer, FileTransferControlOpcode.Offer, offerPayload);
         OutboundPayloadContext outboundContext = FileTransferControlFraming.BuildOutboundContext(
             channelId,
             localInitiator,
-            isGroupTransfer ? null : recipients[0],
-            isGroupTransfer,
+            effectiveIsGroup ? null : recipients[0],
+            effectiveIsGroup,
             inBandBytes);
 
-        await _payloadSender.SendPayloadAsync(outboundContext, ct);
+        DomainResult sendResult = await _payloadSender.SendPayloadAsync(outboundContext, ct);
+        if (sendResult.IsFailure)
+        {
+            await _runtime.StopSessionAsync(sessionId, deleteCertificate: true, ct);
+            return DomainResult<TransferSessionId>.Failure(sendResult.Error);
+        }
 
         return DomainResult<TransferSessionId>.Success(sessionId);
     }
@@ -387,7 +393,12 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 isGroupTransfer: true,
                 peerJoinBytes);
 
-            await _payloadSender.SendPayloadAsync(groupJoinContext, ct);
+            DomainResult sendResult = await _payloadSender.SendPayloadAsync(groupJoinContext, ct);
+            if (sendResult.IsFailure)
+            {
+                await _runtime.StopSessionAsync(sessionId, deleteCertificate: false, ct);
+                return sendResult;
+            }
         }
         else
         {
@@ -407,7 +418,12 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                 isGroupTransfer: false,
                 inBandBytes);
 
-            await _payloadSender.SendPayloadAsync(outboundContext, ct);
+            DomainResult sendResult = await _payloadSender.SendPayloadAsync(outboundContext, ct);
+            if (sendResult.IsFailure)
+            {
+                await _runtime.StopSessionAsync(sessionId, deleteCertificate: false, ct);
+                return sendResult;
+            }
         }
 
         return DomainResult.Success();
@@ -523,7 +539,11 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                             isGroupTransfer: true,
                             peerJoinBytes);
 
-                        await _payloadSender.SendPayloadAsync(outboundContext, ct);
+                        DomainResult sendResult = await _payloadSender.SendPayloadAsync(outboundContext, ct);
+                        if (sendResult.IsFailure)
+                        {
+                            return sendResult;
+                        }
                     }
                     else
                     {
@@ -542,7 +562,11 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                             isGroupTransfer: false,
                             acceptBytes);
 
-                        await _payloadSender.SendPayloadAsync(outboundContext, ct);
+                        DomainResult sendResult = await _payloadSender.SendPayloadAsync(outboundContext, ct);
+                        if (sendResult.IsFailure)
+                        {
+                            return sendResult;
+                        }
                     }
                 }
             }
@@ -611,7 +635,11 @@ public sealed class FileTransferActionHandler : IFileTransferActionHandler
                     transportContext.IsGroupTransfer,
                     inBandBytes);
 
-                await _payloadSender.SendPayloadAsync(outboundContext, ct);
+                DomainResult sendResult = await _payloadSender.SendPayloadAsync(outboundContext, ct);
+                if (sendResult.IsFailure)
+                {
+                    return sendResult;
+                }
             }
         }
         return result;

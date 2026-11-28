@@ -144,6 +144,16 @@ public sealed class FileTransferEndToEndIntegrationTests
         ComputeFileSha256(Path.Combine(bobDestDir, "docs", "report.bin")).Should().Equal(reportHash);
         ComputeFileSha256(Path.Combine(bobDestDir, "media", "clip.bin")).Should().Equal(clipHash);
 
+        // Verify live status and 100% verified chunks in SQLite via IFileTransferQueryService
+        using (var scope = bob.Services.CreateScope())
+        {
+            var queryService = scope.ServiceProvider.GetRequiredService<IFileTransferQueryService>();
+            var transferReadModel = await queryService.GetTransferByIdAsync(sessionId).ConfigureAwait(false);
+            transferReadModel.Should().NotBeNull();
+            transferReadModel!.Status.Should().Be(TransferSessionState.Seeding);
+            transferReadModel.CompletedChunks.Count.Should().Be(transferReadModel.TotalChunks.Count);
+        }
+
         // Fetch swarm rendezvous ID from Alice's DB to verify tracker cleanup
         SwarmRendezvousId rendezvousId;
         using (var scope = alice.Services.CreateScope())

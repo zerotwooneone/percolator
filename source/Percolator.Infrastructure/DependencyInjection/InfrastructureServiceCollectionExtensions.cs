@@ -404,6 +404,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<Percolator.Apps.FileTransfer.Ports.INetworkEndpointDiscoveryPort, NetworkInterfaceEndpointDiscoveryPort>();
         services.AddSingleton<IDistributedTrackerPort, GrpcSwarmTrackerClient>();
         services.AddSingleton<ITransferSessionRepository, SqliteTransferSessionRepository>();
+        services.AddSingleton<ITransferSessionCheckpointStore, SqliteTransferSessionCheckpointStore>();
         services.AddSingleton<IFileTransferFilterPolicyRepository, SqliteFilterPolicyRepository>();
         services.AddSingleton<IFileTransferQueryService, SqlFileTransferQueryService>();
 

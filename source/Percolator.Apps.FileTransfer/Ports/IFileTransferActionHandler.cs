@@ -20,6 +20,7 @@ public interface IFileTransferActionHandler
         DirectWanPolicy wanPolicy,
         RootBundleName? customBundleName = null,
         SeedRatio? targetSeedRatio = null,
+        bool isGroupTransfer = false,
         CancellationToken ct = default);
 
     ValueTask<DomainResult> AcceptTransferAsync(

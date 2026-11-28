@@ -29,7 +29,7 @@ public sealed class FileTransferIngressFilter : IAppIngressFilter
         if (!_isEnabled)
             return IngressDecision.DiscardSilently;
 
-        FileTransferFilterPolicy policy = await _policyRepository.GetPolicyAsync(context.SenderIdentityId, ct);
+        FileTransferFilterPolicy policy = await _policyRepository.GetPolicyAsync(context.RecipientIdentityId, ct);
         if (policy.EvaluatePeer(context.SenderIdentityId) == PeerFilterDecision.Blocked)
         {
             return IngressDecision.DiscardSilently;
@@ -43,7 +43,7 @@ public sealed class FileTransferIngressFilter : IAppIngressFilter
         if (!_isEnabled)
             return IngressDecision.DiscardSilently;
 
-        ValueTask<FileTransferFilterPolicy> policyTask = _policyRepository.GetPolicyAsync(context.SenderIdentityId);
+        ValueTask<FileTransferFilterPolicy> policyTask = _policyRepository.GetPolicyAsync(context.RecipientIdentityId);
         FileTransferFilterPolicy policy = policyTask.IsCompletedSuccessfully
             ? policyTask.Result
             : policyTask.AsTask().GetAwaiter().GetResult();

@@ -44,6 +44,7 @@ public sealed class IngressControlTests
             new InMemoryEventBusForTests(),
             _serializer,
             new DirectBackgroundPayloadDispatcher(_payloadSender),
+            new InMemoryTransferSessionCheckpointStore(),
             new TransferSessionRuntimeOptions());
     }
 
@@ -75,10 +76,11 @@ public sealed class IngressControlTests
     }
 
     [Test]
-    public void UT_ING_02_IngressPeerBlockingPolicyEnforcement()
+    public async Task UT_ING_02_IngressPeerBlockingPolicyEnforcement()
     {
+        PublicIdentityId recipientId = PublicIdentityId.New();
         PublicIdentityId blockedPeer = PublicIdentityId.New();
-        _policyRepository.Policy = FileTransferFilterPolicy.CreateDefault().BlockPeer(blockedPeer);
+        await _policyRepository.SavePolicyAsync(FileTransferFilterPolicy.DefaultPermissive(recipientId).BlockPeer(blockedPeer));
 
         FileTransferIngressFilter filter = new(_policyRepository)
         {
@@ -87,7 +89,7 @@ public sealed class IngressControlTests
 
         InboundPayloadContext context = new(
             ChannelId.New(),
-            PublicIdentityId.New(),
+            recipientId,
             blockedPeer,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -102,8 +104,10 @@ public sealed class IngressControlTests
     [Test]
     public async Task UT_ING_03_IngressRelayUriBlockingPolicyEnforcement()
     {
+        PublicIdentityId recipientId = PublicIdentityId.New();
+        PublicIdentityId senderId = PublicIdentityId.New();
         RelayPipeEndpointUri blockedRelay = RelayPipeEndpointUri.Parse("https://malicious-relay.com/pipe");
-        _policyRepository.Policy = FileTransferFilterPolicy.CreateDefault().BlockRelay(blockedRelay);
+        await _policyRepository.SavePolicyAsync(FileTransferFilterPolicy.DefaultPermissive(recipientId).BlockRelay(blockedRelay));
 
         FileTransferPayloadHandler handler = new(_sessionRepository, _policyRepository, _serializer, _clock, new InMemoryBlobStorageService(), _runtime, new DirectBackgroundPayloadDispatcher(_payloadSender), new InMemoryTransferSessionCertificateStore(), _transportStore);
 
@@ -111,10 +115,9 @@ public sealed class IngressControlTests
         FileTransferOfferPayload offer = CreateValidOffer(sessionId, relayUri: blockedRelay);
         byte[] payloadBytes = PrependOpcode((byte)FileTransferControlOpcode.Offer, _serializer.Serialize(offer).Span);
 
-        PublicIdentityId senderId = PublicIdentityId.New();
         InboundPayloadContext context = new(
             ChannelId.FromGuid(sessionId.Value),
-            PublicIdentityId.New(),
+            recipientId,
             senderId,
             DeviceId.Primary,
             AppId.FileTransferControl,
@@ -380,6 +383,41 @@ public sealed class IngressControlTests
             StreamAuthToken.Generate(),
             relay,
             DirectCandidates: []);
+    }
+
+    [Test]
+    public async Task UT_ING_09_PolicyLookupIsScopedToRecipientOwnerNotSender()
+    {
+        PublicIdentityId recipientId = PublicIdentityId.New();
+        PublicIdentityId senderId = PublicIdentityId.New();
+
+        // Policy saved under senderId blocks a peer; recipient's policy is default permissive.
+        // Inbound message to recipientId from senderId must NOT be dropped by sender's policy.
+        PublicIdentityId otherPeer = PublicIdentityId.New();
+        await _policyRepository.SavePolicyAsync(FileTransferFilterPolicy.DefaultPermissive(senderId).BlockPeer(otherPeer));
+
+        FileTransferIngressFilter filter = new(_policyRepository)
+        {
+            IsEnabled = true
+        };
+
+        InboundPayloadContext allowedContext = new(
+            ChannelId.New(),
+            recipientId,
+            senderId,
+            DeviceId.Primary,
+            AppId.FileTransferControl,
+            new byte[] { (byte)FileTransferControlOpcode.Offer },
+            DateTimeOffset.UtcNow);
+
+        IngressDecision allowedDecision = await filter.EvaluateAsync(allowedContext);
+        allowedDecision.Should().Be(IngressDecision.Accept, "Recipient's policy has no block on sender");
+
+        // Now save a policy under recipientId blocking senderId
+        await _policyRepository.SavePolicyAsync(FileTransferFilterPolicy.DefaultPermissive(recipientId).BlockPeer(senderId));
+
+        IngressDecision blockedDecision = await filter.EvaluateAsync(allowedContext);
+        blockedDecision.Should().Be(IngressDecision.DiscardSilently, "Recipient's policy blocks sender");
     }
 
     private static byte[] PrependOpcode(byte opcode, ReadOnlySpan<byte> payload)

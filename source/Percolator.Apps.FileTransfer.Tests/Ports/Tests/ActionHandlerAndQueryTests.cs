@@ -28,6 +28,7 @@ public sealed class ActionHandlerAndQueryTests
     private FileTransferIngressFilter _ingressFilter = null!;
     private FakeNetworkEndpointDiscoveryPort _endpointDiscovery = null!;
     private InMemoryTransferSessionCertificateStore _certStore = null!;
+    private InMemoryTransferSessionCheckpointStore _checkpointStore = null!;
     private TransferSessionRuntime _runtime = null!;
     private TestPayloadSerializer _serializer = null!;
     private FileTransferActionHandler _handler = null!;
@@ -45,6 +46,7 @@ public sealed class ActionHandlerAndQueryTests
         _blobStorage = new InMemoryBlobStorageService();
         _endpointDiscovery = new FakeNetworkEndpointDiscoveryPort();
         _certStore = new InMemoryTransferSessionCertificateStore();
+        _checkpointStore = new InMemoryTransferSessionCheckpointStore();
         _serializer = new TestPayloadSerializer();
         _runtime = new TransferSessionRuntime(
             new FakeTransferPeerTransport(),
@@ -56,6 +58,7 @@ public sealed class ActionHandlerAndQueryTests
             new InMemoryEventBusForTests(),
             _serializer,
             new DirectBackgroundPayloadDispatcher(_payloadSender),
+            _checkpointStore,
             new TransferSessionRuntimeOptions());
         _ingressFilter = new FileTransferIngressFilter(new InMemoryFilterPolicyRepository()) { IsEnabled = true };
 
@@ -292,10 +295,7 @@ public sealed class ActionHandlerAndQueryTests
 
         // Stage offer on recipient
         InMemoryTransferSessionRepository recipientRepo = new();
-        InMemoryFilterPolicyRepository policyRepo = new()
-        {
-            Policy = FileTransferFilterPolicy.DefaultPermissive(recipientId)
-        };
+        InMemoryFilterPolicyRepository policyRepo = new();
         InMemoryDesktopFileStorage recipientStorage = new()
         {
             ConfiguredResumptionBitfield = Bitfield.Empty(ChunkCount.FromInt(3)).WithChunk(ChunkIndex.FromInt(0))
@@ -313,6 +313,7 @@ public sealed class ActionHandlerAndQueryTests
             new InMemoryEventBusForTests(),
             _serializer,
             new DirectBackgroundPayloadDispatcher(recipientSender),
+            new InMemoryTransferSessionCheckpointStore(),
             new TransferSessionRuntimeOptions());
 
         InMemoryTransferSessionTransportStore recipientTransportStore = new();
@@ -446,5 +447,69 @@ public sealed class ActionHandlerAndQueryTests
         cancelResult.IsSuccess.Should().BeTrue();
         session.State.Should().Be(TransferSessionState.Cancelled);
         _payloadSender.SentPayloads.Should().BeEmpty("No wire payload or synthetic ChannelId must be sent when transport context is missing");
+    }
+
+    [Test]
+    public async Task UT_CMD_08_InitiateTransferWithIsGroupTransferTrueCreatesGroupRouteForSingleRecipient()
+    {
+        ChannelId channelId = ChannelId.New();
+        PublicIdentityId senderId = PublicIdentityId.New();
+        PublicIdentityId singleRecipient = PublicIdentityId.New();
+        RootDirectoryPath sourceRoot = RootDirectoryPath.Parse(@"C:\SourceSingleInGroup");
+        SanitizedRelativePath relPath = SanitizedRelativePath.Parse("doc.pdf");
+
+        ResolvedFilePath fullPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
+        _fileStorage.FilesOnDisk[fullPath.AbsolutePath] = new byte[1024];
+
+        DomainResult<TransferSessionId> result = await _handler.InitiateTransferAsync(
+            channelId,
+            senderId,
+            [singleRecipient],
+            sourceRoot,
+            [relPath],
+            DirectWanPolicy.DisabledByDefault,
+            isGroupTransfer: true);
+
+        result.IsSuccess.Should().BeTrue();
+        TransferSessionId sessionId = result.Value;
+
+        TransferSession? session = await _sessionRepo.GetSessionByIdAsync(sessionId);
+        session.Should().NotBeNull();
+        session!.Topology.Should().BeOfType<TransferTopology.MultiPeer>("InitiateTransfer with isGroupTransfer=true must create MultiPeer topology even with 1 recipient");
+
+        _payloadSender.SentPayloads.Should().ContainSingle();
+        OutboundPayloadContext sentOffer = _payloadSender.SentPayloads[0];
+        sentOffer.Route.Should().Be(DeliveryRoute.RelayedGroup);
+        sentOffer.RecipientIdentityId.Should().BeNull("Group transfers must broadcast with null RecipientIdentityId");
+        sentOffer.ChannelId.Should().Be(channelId);
+    }
+
+    [Test]
+    public async Task UT_CMD_09_InitiateTransferSendPayloadFailureStopsRuntimeAndReturnsFailure()
+    {
+        ChannelId channelId = ChannelId.New();
+        PublicIdentityId senderId = PublicIdentityId.New();
+        PublicIdentityId recipientId = PublicIdentityId.New();
+        RootDirectoryPath sourceRoot = RootDirectoryPath.Parse(@"C:\SourceSendFail");
+        SanitizedRelativePath relPath = SanitizedRelativePath.Parse("doc.pdf");
+
+        ResolvedFilePath fullPath = ResolvedFilePath.Resolve(sourceRoot, relPath);
+        _fileStorage.FilesOnDisk[fullPath.AbsolutePath] = new byte[1024];
+
+        _payloadSender.ResultToReturn = DomainResult.Failure(new DomainError("Outbox.Failed", "Failed to enqueue outbox payload."));
+
+        DomainResult<TransferSessionId> result = await _handler.InitiateTransferAsync(
+            channelId,
+            senderId,
+            [recipientId],
+            sourceRoot,
+            [relPath],
+            DirectWanPolicy.DisabledByDefault);
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Code.Should().Be("Outbox.Failed");
+
+        // Runtime handle must be stopped so no zombie session remains active
+        _runtime.ActiveSessionCount.Should().Be(0);
     }
 }
